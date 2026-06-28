@@ -1,0 +1,12 @@
+{
+  "name": "bilanco-analiz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bilanco Analiz - ABD hisseleri icin anahtarsiz bilanco/gelir tablosu analiz araci",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

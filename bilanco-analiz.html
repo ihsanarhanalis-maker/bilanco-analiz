@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bilanço Analiz Aracı</title>
+<style>
+  :root{
+    --bg:#0a0d1a; --surface:#111726; --surface-2:#161e30; --surface-3:#1e293f;
+    --ink:#eaf0fa; --ink-2:#aebbd0; --muted:#7585a0; --line:#1f2940; --line-2:#2b3855;
+    --accent:#4f9cf9; --accent-2:#6cb0ff; --gold:#d6ad45;
+    --good:#34d39a; --warn:#f3b44e; --bad:#f06a72;
+    --good-bg:rgba(52,211,154,.12); --warn-bg:rgba(243,180,78,.12); --bad-bg:rgba(240,106,114,.12);
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,Arial,sans-serif;background:var(--bg);color:var(--ink);
+    font-size:14px;-webkit-font-smoothing:antialiased;background-attachment:fixed;
+    background-image:
+      radial-gradient(1000px 560px at 88% -12%, rgba(124,92,255,.20), transparent 60%),
+      radial-gradient(820px 480px at 2% 2%, rgba(56,150,255,.14), transparent 58%);}
+
+  /* Üst bant */
+  header{background:linear-gradient(120deg,#0c1022 0%,#141a30 55%,#1a1f3d 100%);
+    border-bottom:1px solid var(--line-2)}
+  .hd-inner{max-width:1180px;margin:0 auto;padding:20px 28px;display:flex;align-items:center;gap:16px}
+  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(140deg,#1b2942,#101626);
+    border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+    box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.2px;color:#fff}
+  header p{margin:4px 0 0;color:var(--ink-2);font-size:12.5px}
+  .hd-badge{font-size:11px;color:var(--accent-2);background:rgba(79,156,249,.10);
+    border:1px solid rgba(79,156,249,.3);padding:5px 12px;border-radius:999px;white-space:nowrap;font-weight:600}
+  /* Piyasa değeri rozeti — okunaklı: etiket beyaz, değer yeşil */
+  .hd-badge.mcap{font-size:13px;color:var(--ink);background:rgba(52,211,154,.08);
+    border-color:rgba(52,211,154,.32);padding:6px 14px;display:inline-flex;align-items:baseline;gap:7px}
+  .hd-badge.mcap .mc-lbl{color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  .hd-badge.mcap .mc-eq{color:var(--muted);font-weight:700}
+  .hd-badge.mcap .mc-val{color:var(--good);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .live-price{display:flex;align-items:baseline;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .live-price .lp-sym{color:var(--ink-2);font-size:13px;font-weight:700;letter-spacing:.3px}
+  .live-price .lp-val{color:#fff;font-size:22px;font-weight:800}
+  .live-price .lp-chg{font-size:13px;font-weight:700}
+  .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
+  .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 70px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+    padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow)}
+  .card h2{position:relative;margin:0 0 5px;padding-left:13px;font-size:16.5px;font-weight:700;color:var(--ink)}
+  .card h2::before{content:"";position:absolute;left:0;top:3px;bottom:3px;width:4px;border-radius:3px;
+    background:linear-gradient(var(--accent),#2f6fd0)}
+  .card .sub{color:var(--muted);font-size:12.5px;margin-bottom:15px;line-height:1.5}
+
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  button{cursor:pointer;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);
+    padding:9px 15px;border-radius:9px;font-size:13px;font-weight:600;transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent-2);background:var(--surface-3)}
+  button.primary{background:linear-gradient(135deg,#4f9cf9,#2f6fd0);border-color:transparent;color:#fff;
+    box-shadow:0 4px 14px rgba(47,111,208,.4)}
+  button.primary:hover{filter:brightness(1.08);color:#fff}
+
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:9px 11px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th:first-child,td:first-child{text-align:left}
+  thead th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+    background:var(--surface-2);border-bottom:1px solid var(--line-2)}
+  tbody tr:hover td{background:var(--surface-2)}
+  tbody tr.group td{background:var(--surface-3);font-weight:700;color:var(--accent-2)}
+  tbody tr.total td{font-weight:700;border-top:2px solid var(--line-2)}
+
+  input.cell{width:130px;background:var(--bg);border:1px solid var(--line-2);color:var(--ink);
+    padding:7px 9px;border-radius:8px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums}
+  input.cell:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,156,249,.18)}
+  input.name{width:100%;background:transparent;border:none;color:var(--ink);font-size:13px;font-weight:500}
+  input.name:focus{outline:none}
+  select.cell{background:var(--bg);border:1px solid var(--line-2);color:var(--ink);padding:7px;border-radius:8px;font-size:12.5px}
+  select.cell:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,156,249,.18)}
+
+  .hint{color:var(--muted);font-size:12px;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+  .kpi{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
+    border-radius:13px;padding:15px 17px;position:relative;overflow:hidden}
+  .kpi::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;
+    background:linear-gradient(90deg,var(--accent),transparent)}
+  .kpi .lbl{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px}
+  .kpi .val{font-size:23px;font-weight:700;color:var(--ink)}
+  .kpi .delta{font-size:12.5px;margin-top:5px}
+  .up{color:var(--good)} .down{color:var(--bad)} .neutral{color:var(--muted)}
+
+  .pill{display:inline-block;padding:3px 11px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid transparent}
+  .pill.good{background:var(--good-bg);color:var(--good);border-color:rgba(52,211,154,.3)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn);border-color:rgba(243,180,78,.3)}
+  .pill.bad{background:var(--bad-bg);color:var(--bad);border-color:rgba(240,106,114,.3)}
+  .ratio-name{font-weight:600;color:var(--ink)}
+  .ratio-formula{color:var(--muted);font-size:11.5px}
+
+  .bar{height:8px;border-radius:5px;background:var(--bg);overflow:hidden;margin-top:6px;border:1px solid var(--line)}
+  .bar > i{display:block;height:100%;border-radius:5px}
+
+  .flag{display:flex;gap:11px;padding:12px 14px;border-radius:11px;margin-bottom:10px;
+    border:1px solid var(--line);background:var(--surface-2);border-left:4px solid var(--line-2)}
+  .flag .ic{font-size:16px;line-height:1.4}
+  .flag.bad{border-left-color:var(--bad);background:var(--bad-bg)}
+  .flag.warn{border-left-color:var(--warn);background:var(--warn-bg)}
+  .flag.good{border-left-color:var(--good);background:var(--good-bg)}
+  .flag .ttl{font-weight:700;margin-bottom:2px;color:var(--ink)}
+  .flag .body{color:var(--ink-2);font-size:12.5px;line-height:1.55}
+
+  .balcheck{padding:12px 15px;border-radius:11px;font-weight:600;font-size:13px;border:1px solid transparent}
+  .balcheck.ok{background:var(--good-bg);color:var(--good);border-color:rgba(52,211,154,.3)}
+  .balcheck.no{background:var(--bad-bg);color:var(--bad);border-color:rgba(240,106,114,.3)}
+
+  /* Haberler */
+  .news{display:block;padding:12px 14px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;
+    background:var(--surface-2);text-decoration:none;transition:border-color .15s,background .15s;cursor:pointer}
+  .news:hover{border-color:var(--accent);background:var(--surface-3)}
+  .news.open{border-color:var(--line-2);background:var(--surface-3)}
+  .news-t{color:var(--ink);font-size:13.5px;font-weight:600;line-height:1.4;margin-bottom:4px;
+    display:flex;gap:8px;align-items:flex-start}
+  .news-t .chev{color:var(--muted);font-size:12px;flex:0 0 auto;transition:transform .15s;margin-top:2px}
+  .news.open .news-t .chev{transform:rotate(90deg);color:var(--accent-2)}
+  .news-m{color:var(--muted);font-size:11.5px}
+  .news-sum{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);
+    color:var(--ink-2);font-size:12.5px;line-height:1.65}
+  .news.open .news-sum{display:block}
+  .news-sum a{display:inline-block;margin-top:8px;font-weight:600;font-size:12px}
+
+  .hidden{display:none}
+  .row-actions{width:34px;text-align:center}
+  .delrow{color:var(--muted);cursor:pointer;border:none;background:none;font-size:15px;padding:2px 6px}
+  .delrow:hover{color:var(--bad)}
+  .footer{color:var(--muted);font-size:11.5px;text-align:center;margin-top:30px;line-height:1.7;
+    border-top:1px solid var(--line);padding-top:20px}
+  a{color:var(--accent-2)}
+  .thd{display:inline-block;margin-top:3px;font-size:11.5px;font-weight:700;color:var(--accent-2);
+    letter-spacing:.3px;text-transform:none}
+  td input.cell.cur, td input.cell.prev{width:120px;font-weight:600}
+  /* Bilanço Verisi: cari değer önceki döneme göre iyi=yeşil / kötü=kırmızı */
+  td input.cell.cur.cell-good{color:var(--good)}
+  td input.cell.cur.cell-bad{color:var(--bad)}
+
+  /* Yazdırma / PDF — açık tema, gereksiz öğeler gizli */
+  @media print{
+    @page{ margin:14mm }
+    body{background:#fff !important;color:#111 !important;background-image:none !important;font-size:11px}
+    header{background:#fff !important;border-bottom:1px solid #ccc}
+    header h1,header p{color:#111 !important}
+    .hd-badge{color:#333 !important;background:#eee !important;border-color:#ccc !important}
+    .no-print,.toolbar,.row-actions,.delrow,button{display:none !important}
+    .card{break-inside:avoid;box-shadow:none !important;border:1px solid #ddd !important;background:#fff !important;margin-bottom:10px}
+    .card h2,.kpi .val,.ratio-name,.flag .ttl{color:#111 !important}
+    .card .sub,.muted,.hint,.ratio-formula,.kpi .lbl{color:#555 !important}
+    .kpi{background:#fafafa !important;border-color:#ddd !important}
+    thead th{background:#f0f0f0 !important;color:#333 !important}
+    th,td{border-color:#ddd !important}
+    input.cell,input.name,select.cell{border:none !important;background:transparent !important;color:#111 !important;-webkit-appearance:none;appearance:none;padding:2px 4px}
+    .up{color:#0a7d4d !important} .down{color:#c0392b !important}
+    .news:hover{transform:none}
+    a{color:#1763b8 !important;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="hd-inner">
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3"  y="13" width="4" height="8" rx="1" fill="#9cc3e6"/>
+        <rect x="10" y="8"  width="4" height="13" rx="1" fill="#cfe0f0"/>
+        <rect x="17" y="4"  width="4" height="17" rx="1" fill="#c8a23a"/>
+      </svg>
+    </div>
+    <div>
+      <h1>Bilanço Analiz</h1>
+      <p>ABD hisseleri · bilanço, oranlar ve güncel haberler · dolar cinsinden</p>
+    </div>
+    <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div id="livePrice" class="live-price hidden"></div>
+      <span id="hdBadge" class="hd-badge">SEC EDGAR + Bing News</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ŞİRKET ARAMA -->
+  <div class="card no-print">
+    <h2>Hisse Ara</h2>
+    <div class="sub">Bir ABD hissesinin kodunu yaz, <b>Ara</b>'ya bas. Bilanço, oranlar ve güncel haberler dolar cinsinden gelir. Örnek: NVDA, AAPL, MSFT, TSLA, AMZN</div>
+    <div class="toolbar" style="align-items:center">
+      <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()">
+      <select id="periodType" class="cell" style="width:auto">
+        <option value="annual">Yıllık</option>
+        <option value="quarter">Çeyreklik</option>
+      </select>
+      <button class="primary" onclick="fetchTicker()">Ara →</button>
+      <span id="fetchStatus" class="hint"></span>
+    </div>
+  </div>
+
+  <!-- ŞİRKET KARŞILAŞTIRMA -->
+  <div class="card no-print">
+    <h2>Şirket Karşılaştırma</h2>
+    <div class="sub">2–4 ABD hisse kodunu virgülle ayırarak yaz, oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b></div>
+    <div class="toolbar" style="align-items:center">
+      <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
+      <select id="cmpPeriod" class="cell" style="width:auto">
+        <option value="annual">Yıllık</option>
+        <option value="quarter">Çeyreklik</option>
+      </select>
+      <button class="primary" onclick="compareTickers()">Karşılaştır →</button>
+      <span id="cmpStatus" class="hint"></span>
+    </div>
+    <div id="cmpResult" style="overflow-x:auto"></div>
+  </div>
+
+  <!-- VERİ GİRİŞİ -->
+  <div class="card">
+    <h2>Bilanço Verisi</h2>
+    <div class="sub">Otomatik gelen veriyi buradan düzenleyebilir veya elle girebilirsiniz. Tutarlar şirketin <span id="curNote">para biriminde</span>dir.</div>
+    <div id="priceNote" class="hidden" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px"></div>
+    <div class="toolbar">
+      <button class="primary" onclick="analyze()">🔍 Analiz Et</button>
+      <button onclick="loadSample()">📋 Örnek Veri</button>
+      <button onclick="addRow('asset')">+ Varlık</button>
+      <button onclick="addRow('liab')">+ Yükümlülük</button>
+      <button onclick="addRow('equity')">+ Özkaynak</button>
+      <button onclick="clearAll()">🗑 Temizle</button>
+    </div>
+
+    <table id="inputTable">
+      <thead>
+        <tr><th style="width:40%">Kalem</th><th>Kategori</th><th id="thCur">Cari Dönem</th><th id="thPrev">Önceki Dönem</th><th class="row-actions"></th></tr>
+      </thead>
+      <tbody id="inputBody"></tbody>
+    </table>
+  </div>
+
+  <!-- SONUÇLAR -->
+  <div id="results" class="hidden">
+
+    <div class="toolbar no-print" style="justify-content:flex-end;margin-bottom:6px">
+      <button onclick="exportPDF()">📄 PDF / Yazdır</button>
+      <button onclick="exportCSV()">⬇ Excel (CSV)</button>
+    </div>
+    <div id="reportTitle" style="font-size:15px;font-weight:700;color:var(--ink);margin:2px 0 4px"></div>
+    <div id="periodNote" class="hint" style="margin:0 0 14px"></div>
+
+    <div class="card">
+      <h2>Özet</h2>
+      <div id="balcheck" style="margin-bottom:14px"></div>
+      <div class="grid" id="kpis"></div>
+    </div>
+
+    <div class="card" id="incomeCard">
+      <h2>Gelir Tablosu & Kârlılık</h2>
+      <div class="sub">SEC'ten çekilen gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
+      <div class="grid" id="profKpis" style="margin-bottom:16px"></div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim</th></tr></thead>
+        <tbody id="incomeBody"></tbody>
+      </table>
+      <div style="height:14px"></div>
+      <table>
+        <thead><tr><th>Kârlılık Oranı</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
+        <tbody id="profBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card" id="trendCard">
+      <h2>Çok Yıllı Trend</h2>
+      <div class="sub">Son dönemlerin gelişimi. Çubuğa gelince değeri görürsünüz.</div>
+      <div class="grid" id="trendCharts" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr))"></div>
+    </div>
+
+    <div class="card">
+      <h2>Güncel Haberler</h2>
+      <div class="sub">Bu şirketle ilgili son haber başlıkları (Bing News). Başlığa tıklayınca <b>özeti uygulama içinde</b> açılır; istersen "Kaynakta tüm haberi oku" ile siteye gidebilirsin.</div>
+      <div id="newsList"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Finansal Oranlar</h2>
+      <div class="sub">Renkler genel kabul görmüş eşik değerlerine göredir; sektöre göre yorumlanmalıdır.</div>
+      <table>
+        <thead><tr><th>Oran</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
+        <tbody id="ratioBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Önemli Değişimler</h2>
+      <div class="sub">Dönemler arası tutarca en büyük 8 değişim. Sıralama mutlak değişime göre.</div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim ($)</th><th>Değişim (%)</th><th>Yön</th></tr></thead>
+        <tbody id="varBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Dikey Analiz</h2>
+      <div class="sub">Her kalemin toplam varlıklara oranı — bilançonun bileşimi ve dönemsel kayması.</div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari %</th><th>Önceki %</th><th>Pay Değişimi</th><th></th></tr></thead>
+        <tbody id="vertBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Otomatik Yorum & Risk İşaretleri</h2>
+      <div class="sub">Kurallara dayalı otomatik değerlendirme. Yatırım kararı için profesyonel görüş alınmalıdır.</div>
+      <div id="flags"></div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Bu araç finansal danışmanlık değildir; sonuçlar nitelikli bir analist tarafından gözden geçirilmelidir.<br>
+    Bilanço verisi: SEC EDGAR · Haberler: Bing News · Hesaplamalar tarayıcınızda yapılır.
+  </div>
+</div>
+
+<script src="cik-map.js"></script>
+<script>
+/* ---------- Kalem kategorileri ---------- */
+const CATS = {
+  asset_current:  "Dönen Varlık",
+  asset_noncur:   "Duran Varlık",
+  liab_current:   "Kısa Vade Yük.",
+  liab_noncur:    "Uzun Vade Yük.",
+  equity:         "Özkaynak"
+};
+const CAT_GROUP = { // hangi büyük gruba ait
+  asset_current:'asset', asset_noncur:'asset',
+  liab_current:'liab', liab_noncur:'liab', equity:'equity'
+};
+
+/* Örnek bilanço (Türk tipi) */
+const SAMPLE = [
+  ["Nakit ve Nakit Benzerleri","asset_current",450000,620000],
+  ["Ticari Alacaklar","asset_current",1850000,1200000],
+  ["Stoklar","asset_current",2100000,1450000],
+  ["Diğer Dönen Varlıklar","asset_current",320000,280000],
+  ["Maddi Duran Varlıklar","asset_noncur",3400000,3550000],
+  ["Maddi Olmayan Duran Varlıklar","asset_noncur",480000,520000],
+  ["Finansal Yatırımlar (Uzun V.)","asset_noncur",600000,600000],
+  ["Banka Kredileri (Kısa V.)","liab_current",1900000,900000],
+  ["Ticari Borçlar","liab_current",1350000,1100000],
+  ["Diğer Kısa Vadeli Yük.","liab_current",420000,390000],
+  ["Banka Kredileri (Uzun V.)","liab_noncur",1800000,2050000],
+  ["Ertelenmiş Vergi Yük.","liab_noncur",230000,210000],
+  ["Ödenmiş Sermaye","equity",2000000,2000000],
+  ["Geçmiş Yıl Kârları","equity",900000,700000],
+  ["Dönem Net Kârı","equity",600000,870000]
+];
+/* Denge kontrolü (cari): Aktif 9.200.000 = KV 3.670.000 + UV 2.030.000 + Özkaynak 3.500.000
+   Denge kontrolü (önceki): Aktif 8.220.000 = KV 2.390.000 + UV 2.260.000 + Özkaynak 3.570.000 */
+
+let CUR = 'TL';  // şirketin raporlama para birimi
+let FIN = null;  // son çekilen şirketin çok yıllı verisi (bilanço + gelir tablosu)
+const fmt = n => (n===0?'0':Math.round(n).toLocaleString('tr-TR',{maximumFractionDigits:0}));
+const pct = n => (n>=0?'+':'')+n.toFixed(1)+'%';
+/* Okunaklı kısaltma: milyar -> B, milyon -> M, küçükler binlik ayraçla */
+function fmtAbbr(n){
+  if(!n) return '0';
+  const sign=n<0?'-':'', a=Math.abs(n);
+  const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(a>=1e9) return sign+two(a/1e9)+' B';
+  if(a>=1e6) return sign+two(a/1e6)+' M';
+  return sign+Math.round(a).toLocaleString('tr-TR');
+}
+/* ISO tarih -> GG/AA/YYYY */
+const fmtDate = iso => { const p=String(iso).split('-'); return (p.length===3)?`${p[2]}/${p[1]}/${p[0]}`:iso; };
+/* Sayı çöz: "206,80 B" / "5,72 M" / "206.803.000.000" hepsini anlar */
+function num(s){
+  if(typeof s==='number') return s;
+  let str=String(s).trim().toUpperCase();
+  let mult=1;
+  if(/\bB\b|MR|MILYAR|MİLYAR/.test(str)) mult=1e9;
+  else if(/\bM\b|MN|MILYON|MİLYON/.test(str)) mult=1e6;
+  str=str.replace(/[^0-9.,\-]/g,'').replace(/\./g,'').replace(/,/g,'.');
+  const v=parseFloat(str);
+  return isNaN(v)?0:v*mult;
+}
+
+/* ---------- Şirket verisi çekme (SEC EDGAR — anahtarsız) ---------- */
+function setStatus(msg,kind){
+  const el=document.getElementById('fetchStatus');
+  el.textContent=msg;
+  el.style.color = kind==='bad'?'var(--bad)':kind==='good'?'var(--good)':'var(--muted)';
+}
+
+/* ---- Paylaşılan us-gaap kavram tanımları (tekli analiz + karşılaştırma) ---- */
+const CONCEPTS_BALANCE = {
+  assets:        ['Assets'],
+  assetsCur:     ['AssetsCurrent'],
+  cash:          ['CashAndCashEquivalentsAtCarryingValue','CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'],
+  stInv:         ['ShortTermInvestments','MarketableSecuritiesCurrent','AvailableForSaleSecuritiesCurrent'],
+  recv:          ['AccountsReceivableNetCurrent','ReceivablesNetCurrent'],
+  inv:           ['InventoryNet'],
+  ppe:           ['PropertyPlantAndEquipmentNet'],
+  goodwill:      ['Goodwill'],
+  intang:        ['IntangibleAssetsNetExcludingGoodwill','FiniteLivedIntangibleAssetsNet'],
+  ltInv:         ['LongTermInvestments','MarketableSecuritiesNoncurrent'],
+  liab:          ['Liabilities'],
+  liabCur:       ['LiabilitiesCurrent'],
+  liabNoncur:    ['LiabilitiesNoncurrent'],
+  liabEquity:    ['LiabilitiesAndStockholdersEquity'],
+  ap:            ['AccountsPayableCurrent','AccountsPayableAndAccruedLiabilitiesCurrent'],
+  stDebt:        ['LongTermDebtCurrent','DebtCurrent','ShortTermBorrowings','CommercialPaper'],
+  defRev:        ['ContractWithCustomerLiabilityCurrent','DeferredRevenueCurrent'],
+  ltDebt:        ['LongTermDebtNoncurrent','LongTermDebt'],
+  equity:        ['StockholdersEquity'],
+  equityIncl:    ['StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],
+  minority:      ['MinorityInterest'],
+  common:        ['CommonStockValue','CommonStocksIncludingAdditionalPaidInCapital'],
+  retained:      ['RetainedEarningsAccumulatedDeficit'],
+};
+const CONCEPTS_INCOME = {
+  revenue:    ['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','RevenueFromContractWithCustomerIncludingAssessedTax','SalesRevenueNet'],
+  costRev:    ['CostOfRevenue','CostOfGoodsAndServicesSold','CostOfGoodsSold'],
+  grossProfit:['GrossProfit'],
+  opIncome:   ['OperatingIncomeLoss'],
+  netIncome:  ['NetIncomeLoss','ProfitLoss'],
+  rnd:        ['ResearchAndDevelopmentExpense'],
+  interest:   ['InterestExpense','InterestExpenseDebt','InterestExpenseNonoperating'],
+};
+
+/* Bir us-gaap kavramının ham USD kayıtlarını çeker (aday etiketleri sırayla dener).
+   Sonuç: doğru formdaki ham kayıt dizisi [{start?,end,val,filed,form}, …]. */
+async function fetchConceptRaw(cik, tags, formPrefix){
+  for(const tag of tags){
+    let j;
+    try{
+      const r=await fetch(`/sec/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`);
+      if(!r.ok) continue;
+      j=await r.json();
+    }catch(e){ continue; }
+    const usd = j.units && (j.units.USD || j.units['USD']);
+    if(!usd) continue;
+    const arr = usd.filter(e=> e.form && e.form.indexOf(formPrefix)===0);
+    if(arr.length) return arr;
+  }
+  return [];
+}
+/* Anlık (stok) kavram: dönem sonuna göre en güncel dosyalamayı al → { 'YYYY-MM-DD': değer } */
+function pickInstant(arr){
+  const map={}, filed={};
+  arr.forEach(e=>{
+    const d=e.end;
+    if(!(d in map) || e.filed>filed[d]){ map[d]=Number(e.val); filed[d]=e.filed; }
+  });
+  return map;
+}
+/* Süre (akış) kavram: dönem uzunluğu moda uyanları al (yıllık ~1 yıl / çeyrek ~3 ay) */
+function pickDuration(arr, mode){
+  const map={}, filed={};
+  arr.forEach(e=>{
+    if(!e.start) return;
+    const days=(new Date(e.end)-new Date(e.start))/86400000;
+    const ok = mode==='annual' ? (days>=300 && days<=400) : (days>=60 && days<=100);
+    if(!ok) return;
+    const d=e.end;
+    if(!(d in map) || e.filed>filed[d]){ map[d]=Number(e.val); filed[d]=e.filed; }
+  });
+  return map;
+}
+/* Geriye dönük uyumluluk: anlık kavram için { tarih: değer } döndürür */
+async function fetchConcept(cik, tags, formPrefix){
+  return pickInstant(await fetchConceptRaw(cik, tags, formPrefix));
+}
+
+/* Bir şirketin tüm bilanço (anlık) + gelir (süre) serilerini çeker.
+   SEC saniye limitini aşmamak için 5'erli gruplar halinde. → { D, I } */
+async function fetchSeries(cik, mode, formPrefix){
+  const grab = async (defs)=>{
+    const keys=Object.keys(defs), raw={};
+    for(let i=0;i<keys.length;i+=5){
+      const chunk=keys.slice(i,i+5);
+      const r=await Promise.all(chunk.map(k=>fetchConceptRaw(cik,defs[k],formPrefix)));
+      chunk.forEach((k,j)=>raw[k]=r[j]);
+    }
+    return {keys,raw};
+  };
+  const b=await grab(CONCEPTS_BALANCE);
+  const ic=await grab(CONCEPTS_INCOME);
+  const D={}; b.keys.forEach(k=>D[k]=pickInstant(b.raw[k]));
+  const I={}; ic.keys.forEach(k=>I[k]=pickDuration(ic.raw[k],mode));
+  // Brüt kâr yoksa gelir − satış maliyetinden türet
+  if(!Object.keys(I.grossProfit).length && Object.keys(I.revenue).length && Object.keys(I.costRev).length){
+    const g={}; Object.keys(I.revenue).forEach(d=>{ if(d in I.costRev) g[d]=I.revenue[d]-I.costRev[d]; }); I.grossProfit=g;
+  }
+  // Toplam aktifin dönem sonuna göre İLK (orijinal) SEC bildirim tarihi — o dönem ilk
+  // açıklandığında. (En güncel 10-K karşılaştırmalı yılları da içerir; en erkeni alırız.)
+  const filed={};
+  (b.raw.assets||[]).forEach(e=>{ if(!(e.end in filed)||e.filed<filed[e.end]) filed[e.end]=e.filed; });
+  return { D, I, filed };
+}
+
+/* Tek bir hissenin karşılaştırma metriklerini hesaplar (DOM'a dokunmaz). */
+async function fetchMetrics(sym, mode){
+  const map=window.CIK_MAP||{};
+  if(!map[sym]) return { sym, ok:false, err:'listede yok' };
+  const cik=String(map[sym]).padStart(10,'0');
+  const formPrefix = mode==='annual' ? '10-K' : '10-Q';
+  let D,I;
+  try{ ({D,I}=await fetchSeries(cik,mode,formPrefix)); }
+  catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+  if(!Object.keys(D.assets).length) return { sym, ok:false, err:'veri yok' };
+  const bd=Object.keys(D.assets).sort().reverse()[0];
+  const rd=Object.keys(I.revenue||{}).sort().reverse()[0]||bd;
+  const v=(m,d)=> (d&&m&&(d in m))?m[d]:null;
+  const assets=v(D.assets,bd), assetsCur=v(D.assetsCur,bd),
+        liabCur=v(D.liabCur,bd), inv=v(D.inv,bd)||0;
+  // Sağlam toplam yükümlülük + özkaynak (tekli analizle tutarlı; NCI/mezzanine dahil)
+  const liab=liabTotal(D,bd);
+  const equity=(assets!=null)? assets-liab : equityAllIn(D,bd);
+  const rev=v(I.revenue,rd), ni=v(I.netIncome,rd), gp=v(I.grossProfit,rd), op=v(I.opIncome,rd);
+  const sd=(a,b)=> (a==null||b==null||b===0)?null:a/b;
+  return {
+    sym, ok:true, asOf:bd,
+    revenue:rev, netIncome:ni,
+    netMargin: sd(ni,rev), grossMargin: sd(gp,rev), opMargin: sd(op,rev),
+    roe: sd(ni,equity), roa: sd(ni,assets),
+    current: sd(assetsCur,liabCur),
+    quick: (assetsCur!=null&&liabCur)?(assetsCur-inv)/liabCur:null,
+    debtEq: sd(liab,equity),
+    equityRatio: sd(equity,assets),
+    assets, equity,
+  };
+}
+
+/* ---------- Şirket karşılaştırma ---------- */
+async function compareTickers(){
+  const st=document.getElementById('cmpStatus');
+  if(location.protocol==='file:'){ st.textContent='⚠ Bu dosyayı "Bilanco-Baslat.bat" ile açın.'; st.style.color='var(--bad)'; return; }
+  const raw=(document.getElementById('cmpTickers').value||'').toUpperCase();
+  const syms=[...new Set(raw.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean))].slice(0,4);
+  const mode=document.getElementById('cmpPeriod').value;
+  if(syms.length<2){ st.textContent='En az 2 hisse kodu girin (virgülle ayırın).'; st.style.color='var(--bad)'; return; }
+  st.textContent='⏳ '+syms.join(', ')+' çekiliyor…'; st.style.color='var(--muted)';
+  const data=[];
+  for(const s of syms){ data.push(await fetchMetrics(s,mode)); }   // sıralı: SEC saniye limiti
+  const okData=data.filter(d=>d.ok), bad=data.filter(d=>!d.ok);
+  if(!okData.length){ st.textContent='✕ Hiçbiri için veri alınamadı.'; st.style.color='var(--bad)'; document.getElementById('cmpResult').innerHTML=''; return; }
+  st.textContent='✓ '+okData.map(d=>d.sym).join(', ')+(bad.length?'  ·  alınamadı: '+bad.map(d=>d.sym+' ('+d.err+')').join(', '):'');
+  st.style.color = bad.length?'var(--warn)':'var(--good)';
+  renderComparison(okData);
+}
+function renderComparison(list){
+  const pp=v=>v==null?'—':(v*100).toFixed(1)+'%';
+  const xx=v=>v==null?'—':v.toFixed(2)+'x';
+  const ab=v=>v==null?'—':fmtAbbr(v);
+  // [etiket, anahtar, biçim, yön(+1 yüksek iyi / −1 düşük iyi)]
+  const rows=[
+    ['Gelir (Hasılat)','revenue',ab,1],
+    ['Net Kâr','netIncome',ab,1],
+    ['Brüt Marj','grossMargin',pp,1],
+    ['Faaliyet Marjı','opMargin',pp,1],
+    ['Net Kâr Marjı','netMargin',pp,1],
+    ['Özkaynak Kârlılığı (ROE)','roe',pp,1],
+    ['Aktif Kârlılığı (ROA)','roa',pp,1],
+    ['Cari Oran','current',xx,1],
+    ['Asit-Test','quick',xx,1],
+    ['Borç / Özkaynak','debtEq',xx,-1],
+    ['Özkaynak Oranı','equityRatio',pp,1],
+  ];
+  const head='<tr><th>Metrik</th>'+list.map(d=>`<th>${d.sym}<br><span class="thd">${d.asOf?fmtDate(d.asOf):''}</span></th>`).join('')+'</tr>';
+  const body=rows.map(([lbl,key,fmt,dir])=>{
+    const present=list.map(d=>d[key]).filter(v=>v!=null);
+    const best  = present.length>1 ? (dir>0?Math.max(...present):Math.min(...present)) : null;
+    const worst = present.length>1 ? (dir>0?Math.min(...present):Math.max(...present)) : null;
+    const cells=list.map(d=>{
+      const v=d[key]; let cls='';
+      if(v!=null && best!=null && best!==worst){           // en az iki farklı değer varsa renklendir
+        if(v===best) cls='up'; else if(v===worst) cls='down';
+      }
+      return `<td class="${cls}" style="${cls?'font-weight:700':''}">${fmt(v)}</td>`;
+    }).join('');
+    return `<tr><td>${lbl}</td>${cells}</tr>`;
+  }).join('');
+  document.getElementById('cmpResult').innerHTML =
+    `<table style="margin-top:14px;min-width:480px"><thead>${head}</thead><tbody>${body}</tbody></table>
+     <div class="hint" style="margin-top:8px">Yeşil = o metrikte en iyi, kırmızı = en kötü değer. Borç/Özkaynak'ta düşük olan iyidir.</div>`;
+}
+
+async function fetchTicker(){
+  if(location.protocol==='file:'){
+    setStatus('⚠ Bu dosyayı çift tıklamak yerine "Bilanco-Baslat.bat" ile açın (anahtarsız veri için yerel köprü gerekir).','bad');
+    return;
+  }
+  const sym=(document.getElementById('ticker').value||'').trim().toUpperCase();
+  if(!sym){ setStatus('Lütfen bir hisse kodu yazın.','bad'); return; }
+  const mode=document.getElementById('periodType').value;        // 'annual' | 'quarter'
+  const formPrefix = mode==='annual' ? '10-K' : '10-Q';
+  const map=window.CIK_MAP||{};
+  if(!map[sym]){ setStatus('✕ "'+sym+'" ABD borsa listesinde bulunamadı. (BIST/uluslararası kodlar bu kaynakta yok.)','bad'); return; }
+  const cik=String(map[sym]).padStart(10,'0');
+  setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
+
+  try{
+    const { D, I, filed } = await fetchSeries(cik, mode, formPrefix);
+
+    if(!Object.keys(D.assets).length){ setStatus('✕ '+sym+' için bilanço verisi bulunamadı (form: '+formPrefix+').','bad'); return; }
+    // Referans dönem tarihleri: toplam aktiften en güncel iki dönem sonu
+    const dates=Object.keys(D.assets).sort().reverse();
+    const D0=dates[0], D1=dates[1]||null;
+    if(!D1){ setStatus('⚠ '+sym+' için yalnızca tek dönem bulundu; değişim analizi sınırlı olacak.','muted'); }
+
+    CUR='USD';
+    // Çok yıllı analiz/grafik/karşılaştırma için sakla
+    FIN = { ticker:sym, mode, cur:'USD', D0, D1, balance:D, income:I,
+            filedD0:(filed&&filed[D0])||null, filedD1:(filed&&D1&&filed[D1])||null };
+
+    const rows=buildRowsFromSEC(D,D0,D1);
+    const b=document.getElementById('inputBody'); b.innerHTML='';
+    rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+    document.getElementById('curNote').textContent='USD cinsinden';
+    setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+    setStatus(`✓ ${sym} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
+    analyze();
+    fetchNews(sym);
+    fetchPrice(sym, cik);
+  }catch(e){
+    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+  }
+}
+
+/* ---------- Canlı + dönemsel hisse fiyatı (Yahoo Finance — anahtarsız köprü) ---------- */
+function fmtUSD(n){ return (n==null)?'—':'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+/* Piyasa değeri biçimi: $4,17 T / $281,50 B / $950,00 M */
+function fmtMcap(n){
+  if(n==null) return '—';
+  const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n>=1e12) return '$'+two(n/1e12)+' T';
+  if(n>=1e9)  return '$'+two(n/1e9)+' B';
+  if(n>=1e6)  return '$'+two(n/1e6)+' M';
+  return '$'+Math.round(n).toLocaleString('tr-TR');
+}
+/* Dolaşımdaki en güncel pay sayısı (SEC dei kapak sayfası; yedek: us-gaap) */
+async function fetchShares(cik){
+  const pick=u=>{ const m={},f={}; u.forEach(e=>{ if(!(e.end in m)||e.filed>f[e.end]){m[e.end]=Number(e.val);f[e.end]=e.filed;} });
+    const d=Object.keys(m).sort().reverse()[0]; return d?m[d]:null; };
+  const tries=[
+    `/sec/api/xbrl/companyconcept/CIK${cik}/dei/EntityCommonStockSharesOutstanding.json`,
+    `/sec/api/xbrl/companyconcept/CIK${cik}/us-gaap/CommonStockSharesOutstanding.json`,
+  ];
+  for(const url of tries){
+    try{ const r=await fetch(url); if(!r.ok) continue; const j=await r.json();
+      const u=j.units&&j.units.shares; if(u){ const v=pick(u); if(v) return v; } }catch(e){}
+  }
+  return null;
+}
+async function fetchPrice(sym, cik){
+  const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote');
+  const fd0=FIN&&FIN.filedD0, fd1=FIN&&FIN.filedD1;
+  try{
+    const now=Math.floor(Date.now()/1000)+86400;
+    const earliest = fd1||fd0||'2015-01-01';
+    const p1=Math.floor(new Date(earliest).getTime()/1000) - 10*86400;
+    // Canlı (range=1d) + geçmiş (tarih aralığı) + dolaşımdaki pay sayısı paralel
+    const [liveR, histR, shares]=await Promise.all([
+      fetch(`/price?s=${encodeURIComponent(sym)}&range=1d`).then(x=>x.json()).catch(()=>null),
+      fetch(`/price?s=${encodeURIComponent(sym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
+      cik? fetchShares(cik) : Promise.resolve(null)
+    ]);
+    const res = histR&&histR.chart&&histR.chart.result&&histR.chart.result[0];
+    const liveRes = liveR&&liveR.chart&&liveR.chart.result&&liveR.chart.result[0];
+    if(!res && !liveRes){ lp.classList.add('hidden'); return; }
+    const m=(liveRes&&liveRes.meta) || (res&&res.meta) || {};
+    const ts=(res&&res.timestamp)||[], closes=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
+    // Belirli tarihteki (veya bir önceki işlem günündeki) kapanış
+    const closeOn=iso=>{
+      if(!iso) return null;
+      const tgt=new Date(iso).getTime()/1000 + 86400;   // gün sonu
+      let best=null;
+      for(let i=0;i<ts.length;i++){ if(ts[i]<=tgt){ if(closes[i]!=null) best=closes[i]; } else break; }
+      return best;
+    };
+    // Canlı fiyat (sağ üst)
+    const live=m.regularMarketPrice, prevC=m.chartPreviousClose;
+    if(live!=null){
+      const ch = (prevC? (live-prevC)/prevC*100 : null);
+      const cls = ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
+      const ar  = ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
+      lp.innerHTML=`<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
+        (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
+        `<span class="lp-live">● canlı</span>`;
+      lp.classList.remove('hidden');
+    }else lp.classList.add('hidden');
+    // Piyasa değeri (≈ canlı fiyat × dolaşımdaki pay) → sağ üstteki rozet
+    const badge=document.getElementById('hdBadge');
+    if(badge){
+      if(live!=null && shares){
+        badge.className='hd-badge mcap';
+        badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(live*shares)}</span>`;
+      }else{
+        badge.className='hd-badge'; badge.textContent='SEC EDGAR + Bing News';
+      }
+    }
+    // Dönemsel fiyatlar (açıklandığı gün) — Bilanço Verisi
+    const pCur=closeOn(fd0), pPrev=closeOn(fd1);
+    const chip=(lbl,date,price,color)=> price==null?'' :
+      `<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;padding:7px 11px;font-size:12px">
+        <span style="color:var(--muted)">${lbl}${date?' · açıklanma '+fmtDate(date):''}:</span>
+        <b style="color:var(--ink);margin-left:5px;font-variant-numeric:tabular-nums">${fmtUSD(price)}</b></div>`;
+    pn.innerHTML = chip('Cari dönem fiyatı', fd0, pCur, 'var(--accent)') + chip('Önceki dönem fiyatı', fd1, pPrev, 'var(--muted)');
+    pn.classList.toggle('hidden', !pn.innerHTML.trim());
+  }catch(e){ lp.classList.add('hidden'); }
+}
+
+/* Güncel haberler — Google News (en güncel) + Türkçe çeviri (anahtarsız köprü) */
+const safeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function relTime(d){
+  const diff=(Date.now()-d.getTime())/1000;
+  if(diff<3600) return Math.max(1,Math.round(diff/60))+' dk önce';
+  if(diff<86400) return Math.round(diff/3600)+' saat önce';
+  if(diff<604800) return Math.round(diff/86400)+' gün önce';
+  return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+}
+async function translateTR(titles){
+  // Tüm başlıkları tek istekte çevir; satır sonlarıyla ayır
+  try{
+    const joined=titles.join('\n');
+    const r=await fetch('/tr?q='+encodeURIComponent(joined));
+    const j=await r.json();
+    if(!j||!j[0]) return titles;
+    const out=j[0].map(seg=>seg[0]).join('');     // çeviri parçalarını birleştir
+    const lines=out.split('\n').map(s=>s.trim()).filter(Boolean);
+    return lines.length===titles.length ? lines : titles;
+  }catch(e){ return titles; }
+}
+async function fetchNews(sym){
+  const box=document.getElementById('newsList');
+  if(!box) return;
+  box.innerHTML='<div class="hint">Haberler yükleniyor…</div>';
+  try{
+    const r=await fetch('/news?q='+encodeURIComponent(sym+' stock'));
+    const xml=await r.text();
+    const doc=new DOMParser().parseFromString(xml,'application/xml');
+    let items=[...doc.querySelectorAll('item')].map(it=>{
+      const get=t=>{ const el=it.getElementsByTagName(t)[0]; return el?el.textContent:''; };
+      const title=get('title');
+      // Bing apiclick linkinden gerçek yayıncı adresini çıkar (?url=...)
+      let link=get('link');
+      const m=link.match(/[?&]url=([^&]+)/);
+      if(m){ try{ link=decodeURIComponent(m[1]); }catch(e){} }
+      const pub=get('pubDate');
+      // Özet: <description> içindeki CDATA/HTML temizlenir
+      let desc=get('description').replace(/<!\[CDATA\[|\]\]>/g,'').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
+      // Kaynak: <News:Source> ya da adresten alan adı
+      let src=get('News:Source')||get('Source');
+      if(!src){ try{ src=new URL(link).hostname.replace(/^www\./,''); }catch(e){} }
+      const d=pub?new Date(pub):null;
+      return {title,link,src,desc,d:(d&&!isNaN(d))?d:null};
+    });
+    // En güncel önce
+    items.sort((a,b)=> (b.d?b.d.getTime():0) - (a.d?a.d.getTime():0));
+    items=items.slice(0,8);
+    if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
+
+    // Başlık ve özetleri Türkçe'ye çevir (paralel, anahtarsız köprü)
+    const [trTitles, trDescs] = await Promise.all([
+      translateTR(items.map(i=>i.title)),
+      translateTR(items.map(i=>i.desc||'—'))
+    ]);
+    box.innerHTML=items.map((it,idx)=>{
+      const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
+      const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
+      return `<div class="news" onclick="toggleNews(this)">
+        <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
+        <div class="news-m">${safeHTML(meta)}</div>
+        <div class="news-sum">${sum}<br><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Kaynakta tüm haberi oku →</a></div>
+      </div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
+}
+/* Haber başlığına tıklayınca özeti aç/kapat */
+function toggleNews(el){ el.classList.toggle('open'); }
+
+/* ---- Sağlam yükümlülük/özkaynak toplamları (eksik SEC etiketlerini telafi eder) ---- */
+const bsVal=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+/* Özkaynak (azınlık payı dahil): önce IncludingNCI; yoksa ana ortaklık + azınlık payı */
+function equityAllIn(D,d){
+  const incl=bsVal(D.equityIncl,d);
+  if(incl) return incl;
+  return bsVal(D.equity,d)+bsVal(D.minority,d);
+}
+/* Toplam yükümlülük: raporlanmışsa Liabilities; yoksa (Pasif Toplamı − Özkaynak);
+   o da yoksa KV + UV yükümlülük. */
+function liabTotal(D,d){
+  if(D.liab && (d in D.liab)) return D.liab[d];
+  const base=bsVal(D.liabEquity,d)||bsVal(D.assets,d);
+  const eq=equityAllIn(D,d);
+  if(base && eq) return base-eq;
+  return bsVal(D.liabCur,d)+bsVal(D.liabNoncur,d);
+}
+
+/* SEC kavram haritalarını uygulamanın satır yapısına çevirir.
+   Bölüm toplamına göre bir "denge" satırı eklenir → Aktif = Pasif korunur. */
+function buildRowsFromSEC(D,D0,D1){
+  const out=[];
+  const v=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+  const section=(cat,items,totMap,plugLabel,derive)=>{
+    let cs=0,ps=0;
+    items.forEach(([lbl,m])=>{
+      const cv=v(m,D0), pv=v(m,D1);
+      cs+=cv; ps+=pv;
+      if(cv!==0||pv!==0) out.push([lbl,cat,cv,pv]);
+    });
+    const ct = derive? derive(D0): v(totMap,D0);
+    const pt = derive? derive(D1): v(totMap,D1);
+    const plugC=ct-cs, plugP=pt-ps;
+    const thr=Math.max(Math.abs(ct),1)*0.001;
+    if(Math.abs(plugC)>thr||Math.abs(plugP)>thr) out.push([plugLabel,cat,plugC,plugP]);
+  };
+
+  section('asset_current',[
+    ['Nakit ve Nakit Benzerleri',D.cash],
+    ['Kısa Vadeli Yatırımlar',D.stInv],
+    ['Ticari Alacaklar',D.recv],
+    ['Stoklar',D.inv],
+  ],D.assetsCur,'Diğer Dönen Varlıklar');
+
+  section('asset_noncur',[
+    ['Maddi Duran Varlıklar',D.ppe],
+    ['Şerefiye (Goodwill)',D.goodwill],
+    ['Maddi Olmayan Duran Varlıklar',D.intang],
+    ['Uzun Vadeli Yatırımlar',D.ltInv],
+  ],null,'Diğer Duran Varlıklar', d=> (v(D.assets,d)-v(D.assetsCur,d)) );
+
+  section('liab_current',[
+    ['Ticari Borçlar',D.ap],
+    ['Kısa Vadeli Finansal Borçlar',D.stDebt],
+    ['Ertelenmiş Gelirler',D.defRev],
+  ],D.liabCur,'Diğer Kısa Vadeli Yük.');
+
+  section('liab_noncur',[
+    ['Uzun Vadeli Finansal Borçlar',D.ltDebt],
+  ],null,'Diğer Uzun Vadeli Yük.', d=> (liabTotal(D,d)-v(D.liabCur,d)) );
+
+  // Özkaynak toplamı = Aktif − (sağlam) Toplam Yükümlülük → bilanço HER ZAMAN dengelenir.
+  // Azınlık payları (NCI) ve mezzanine gibi StockholdersEquity'ye dahil OLMAYAN
+  // kalemler "Diğer Özkaynak" satırında toplanır.
+  section('equity',[
+    ['Ödenmiş Sermaye',D.common],
+    ['Dağıtılmamış Kârlar',D.retained],
+  ],null,'Diğer Özkaynak Kalemleri', d=> (v(D.assets,d)-liabTotal(D,d)) );
+
+  return out;
+}
+
+/* ---------- Tablo satır ekleme ---------- */
+function rowHTML(name='', cat='asset_current', cur='', prev=''){
+  const opts = Object.keys(CATS).map(k=>`<option value="${k}" ${k===cat?'selected':''}>${CATS[k]}</option>`).join('');
+  const cell = v => (v===''||v===null||v===undefined) ? '' : fmtAbbr(Number(v));
+  return `<tr>
+    <td><input class="name" value="${name.replace(/"/g,'&quot;')}" placeholder="Kalem adı"></td>
+    <td><select class="cell catsel">${opts}</select></td>
+    <td><input class="cell cur" value="${cell(cur)}" inputmode="text"></td>
+    <td><input class="cell prev" value="${cell(prev)}" inputmode="text"></td>
+    <td class="row-actions"><button class="delrow" onclick="this.closest('tr').remove()" title="Sil">✕</button></td>
+  </tr>`;
+}
+function addRow(group){
+  const cat = group==='asset'?'asset_current':group==='liab'?'liab_current':'equity';
+  document.getElementById('inputBody').insertAdjacentHTML('beforeend', rowHTML('',cat));
+}
+function setPeriodHeaders(curDate, prevDate){
+  const th1=document.getElementById('thCur'), th2=document.getElementById('thPrev');
+  if(th1) th1.innerHTML = 'Cari Dönem' + (curDate?`<br><span class="thd">${curDate}</span>`:'');
+  if(th2) th2.innerHTML = 'Önceki Dönem' + (prevDate?`<br><span class="thd">${prevDate}</span>`:'');
+}
+function hidePriceUI(){
+  const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
+  if(lp) lp.classList.add('hidden');
+  if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
+  if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
+}
+function loadSample(){
+  FIN=null; hidePriceUI();
+  const b=document.getElementById('inputBody'); b.innerHTML='';
+  SAMPLE.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+  setPeriodHeaders(null,null);
+  analyze();
+}
+function clearAll(){ FIN=null; hidePriceUI(); document.getElementById('inputBody').innerHTML=''; setPeriodHeaders(null,null); document.getElementById('results').classList.add('hidden'); }
+
+/* ---------- Verileri oku ---------- */
+function readData(){
+  const rows=[...document.querySelectorAll('#inputBody tr')];
+  return rows.map(tr=>({
+    name: tr.querySelector('.name').value.trim()||'(adsız)',
+    cat:  tr.querySelector('.catsel').value,
+    cur:  num(tr.querySelector('.cur').value),
+    prev: num(tr.querySelector('.prev').value)
+  })).filter(r=>r.cur!==0||r.prev!==0);
+}
+const sum=(rows,f,key)=>rows.filter(f).reduce((a,r)=>a+r[key],0);
+
+/* Cari değeri önceki döneme göre renklendir: iyi=yeşil, kötü=kırmızı.
+   Yön: varlık & özkaynak artışı iyi; yükümlülük artışı kötü. */
+function colorInputRows(){
+  document.querySelectorAll('#inputBody tr').forEach(tr=>{
+    const curEl=tr.querySelector('.cur'), prevEl=tr.querySelector('.prev'), catEl=tr.querySelector('.catsel');
+    if(!curEl||!prevEl||!catEl) return;
+    curEl.classList.remove('cell-good','cell-bad');
+    const cur=num(curEl.value), prev=num(prevEl.value);
+    if(!prev) return;                                  // karşılaştırılacak önceki dönem yok
+    const dv=cur-prev;
+    if(Math.abs(dv) < Math.abs(prev)*0.0005) return;   // anlamlı değişim yok → nötr
+    const favorable = (CAT_GROUP[catEl.value]==='liab') ? dv<0 : dv>0;
+    curEl.classList.add(favorable?'cell-good':'cell-bad');
+  });
+}
+
+/* ---------- Ana analiz ---------- */
+function analyze(){
+  const d=readData();
+  colorInputRows();
+  if(d.length===0){ alert('Lütfen en az bir kalem girin veya "Örnek Veri Yükle"ye basın.'); return; }
+  document.getElementById('results').classList.remove('hidden');
+
+  const isA=r=>CAT_GROUP[r.cat]==='asset', isL=r=>CAT_GROUP[r.cat]==='liab', isE=r=>CAT_GROUP[r.cat]==='equity';
+  const period=['cur','prev'];
+  const T={}; // toplamlar
+  period.forEach(p=>{
+    T[p]={
+      donenV:   sum(d,r=>r.cat==='asset_current',p),
+      duranV:   sum(d,r=>r.cat==='asset_noncur',p),
+      kvYuk:    sum(d,r=>r.cat==='liab_current',p),
+      uvYuk:    sum(d,r=>r.cat==='liab_noncur',p),
+      ozkaynak: sum(d,isE,p),
+      stok:     sum(d,r=>/stok/i.test(r.name)&&r.cat==='asset_current',p),
+      nakit:    sum(d,r=>/(nakit|kasa|banka(?!\s*kred))/i.test(r.name)&&r.cat==='asset_current',p),
+    };
+    T[p].toplamV = T[p].donenV+T[p].duranV;
+    T[p].toplamYuk = T[p].kvYuk+T[p].uvYuk;
+    T[p].pasifTop = T[p].toplamYuk+T[p].ozkaynak;
+    T[p].netSermaye = T[p].donenV-T[p].kvYuk;
+  });
+
+  renderBalCheck(T);
+  renderKPIs(T);
+  renderRatios(T);
+  renderVariance(d);
+  renderVertical(d,T);
+  renderFlags(d,T);
+
+  // Gelir tablosu / kârlılık / trend yalnızca SEC verisi varsa
+  const incCard=document.getElementById('incomeCard'), trCard=document.getElementById('trendCard');
+  if(FIN){
+    renderIncome(T); renderTrends();
+    incCard.classList.remove('hidden'); trCard.classList.remove('hidden');
+  }else{
+    incCard.classList.add('hidden'); trCard.classList.add('hidden');
+  }
+
+  // Rapor başlığı (dışa aktarmada da kullanılır)
+  const rt=document.getElementById('reportTitle');
+  if(rt){
+    rt.textContent = FIN
+      ? `${FIN.ticker} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · USD`
+      : 'Elle girilen veri';
+  }
+  // Dönem notu: bildirilme tarihi + yıllık veride gecikme açıklaması
+  const pn=document.getElementById('periodNote');
+  if(pn){
+    if(FIN){
+      const filedTxt = FIN.filedD0 ? `📅 SEC'e bildirilme: ${fmtDate(FIN.filedD0)}.` : '';
+      const lagTxt = FIN.mode==='annual'
+        ? ` Yıllık rapor (10-K) yılda bir, tamamlanmış mali yıl için yayımlanır — bu en güncel tamamlanmış mali yıldır. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
+        : ` Çeyreklik rapor (10-Q) — en güncel ara dönem.`;
+      pn.innerHTML = (filedTxt + lagTxt).trim();
+    }else{
+      pn.textContent='';
+    }
+  }
+}
+
+/* ---------- Dışa aktarma: PDF (yazdır) & Excel (CSV) ---------- */
+function exportPDF(){ window.print(); }
+
+function csvCell(s){ s=String(s==null?'':s).replace(/ /g,' ').replace(/\s*\n\s*/g,' ').trim(); return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+function domTableRows(bodySel){
+  const tb=document.querySelector(bodySel); if(!tb) return [];
+  return [...tb.querySelectorAll('tr')].map(tr=>[...tr.querySelectorAll('th,td')]
+    .filter(c=>!c.classList.contains('row-actions'))
+    .map(c=>c.innerText.replace(/\s*\n\s*/g,' ').trim()));
+}
+function exportCSV(){
+  const d=readData();
+  if(!d.length){ alert('Önce veri girip "Analiz Et"e basın.'); return; }
+  const sep=';', L=[];
+  const push=(...c)=>L.push(c.map(csvCell).join(sep));
+  const section=(title,headers,bodySel)=>{ push(title); push(...headers); domTableRows(bodySel).forEach(r=>push(...r)); push(''); };
+
+  push('Bilanço Analiz Raporu');
+  push('Şirket', FIN?FIN.ticker:'Elle girilen veri');
+  push('Dönem', FIN?(FIN.mode==='annual'?'Yıllık':'Çeyreklik'):'—');
+  if(FIN) push('Tarih', fmtDate(FIN.D0)+(FIN.D1?' / '+fmtDate(FIN.D1):''));
+  push('Para birimi', CUR);
+  push('Oluşturma', new Date().toLocaleString('tr-TR'));
+  push('');
+
+  // Bilanço (ham sayılarla)
+  push('BİLANÇO'); push('Kalem','Kategori','Cari','Önceki');
+  d.forEach(r=> push(r.name, CATS[r.cat], Math.round(r.cur), Math.round(r.prev)));
+  push('');
+
+  section('FİNANSAL ORANLAR', ['Oran','Cari','Önceki','Değişim','Durum'], '#ratioBody');
+  if(FIN){
+    section('GELİR TABLOSU', ['Kalem','Cari','Önceki','Değişim'], '#incomeBody');
+    section('KÂRLILIK ORANLARI', ['Oran','Cari','Önceki','Değişim','Durum'], '#profBody');
+  }
+  section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki','Değişim ($)','Değişim (%)','Yön'], '#varBody');
+
+  const csv='﻿'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  const name=(FIN?FIN.ticker:'bilanco')+'-analiz-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ---- Gelir tablosu & kârlılık ---- */
+function renderIncome(T){
+  const I=FIN.income, D0=FIN.D0, D1=FIN.D1;
+  const iv=(k,d)=> (d && I[k] && (d in I[k])) ? I[k][d] : null;
+  // Gelir/Net kâr için tarih, bilanço D0 ile birebir olmayabilir → gelir serisinin en güncel 2 tarihi
+  const revDates=Object.keys(I.revenue||{}).sort().reverse();
+  const R0=revDates[0]||D0, R1=revDates[1]||D1;
+
+  // KPI kartları: Gelir, Net Kâr, Net Marj, ROE
+  const rev0=iv('revenue',R0), rev1=iv('revenue',R1);
+  const ni0=iv('netIncome',R0), ni1=iv('netIncome',R1);
+  const nm0=(rev0&&ni0!=null)?ni0/rev0:null, nm1=(rev1&&ni1!=null)?ni1/rev1:null;
+  const roe0=T.cur.ozkaynak?(ni0!=null?ni0/T.cur.ozkaynak:null):null;
+  const roe1=T.prev.ozkaynak?(ni1!=null?ni1/T.prev.ozkaynak:null):null;
+  const kpi=(lbl,c,p,fmtFn,inv)=>{
+    if(c==null){ return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">—</div></div>`; }
+    let delta='';
+    if(p!=null && p!==0){ const ch=(c-p)/Math.abs(p)*100; const good=inv?ch<0:ch>0;
+      const cls=Math.abs(ch)<0.05?'neutral':(good?'up':'down'); const ar=Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
+      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fmtFn(p)})</span></div>`; }
+    return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${fmtFn(c)}</div>${delta}</div>`;
+  };
+  const pp=v=>(v==null?'—':(v*100).toFixed(1)+'%');
+  document.getElementById('profKpis').innerHTML=[
+    kpi('Gelir (Hasılat)', rev0, rev1, fmtAbbr),
+    kpi('Net Kâr', ni0, ni1, fmtAbbr),
+    kpi('Net Kâr Marjı', nm0, nm1, pp),
+    kpi('Özkaynak Kârlılığı (ROE)', roe0, roe1, pp),
+  ].join('');
+
+  // Gelir tablosu satırları
+  const lines=[
+    ['Gelir (Hasılat)','revenue',false],
+    ['Satış Maliyeti','costRev',true],
+    ['Brüt Kâr','grossProfit',false],
+    ['Faaliyet Kârı','opIncome',false],
+    ['Ar-Ge Gideri','rnd',true],
+    ['Net Kâr','netIncome',false],
+  ];
+  document.getElementById('incomeBody').innerHTML=lines.map(([lbl,k,inv])=>{
+    const c=iv(k,R0), p=iv(k,R1);
+    if(c==null&&p==null) return '';
+    let ch='—';
+    if(c!=null&&p!=null&&p!==0){ const d=(c-p)/Math.abs(p)*100; const good=inv?d<0:d>0;
+      const cls=Math.abs(d)<0.05?'neutral':(good?'up':'down'); ch=`<span class="${cls}">${pct(d)}</span>`; }
+    return `<tr><td>${lbl}</td><td><b>${c==null?'—':fmtAbbr(c)}</b></td><td>${p==null?'—':fmtAbbr(p)}</td><td>${ch}</td></tr>`;
+  }).filter(Boolean).join('');
+
+  // Kârlılık oranları tablosu
+  const gp0=iv('grossProfit',R0), gp1=iv('grossProfit',R1);
+  const op0=iv('opIncome',R0), op1=iv('opIncome',R1);
+  const roa0=T.cur.toplamV?(ni0!=null?ni0/T.cur.toplamV:null):null;
+  const roa1=T.prev.toplamV?(ni1!=null?ni1/T.prev.toplamV:null):null;
+  const defs=[
+    ['Brüt Marj','Brüt Kâr / Gelir', rev0?(gp0!=null?gp0/rev0:null):null, rev1?(gp1!=null?gp1/rev1:null):null, v=>v>=0.4?'good':v>=0.2?'warn':'bad'],
+    ['Faaliyet Marjı','Faaliyet Kârı / Gelir', rev0?(op0!=null?op0/rev0:null):null, rev1?(op1!=null?op1/rev1:null):null, v=>v>=0.15?'good':v>=0.05?'warn':'bad'],
+    ['Net Kâr Marjı','Net Kâr / Gelir', nm0, nm1, v=>v>=0.1?'good':v>=0.03?'warn':'bad'],
+    ['Özkaynak Kârlılığı (ROE)','Net Kâr / Özkaynak', roe0, roe1, v=>v>=0.15?'good':v>=0.08?'warn':'bad'],
+    ['Aktif Kârlılığı (ROA)','Net Kâr / Toplam Varlık', roa0, roa1, v=>v>=0.07?'good':v>=0.03?'warn':'bad'],
+  ];
+  document.getElementById('profBody').innerHTML=defs.map(([nm,fo,c,p,st])=>{
+    const status=c==null?'warn':st(c);
+    const lbl=c==null?'—':(status==='good'?'İyi':status==='warn'?'Orta':'Zayıf');
+    let ch='—';
+    if(c!=null&&p!=null){ const d=(c-p)*100; ch=(d>=0?'▲ +':'▼ ')+d.toFixed(1)+'p'; }
+    return `<tr>
+      <td><span class="ratio-name">${nm}</span><br><span class="ratio-formula">${fo}</span></td>
+      <td><b>${pp(c)}</b></td><td>${pp(p)}</td><td>${ch}</td>
+      <td><span class="pill ${status}">${lbl}</span></td></tr>`;
+  }).join('');
+}
+
+/* ---- Çok yıllı trend grafikleri (bağımsız SVG) ---- */
+function fmtShort(n){
+  const s=n<0?'-':'', a=Math.abs(n);
+  if(a>=1e12) return s+(a/1e12).toFixed(1)+'T';
+  if(a>=1e9)  return s+(a/1e9).toFixed(0)+'B';
+  if(a>=1e6)  return s+(a/1e6).toFixed(0)+'M';
+  if(a>=1e3)  return s+(a/1e3).toFixed(0)+'K';
+  return s+Math.round(a);
+}
+function miniBarChart(title, series){
+  const entries=Object.keys(series||{}).map(d=>[d,series[d]]).filter(e=>typeof e[1]==='number');
+  entries.sort((a,b)=> a[0]<b[0]?-1:1);
+  const data=entries.slice(-6);                 // son 6 dönem
+  if(data.length<2) return '';
+  const W=330,H=170, padT=22, padB=28;
+  const vals=data.map(d=>d[1]);
+  let max=Math.max(...vals,0), min=Math.min(...vals,0);
+  const span=(max-min)||Math.abs(max)||1;
+  const plotH=H-padT-padB;
+  const n=data.length, gap=8, plotW=W-12, bw=(plotW-gap*(n-1))/n;
+  const yOf=v=> padT + ((max-v)/span)*plotH;
+  const y0=yOf(0);
+  let bars='';
+  data.forEach((d,i)=>{
+    const x=6+i*(bw+gap), v=d[1], yv=yOf(v);
+    const top=Math.min(yv,y0), hgt=Math.max(1,Math.abs(yv-y0));
+    const col=v<0?'var(--bad)':'var(--accent)';
+    const ly=v>=0? top-5 : top+hgt+11;
+    bars+=`<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hgt.toFixed(1)}" rx="3" fill="${col}"><title>${fmtDate(d[0])}: ${fmtAbbr(v)}</title></rect>
+      <text x="${(x+bw/2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="9.5" fill="var(--ink-2)">${fmtShort(v)}</text>
+      <text x="${(x+bw/2).toFixed(1)}" y="${(H-10).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--muted)">${String(d[0]).slice(0,4)}</text>`;
+  });
+  const baseline = min<0 ? `<line x1="6" x2="${W-6}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" stroke="var(--line-2)"/>` : '';
+  return `<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:13px;padding:12px 14px">
+    <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:2px">${title}</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${baseline}${bars}</svg></div>`;
+}
+function renderTrends(){
+  const charts=[
+    ['Gelir (Hasılat)', FIN.income.revenue],
+    ['Net Kâr', FIN.income.netIncome],
+    ['Toplam Varlık', FIN.balance.assets],
+    ['Özkaynak', FIN.balance.equity],
+    ['Toplam Yükümlülük', FIN.balance.liab],
+  ];
+  const html=charts.map(([t,s])=>miniBarChart(t,s)).filter(Boolean).join('');
+  document.getElementById('trendCharts').innerHTML = html || '<div class="hint">Trend için yeterli geçmiş veri bulunamadı.</div>';
+}
+
+/* ---- Bilanço dengesi ---- */
+function renderBalCheck(T){
+  const diff=T.cur.toplamV-T.cur.pasifTop;
+  const ok=Math.abs(diff)<Math.max(1,T.cur.toplamV*0.005);
+  const el=document.getElementById('balcheck');
+  el.className='balcheck '+(ok?'ok':'no');
+  el.innerHTML = ok
+    ? `✓ Bilanço dengede: Toplam Varlık (${fmtAbbr(T.cur.toplamV)}) = Yükümlülük + Özkaynak (${fmtAbbr(T.cur.pasifTop)})`
+    : `⚠ Bilanço dengede DEĞİL — Aktif ${fmtAbbr(T.cur.toplamV)} ≠ Pasif ${fmtAbbr(T.cur.pasifTop)} (fark ${fmtAbbr(diff)}). Girdileri kontrol edin.`;
+}
+
+/* ---- KPI kartları ---- */
+function renderKPIs(T){
+  const cards=[
+    ['Toplam Varlık', T.cur.toplamV, T.prev.toplamV, false],
+    ['Toplam Yükümlülük', T.cur.toplamYuk, T.prev.toplamYuk, true],
+    ['Özkaynak', T.cur.ozkaynak, T.prev.ozkaynak, false],
+    ['Net İşletme Sermayesi', T.cur.netSermaye, T.prev.netSermaye, false],
+    ['Dönen Varlık', T.cur.donenV, T.prev.donenV, false],
+    ['Kısa Vade. Yük.', T.cur.kvYuk, T.prev.kvYuk, true],
+  ];
+  document.getElementById('kpis').innerHTML = cards.map(([lbl,cur,prev,inv])=>{
+    const ch = prev!==0 ? (cur-prev)/Math.abs(prev)*100 : (cur!==0?100:0);
+    const goodDir = inv ? ch<0 : ch>0; // borç için azalış iyi
+    const cls = Math.abs(ch)<0.05?'neutral':(goodDir?'up':'down');
+    const arrow = Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
+    return `<div class="kpi"><div class="lbl">${lbl}</div>
+      <div class="val">${fmtAbbr(cur)}</div>
+      <div class="delta ${cls}">${arrow} ${pct(ch)} <span class="neutral">(önceki ${fmtAbbr(prev)})</span></div></div>`;
+  }).join('');
+}
+
+/* ---- Oranlar ---- */
+function renderRatios(T){
+  const safe=(a,b)=> b===0?null:a/b;
+  function build(p){
+    const t=T[p];
+    return {
+      cari: safe(t.donenV,t.kvYuk),
+      asit: safe(t.donenV-t.stok,t.kvYuk),
+      nakit: safe(t.nakit,t.kvYuk),
+      borcOz: safe(t.toplamYuk,t.ozkaynak),
+      kaldiraci: safe(t.toplamYuk,t.toplamV),
+      ozkOran: safe(t.ozkaynak,t.toplamV),
+      duranOzk: safe(t.duranV,t.ozkaynak),
+    };
+  }
+  const c=build('cur'), pr=build('prev');
+  // [ad, formül, curVal, prevVal, biçim, eşik fonksiyonu(durum)]
+  const defs=[
+    ['Cari Oran','Dönen V. / KV Yük.', c.cari, pr.cari, 'x', v=> v>=1.5?'good':v>=1?'warn':'bad'],
+    ['Asit-Test (Likidite)','(Dönen V. − Stok) / KV Yük.', c.asit, pr.asit, 'x', v=> v>=1?'good':v>=0.7?'warn':'bad'],
+    ['Nakit Oranı','Nakit / KV Yük.', c.nakit, pr.nakit, 'x', v=> v>=0.2?'good':v>=0.1?'warn':'bad'],
+    ['Borç / Özkaynak','Toplam Yük. / Özkaynak', c.borcOz, pr.borcOz, 'x', v=> v<=1?'good':v<=2?'warn':'bad'],
+    ['Finansal Kaldıraç','Toplam Yük. / Toplam Varlık', c.kaldiraci, pr.kaldiraci, '%', v=> v<=0.5?'good':v<=0.7?'warn':'bad'],
+    ['Özkaynak Oranı','Özkaynak / Toplam Varlık', c.ozkOran, pr.ozkOran, '%', v=> v>=0.4?'good':v>=0.25?'warn':'bad'],
+    ['Duran V. Karşılama','Duran V. / Özkaynak', c.duranOzk, pr.duranOzk, 'x', v=> v<=1?'good':v<=1.5?'warn':'bad'],
+  ];
+  const showV=(v,f)=> v===null?'—':(f==='%'?(v*100).toFixed(1)+'%':v.toFixed(2)+'x');
+  document.getElementById('ratioBody').innerHTML = defs.map(([nm,fo,cv,pv,f,st])=>{
+    const status = cv===null?'warn':st(cv);
+    const lbl = status==='good'?'İyi':status==='warn'?'Orta':'Zayıf';
+    let ch='—';
+    if(cv!==null&&pv!==null){ const dv=cv-pv; ch=(dv>=0?'▲ ':'▼ ')+(f==='%'?(dv*100).toFixed(1)+'p':dv.toFixed(2)); }
+    return `<tr>
+      <td><span class="ratio-name">${nm}</span><br><span class="ratio-formula">${fo}</span></td>
+      <td><b>${showV(cv,f)}</b></td>
+      <td>${showV(pv,f)}</td>
+      <td>${ch}</td>
+      <td><span class="pill ${status}">${lbl}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- Yatay analiz / önemli değişimler ---- */
+function renderVariance(d){
+  const rows=d.map(r=>{
+    const dv=r.cur-r.prev;
+    const dp=r.prev!==0? dv/Math.abs(r.prev)*100 : (r.cur!==0?100:0);
+    return {...r,dv,dp};
+  }).filter(r=>r.dv!==0);
+  rows.sort((a,b)=>Math.abs(b.dv)-Math.abs(a.dv));
+  const top=rows.slice(0,8);
+  document.getElementById('varBody').innerHTML = top.map(r=>{
+    const inv = CAT_GROUP[r.cat]!=='asset'; // yükümlülük/özkaynak artışı yorumu farklı
+    const fav = inv ? r.dv<0 : r.dv>0;
+    const dir = Math.abs(r.dp)<0.05?'neutral':(fav?'up':'down');
+    const tag = CAT_GROUP[r.cat]==='asset' ? (r.dv>0?'Artış':'Azalış') : (r.dv>0?'Artış':'Azalış');
+    return `<tr>
+      <td>${r.name} <span class="ratio-formula">(${CATS[r.cat]})</span></td>
+      <td>${fmtAbbr(r.cur)}</td><td>${fmtAbbr(r.prev)}</td>
+      <td class="${dir}">${r.dv>0?'+':''}${fmtAbbr(r.dv)}</td>
+      <td class="${dir}">${pct(r.dp)}</td>
+      <td><span class="${dir}">${tag}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- Dikey analiz ---- */
+function renderVertical(d,T){
+  const rows=d.map(r=>{
+    const cp = T.cur.toplamV? r.cur/T.cur.toplamV*100:0;
+    const pp = T.prev.toplamV? r.prev/T.prev.toplamV*100:0;
+    return {...r,cp,pp,shift:cp-pp};
+  }).sort((a,b)=>b.cp-a.cp);
+  document.getElementById('vertBody').innerHTML = rows.map(r=>{
+    const w=Math.min(100,Math.abs(r.cp));
+    const col = CAT_GROUP[r.cat]==='asset'?'#1763b8':CAT_GROUP[r.cat]==='liab'?'#c0392b':'#157a4d';
+    const sc=Math.abs(r.shift)<0.05?'neutral':(r.shift>0?'up':'down');
+    return `<tr>
+      <td>${r.name} <span class="ratio-formula">(${CATS[r.cat]})</span></td>
+      <td>${r.cp.toFixed(1)}%</td>
+      <td>${r.pp.toFixed(1)}%</td>
+      <td class="${sc}">${r.shift>=0?'+':''}${r.shift.toFixed(1)}p</td>
+      <td style="width:160px"><div class="bar"><i style="width:${w}%;background:${col}"></i></div></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- Otomatik yorum & risk işaretleri ---- */
+function renderFlags(d,T){
+  const F=[];
+  const add=(lvl,ttl,body)=>F.push({lvl,ttl,body});
+  const c=T.cur, p=T.prev;
+  const cari=c.kvYuk?c.donenV/c.kvYuk:null;
+  const asit=c.kvYuk?(c.donenV-c.stok)/c.kvYuk:null;
+  const borcOz=c.ozkaynak?c.toplamYuk/c.ozkaynak:null;
+  const ozkOran=c.toplamV?c.ozkaynak/c.toplamV:null;
+
+  // Likidite
+  if(cari!==null){
+    if(cari<1) add('bad','Likidite riski yüksek',`Cari oran ${cari.toFixed(2)}x — dönen varlıklar kısa vadeli borçları karşılamıyor. Nakit akışı baskısı olabilir.`);
+    else if(cari<1.5) add('warn','Likidite sınırda',`Cari oran ${cari.toFixed(2)}x. 1,5x üzeri daha güvenli kabul edilir.`);
+    else add('good','Likidite güçlü',`Cari oran ${cari.toFixed(2)}x — kısa vadeli yükümlülükler rahatça karşılanıyor.`);
+  }
+  if(asit!==null && asit<0.7) add('warn','Stoğa bağımlılık',`Asit-test ${asit.toFixed(2)}x. Likidite büyük ölçüde stoklara bağlı; stok devri yavaşsa risk artar.`);
+
+  // Kaldıraç
+  if(borcOz!==null){
+    if(borcOz>2) add('bad','Yüksek borçluluk',`Borç/Özkaynak ${borcOz.toFixed(2)}x — özkaynağın 2 katından fazla borç. Faiz/kur şoklarına kırılgan.`);
+    else if(borcOz>1) add('warn','Orta düzey kaldıraç',`Borç/Özkaynak ${borcOz.toFixed(2)}x. Borç yükü yakından izlenmeli.`);
+    else add('good','Sağlam sermaye yapısı',`Borç/Özkaynak ${borcOz.toFixed(2)}x — düşük kaldıraç.`);
+  }
+  if(ozkOran!==null && ozkOran<0.25) add('bad','İnce özkaynak tabanı',`Özkaynak oranı %${(ozkOran*100).toFixed(0)} — varlıkların çok büyük kısmı borçla finanse ediliyor.`);
+
+  // Net işletme sermayesi
+  if(c.netSermaye<0) add('bad','Negatif işletme sermayesi',`Net işletme sermayesi ${fmtAbbr(c.netSermaye)} ${CUR} — kısa vadeli borçlar dönen varlıkları aşıyor.`);
+  else if(p.netSermaye!==0 && c.netSermaye<p.netSermaye*0.7) add('warn','İşletme sermayesi eridi',`Net işletme sermayesi ${fmtAbbr(p.netSermaye)} → ${fmtAbbr(c.netSermaye)} ${CUR}'ye geriledi.`);
+
+  // KV kredi artışı
+  const kvKredi=d.filter(r=>/banka kred|kredi/i.test(r.name)&&r.cat==='liab_current');
+  const kvK=kvKredi.reduce((a,r)=>a+r.cur,0), kvKp=kvKredi.reduce((a,r)=>a+r.prev,0);
+  if(kvKp>0 && kvK>kvKp*1.5) add('warn','Kısa vadeli kredi sıçraması',`Kısa vadeli banka kredileri ${fmtAbbr(kvKp)} → ${fmtAbbr(kvK)} ${CUR} (%${((kvK/kvKp-1)*100).toFixed(0)} artış). Yeniden finansman riski.`);
+
+  // Alacak / stok şişmesi
+  const checkBloat=(rx,label)=>{
+    const it=d.filter(r=>rx.test(r.name)&&CAT_GROUP[r.cat]==='asset');
+    const cv=it.reduce((a,r)=>a+r.cur,0), pv=it.reduce((a,r)=>a+r.prev,0);
+    const varG=(c.toplamV-p.toplamV);
+    if(pv>0 && cv>pv*1.3 && (cv-pv) > Math.abs(varG)*0.3)
+      add('warn',`${label} hızlı büyüdü`,`${label} ${fmtAbbr(pv)} → ${fmtAbbr(cv)} ${CUR} (%${((cv/pv-1)*100).toFixed(0)}). Toplam varlık büyümesinin önemli kısmını oluşturuyor — tahsilat/devir hızı izlenmeli.`);
+  };
+  checkBloat(/alacak/i,'Ticari alacaklar');
+  checkBloat(/stok/i,'Stoklar');
+
+  // Nakit erimesi
+  if(p.nakit>0 && c.nakit<p.nakit*0.6) add('warn','Nakit pozisyonu zayıfladı',`Nakit ve benzerleri ${fmtAbbr(p.nakit)} → ${fmtAbbr(c.nakit)} ${CUR}'ye düştü (%${((1-c.nakit/p.nakit)*100).toFixed(0)} azalış).`);
+
+  // Özkaynak büyümesi (olumlu)
+  if(p.ozkaynak>0 && c.ozkaynak>p.ozkaynak*1.05) add('good','Özkaynak güçlendi',`Özkaynak ${fmtAbbr(p.ozkaynak)} → ${fmtAbbr(c.ozkaynak)} ${CUR}'ye yükseldi (kârlılık/sermaye katkısı).`);
+
+  if(F.length===0) add('good','Belirgin risk işareti yok','Girilen verilere göre eşikleri aşan kritik bir sinyal bulunamadı.');
+
+  const ic={bad:'⛔',warn:'⚠️',good:'✅'};
+  // önce kötüler
+  F.sort((a,b)=>({bad:0,warn:1,good:2}[a.lvl]-{bad:0,warn:1,good:2}[b.lvl]));
+  document.getElementById('flags').innerHTML = F.map(f=>
+    `<div class="flag ${f.lvl}"><div class="ic">${ic[f.lvl]}</div>
+     <div><div class="ttl">${f.ttl}</div><div class="body">${f.body}</div></div></div>`).join('');
+}
+
+/* başlangıç */
+window.addEventListener('DOMContentLoaded',()=>{
+  loadSample();
+  // Bilanço Verisi'nde değer/kategori değişince cari hücreleri anında yeniden renklendir
+  const body=document.getElementById('inputBody');
+  body.addEventListener('input', colorInputRows);
+  body.addEventListener('change', colorInputRows);
+});
+</script>
+</body>
+</html>
