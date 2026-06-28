@@ -140,6 +140,38 @@
   td input.cell.cur.cell-good{color:var(--good)}
   td input.cell.cur.cell-bad{color:var(--bad)}
 
+  /* --- Mobil (telefon) uyumu --- */
+  @media (max-width:600px){
+    .hd-inner{padding:13px 14px;gap:10px;flex-wrap:wrap}
+    header h1{font-size:18px}
+    header p{font-size:11px}
+    .live-price .lp-val{font-size:18px}
+    .live-price .lp-chg{font-size:12px}
+    .hd-badge.mcap{font-size:12px;padding:5px 11px}
+    .hd-badge.mcap .mc-val{font-size:13px}
+    .wrap{padding:14px 12px 50px}
+    .card{padding:14px 13px;border-radius:13px;margin-bottom:13px}
+    .card h2{font-size:15px}
+    .card .sub{font-size:12px}
+    /* KPI kartları dar ekranda 2'li */
+    .grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+    .kpi{padding:12px 13px}
+    .kpi .val{font-size:19px}
+    /* Tablolar yatay kaydırılabilir olsun (sıkışıp bozulmasın) */
+    .card > table, #cmpResult{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    table{font-size:12px}
+    th,td{padding:7px 8px;white-space:nowrap}
+    th:first-child,td:first-child{white-space:normal}
+    /* Bilanço Verisi giriş hücreleri daralsın */
+    input.cell{width:auto;max-width:100px}
+    td input.cell.cur, td input.cell.prev{width:82px}
+    input.name{font-size:12.5px}
+    /* Butonlar parmakla rahat */
+    .toolbar{gap:8px}
+    button{padding:9px 13px;font-size:12.5px}
+    #ticker, #cmpTickers{width:100% !important}
+  }
+
   /* Yazdırma / PDF — açık tema, gereksiz öğeler gizli */
   @media print{
     @page{ margin:14mm }
