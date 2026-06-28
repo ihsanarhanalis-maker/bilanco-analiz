@@ -166,9 +166,23 @@
     input.cell{width:auto;max-width:100px}
     td input.cell.cur, td input.cell.prev{width:82px}
     input.name{font-size:12.5px}
-    /* Bilanço tablosu: kalem adlarına yer aç (yatay kaydırılır) */
-    #inputTable{min-width:580px}
-    #inputTable th:first-child, #inputBody td:first-child{min-width:205px}
+    /* Bilanço Verisi: mobilde her kalem ALT ALTA kart (yatay kaydırma yok) */
+    #inputTable{min-width:0;overflow:visible}
+    #inputTable, #inputTable tbody{display:block}
+    #inputTable thead{display:none}
+    #inputBody tr{display:grid;grid-template-columns:1fr 1fr;gap:9px 10px;
+      border:1px solid var(--line);border-radius:11px;background:var(--surface-2);
+      padding:11px 12px;margin-bottom:10px}
+    #inputBody td{display:block;border:none;padding:0;text-align:left;white-space:normal}
+    #inputBody td:nth-child(1){grid-column:1 / -1}   /* kalem adı tam genişlik */
+    #inputBody td:nth-child(2){grid-column:1 / -1}   /* kategori tam genişlik */
+    #inputBody td:nth-child(5){grid-column:1 / -1;text-align:right}  /* sil */
+    #inputBody td:nth-child(3)::before{content:"Cari Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+    #inputBody td:nth-child(4)::before{content:"Önceki Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+    #inputBody input.name{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;font-weight:600}
+    #inputBody select.catsel{width:100%}
+    #inputBody td input.cell.cur, #inputBody td input.cell.prev{width:100%;max-width:none;text-align:right}
+    #inputBody .delrow{font-size:14px}
     /* Butonlar parmakla rahat */
     .toolbar{gap:8px}
     button{padding:9px 13px;font-size:12.5px}
