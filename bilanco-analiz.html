@@ -346,7 +346,7 @@
 
     <div class="card">
       <h2>Güncel Haberler</h2>
-      <div class="sub">Bu şirketle ilgili son haber başlıkları (Bing News). Başlığa tıklayınca <b>özeti uygulama içinde</b> açılır; istersen "Kaynakta tüm haberi oku" ile siteye gidebilirsin.</div>
+      <div class="sub">Üst düzey kaynaklardan (Bloomberg, CNBC, Reuters, Barron's, WSJ, MarketWatch, Forbes…) bu şirketle ilgili son haberler — Türkçe. Başlığa tıklayınca <b>özeti uygulama içinde</b> açılır; "🌐 Haberi Türkçe oku" ile makalenin tamamını Türkçe okuyabilirsin. (MSN kaynakları gösterilmez.)</div>
       <div id="newsList"><div class="hint">—</div></div>
     </div>
 
@@ -880,59 +880,103 @@ function relTime(d){
   if(diff<604800) return Math.round(diff/86400)+' gün önce';
   return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
 }
-async function translateTR(titles){
-  // Tüm başlıkları tek istekte çevir; satır sonlarıyla ayır
+/* Bir makale URL'sini Google Translate sayfa-çeviri proxy'sine çevirir (tüm site Türkçe açılır) */
+function gtUrl(u){
   try{
-    const joined=titles.join('\n');
-    const r=await fetch('/tr?q='+encodeURIComponent(joined));
+    const a=new URL(u);
+    const host=a.hostname.replace(/-/g,'--').replace(/\./g,'-')+'.translate.goog';
+    const sep=a.search?'&':'?';
+    return a.protocol+'//'+host+a.pathname+a.search+sep+'_x_tr_sl=auto&_x_tr_tl=tr&_x_tr_hl=tr&_x_tr_pto=wapp';
+  }catch(e){ return u; }
+}
+/* Tek bir metni Türkçe'ye çevir; hata/boş olursa kısa beklemeyle 2 kez yeniden dener. */
+async function translateOne(text, tries){
+  const t=(text||'').trim();
+  if(!t || t==='—') return text;
+  try{
+    const r=await fetch('/tr?q='+encodeURIComponent(t));
+    if(!r.ok) throw new Error('http '+r.status);
     const j=await r.json();
-    if(!j||!j[0]) return titles;
-    const out=j[0].map(seg=>seg[0]).join('');     // çeviri parçalarını birleştir
-    const lines=out.split('\n').map(s=>s.trim()).filter(Boolean);
-    return lines.length===titles.length ? lines : titles;
-  }catch(e){ return titles; }
+    if(j && j[0]){ const out=j[0].map(s=>s[0]).join('').trim(); if(out) return out; }
+    throw new Error('bos');
+  }catch(e){
+    if((tries||0) < 2){ await new Promise(res=>setTimeout(res, 300*((tries||0)+1))); return translateOne(text,(tries||0)+1); }
+    return text;
+  }
+}
+/* Diziyi çevir — eşzamanlılığı 4'le sınırla (Google throttle'ını önler, İngilizce'ye düşmez) */
+async function translateTR(arr){
+  const out=new Array(arr.length); let idx=0;
+  const worker=async()=>{ while(idx<arr.length){ const k=idx++; out[k]=await translateOne(arr[k]); } };
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  return out;
+}
+/* Üst düzey kaynaklar (sıralamada öne alınır; "msn" elenir) */
+const TOP_SOURCES = ['bloomberg','reuters','wall street journal','wsj','financial times','ft.com','cnbc',
+  'marketwatch','forbes','fortune','economist','business insider','businessinsider',
+  'investor\'s business','investors.com','morningstar','investing.com',
+  'yahoo finance','benzinga','motley fool','fool.com','thestreet','axios','the information'];
+const PREMIUM_SITES = '(site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR site:wsj.com OR '+
+  'site:ft.com OR site:marketwatch.com OR site:forbes.com OR site:fortune.com OR '+
+  'site:investors.com OR site:businessinsider.com OR site:economist.com OR site:morningstar.com)';
+/* Sorun çıkaran / çeviriyi engelleyen kaynaklar gösterilmez */
+const BLOCK_HOST = /(^|\.)(msn\.com|barrons\.com|seekingalpha\.com)$/i;
+const BLOCK_SRC  = /\bon msn\b|^\s*msn\s*$|barron|seeking ?alpha/i;
+function parseNewsXML(xml){
+  const doc=new DOMParser().parseFromString(xml||'','application/xml');
+  return [...doc.querySelectorAll('item')].map(it=>{
+    const get=t=>{ const el=it.getElementsByTagName(t)[0]; return el?el.textContent:''; };
+    const title=get('title');
+    let link=get('link'); const m=link.match(/[?&]url=([^&]+)/); if(m){ try{ link=decodeURIComponent(m[1]); }catch(e){} }
+    const pub=get('pubDate');
+    let desc=get('description').replace(/<!\[CDATA\[|\]\]>/g,'').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
+    let src=get('News:Source')||get('Source');
+    let host=''; try{ host=new URL(link).hostname.replace(/^www\./,''); }catch(e){}
+    if(!src) src=host;
+    const d=pub?new Date(pub):null;
+    return {title,link,src,host,desc,d:(d&&!isNaN(d))?d:null};
+  });
 }
 async function fetchNews(sym){
   const box=document.getElementById('newsList');
   if(!box) return;
   box.innerHTML='<div class="hint">Haberler yükleniyor…</div>';
   try{
-    const r=await fetch('/news?q='+encodeURIComponent(sym+' stock'));
-    const xml=await r.text();
-    const doc=new DOMParser().parseFromString(xml,'application/xml');
-    let items=[...doc.querySelectorAll('item')].map(it=>{
-      const get=t=>{ const el=it.getElementsByTagName(t)[0]; return el?el.textContent:''; };
-      const title=get('title');
-      // Bing apiclick linkinden gerçek yayıncı adresini çıkar (?url=...)
-      let link=get('link');
-      const m=link.match(/[?&]url=([^&]+)/);
-      if(m){ try{ link=decodeURIComponent(m[1]); }catch(e){} }
-      const pub=get('pubDate');
-      // Özet: <description> içindeki CDATA/HTML temizlenir
-      let desc=get('description').replace(/<!\[CDATA\[|\]\]>/g,'').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
-      // Kaynak: <News:Source> ya da adresten alan adı
-      let src=get('News:Source')||get('Source');
-      if(!src){ try{ src=new URL(link).hostname.replace(/^www\./,''); }catch(e){} }
-      const d=pub?new Date(pub):null;
-      return {title,link,src,desc,d:(d&&!isNaN(d))?d:null};
+    // İki sorgu: premium kaynaklar + genel — paralel
+    const [xPrem, xGen]=await Promise.all([
+      fetch('/news?q='+encodeURIComponent(sym+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
+      fetch('/news?q='+encodeURIComponent(sym+' stock')).then(r=>r.text()).catch(()=>'')
+    ]);
+    let items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
+
+    // MSN'i ele (msn.com host'u ya da "... on MSN" kaynağı) — MSNBC hariç tutulmaz
+    items=items.filter(it=> !/(^|\.)msn\.com$/i.test(it.host||'') && !/\bon msn\b|^\s*msn\s*$/i.test(it.src||''));
+
+    // Tekrarları temizle (host+yol ya da başlık)
+    const seen=new Set();
+    items=items.filter(it=>{
+      let key=(it.title||'').slice(0,60).toLowerCase();
+      try{ const u=new URL(it.link); key=u.hostname.replace(/^www\./,'')+u.pathname; }catch(e){}
+      if(seen.has(key)) return false; seen.add(key); return true;
     });
-    // En güncel önce
-    items.sort((a,b)=> (b.d?b.d.getTime():0) - (a.d?a.d.getTime():0));
+
+    // Üst düzey kaynak önce, sonra en güncel
+    const tier=it=>{ const s=((it.src||'')+' '+(it.host||'')).toLowerCase(); const i=TOP_SOURCES.findIndex(t=>s.includes(t)); return i<0?999:i; };
+    items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
     items=items.slice(0,8);
     if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
 
-    // Başlık ve özetleri Türkçe'ye çevir (paralel, anahtarsız köprü)
-    const [trTitles, trDescs] = await Promise.all([
-      translateTR(items.map(i=>i.title)),
-      translateTR(items.map(i=>i.desc||'—'))
-    ]);
+    // Başlık + özetleri tek havuzda Türkçe'ye çevir (eşzamanlılık sınırlı → İngilizce'ye düşmez)
+    const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
+    const tr=await translateTR(allTexts);
+    const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
       const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
-        <div class="news-sum">${sum}<br><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Kaynakta tüm haberi oku →</a></div>
+        <div class="news-sum">${sum}<br><a href="${gtUrl(it.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 Haberi Türkçe oku →</a><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="margin-left:16px;color:var(--muted);font-weight:500">Orijinal (İng.)</a></div>
       </div>`;
     }).join('');
   }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
