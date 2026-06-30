@@ -126,6 +126,27 @@
   .news.open .news-sum{display:block}
   .news-sum a{display:inline-block;margin-top:8px;font-weight:600;font-size:12px}
 
+  /* Analist hedef fiyatları */
+  .tgt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px}
+  .tgt-box{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
+    border-radius:13px;padding:15px 17px}
+  .tgt-box .lbl{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px}
+  .tgt-box .big{font-size:25px;font-weight:800;color:var(--ink)}
+  .tgt-box .sm{font-size:12.5px;margin-top:5px}
+  .tgt-range{margin:6px 0 2px}
+  .tgt-track{position:relative;height:10px;border-radius:6px;margin:18px 0 46px;
+    background:linear-gradient(90deg,var(--bad),var(--warn),var(--good))}
+  .tgt-track .mk{position:absolute;top:-6px;width:2px;height:22px;background:var(--ink)}
+  .tgt-track .mk b{position:absolute;left:50%;transform:translateX(-50%);top:22px;white-space:nowrap;
+    font-size:10.5px;font-weight:700;color:var(--ink-2)}
+  .tgt-track .mk.cur{background:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.3)}
+  .tgt-track .mk.cur b{color:#fff}
+  .reco-bar{display:flex;height:22px;border-radius:7px;overflow:hidden;border:1px solid var(--line);margin:8px 0}
+  .reco-bar > span{display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#0a0d1a}
+  .reco-leg{display:flex;flex-wrap:wrap;gap:12px;color:var(--muted);font-size:11.5px;margin-top:6px}
+  .reco-leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .grade{font-weight:700} .grade.g-buy{color:var(--good)} .grade.g-hold{color:var(--warn)} .grade.g-sell{color:var(--bad)}
+
   .hidden{display:none}
   .row-actions{width:34px;text-align:center}
   .delrow{color:var(--muted);cursor:pointer;border:none;background:none;font-size:15px;padding:2px 6px}
@@ -327,6 +348,12 @@
       <h2>Güncel Haberler</h2>
       <div class="sub">Bu şirketle ilgili son haber başlıkları (Bing News). Başlığa tıklayınca <b>özeti uygulama içinde</b> açılır; istersen "Kaynakta tüm haberi oku" ile siteye gidebilirsin.</div>
       <div id="newsList"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="targetCard">
+      <h2>Analist Hedef Fiyatları</h2>
+      <div class="sub">Büyük ABD bankaları ve aracı kurumlarının konsensüs hedef fiyatı, tavsiye dağılımı ve en güncel not değişiklikleri (kaynak: Yahoo Finance). Firma başına tam $ hedef ücretli veridir; burada konsensüs + her bankanın güncel notu gösterilir.</div>
+      <div id="targetBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card">
@@ -671,9 +698,94 @@ async function fetchTicker(){
     analyze();
     fetchNews(sym);
     fetchPrice(sym, cik);
+    fetchTargets(sym);
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
+}
+
+/* ---------- Analist hedef fiyatları (Yahoo quoteSummary — anahtarsız köprü) ---------- */
+function gradeClass(g){
+  const s=(g||'').toLowerCase();
+  if(/buy|outperform|overweight|positive|accumulate|add|strong/.test(s)) return 'g-buy';
+  if(/sell|underperform|underweight|reduce|negative/.test(s)) return 'g-sell';
+  return 'g-hold';
+}
+/* Yalnızca en büyük ABD/global banka & aracı kurumlar (Yahoo firma adında geçen parça, küçük harf) */
+const BIG_FIRMS = [
+  'jp morgan','jpmorgan','j.p. morgan','morgan stanley','goldman','bank of america','b of a','bofa','merrill',
+  'citigroup','citi','wells fargo','barclays','ubs','deutsche bank','rbc','bmo','jefferies','evercore',
+  'cowen','stifel','wedbush','piper sandler','raymond james','truist','mizuho','oppenheimer','needham',
+  'keybanc','key banc','baird','cantor','bernstein','guggenheim','wolfe','hsbc','bnp paribas','scotiabank',
+  'scotia','susquehanna','nomura','macquarie','loop capital','william blair','canaccord','citizens'
+];
+const actionTR = { up:'Yükseltti ▲', down:'Düşürdü ▼', main:'Korudu', reit:'Yineledi', init:'Başlattı' };
+const recoTR = { strong_buy:'Güçlü Al', buy:'Al', hold:'Tut', sell:'Sat', strong_sell:'Güçlü Sat', underperform:'Sat', none:'—' };
+async function fetchTargets(sym){
+  const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  try{
+    const r=await fetch('/targets?s='+encodeURIComponent(sym));
+    const j=await r.json();
+    const res=j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
+    if(!res){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
+    const fd=res.financialData||{};
+    const g=o=> (o && typeof o.raw==='number') ? o.raw : null;
+    const cur=g(fd.currentPrice), mean=g(fd.targetMeanPrice), hi=g(fd.targetHighPrice), lo=g(fd.targetLowPrice), n=g(fd.numberOfAnalystOpinions);
+
+    let html='';
+    // 1) Konsensüs kartları
+    if(mean!=null){
+      const up = (cur && mean) ? (mean-cur)/cur*100 : null;
+      const upCls = up==null?'neutral':(up>0?'up':'down');
+      html+=`<div class="tgt-grid">
+        <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+          <div class="big">${fmtUSD(mean)}</div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+          <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
+          <div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div></div>
+        <div class="tgt-box"><div class="lbl">Analist Sayısı</div>
+          <div class="big">${n!=null?n:'—'}</div>
+          <div class="sm neutral">hedef veren kurum</div></div>
+      </div>`;
+    }
+    // 2) Tavsiye dağılımı
+    const tr=res.recommendationTrend && res.recommendationTrend.trend && res.recommendationTrend.trend[0];
+    if(tr){
+      const segs=[['strongBuy','Güçlü Al','#1f9d6b'],['buy','Al','#34d39a'],['hold','Tut','#f3b44e'],['sell','Sat','#f08a5d'],['strongSell','Güçlü Sat','#f06a72']];
+      const tot=segs.reduce((a,[k])=>a+(tr[k]||0),0);
+      if(tot>0){
+        const key=(fd.recommendationKey||'none').toLowerCase();
+        html+=`<div style="margin-bottom:6px"><b>Tavsiye:</b> <span class="grade ${gradeClass(key)}">${recoTR[key]||fd.recommendationKey||'—'}</span>
+          <span class="neutral" style="font-size:12px">· toplam ${tot} analist</span></div>`;
+        html+='<div class="reco-bar">'+segs.map(([k,lbl,c])=>{ const v=tr[k]||0; if(!v)return ''; const w=v/tot*100;
+          return `<span style="width:${w}%;background:${c}" title="${lbl}: ${v}">${w>9?v:''}</span>`; }).join('')+'</div>';
+        html+='<div class="reco-leg">'+segs.map(([k,lbl,c])=>`<span><i style="background:${c}"></i>${lbl}: ${tr[k]||0}</span>`).join('')+'</div>';
+      }
+    }
+    // 3) Firma bazlı son notlar — yalnızca büyük ABD bankaları & aracı kurumlar
+    const histAll=(res.upgradeDowngradeHistory && res.upgradeDowngradeHistory.history) || [];
+    const hist=histAll.filter(x=> BIG_FIRMS.some(f=> (x.firm||'').toLowerCase().includes(f)));
+    if(hist.length){
+      const rows=hist.slice(0,12).map(x=>{
+        const d=new Date((x.epochGradeDate||0)*1000);
+        const ds=isNaN(d)?'':d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+        const act=actionTR[x.action]||x.action||'';
+        const actCls=x.action==='up'?'up':x.action==='down'?'down':'neutral';
+        return `<tr><td>${safeHTML(x.firm||'')}</td>
+          <td><span class="grade ${gradeClass(x.toGrade)}">${safeHTML(x.toGrade||'—')}</span></td>
+          <td class="${actCls}">${act}</td><td>${ds}</td></tr>`;
+      }).join('');
+      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Son Analist Notları — Büyük Banka & Aracı Kurumlar</div>
+        <table style="margin-top:8px"><thead><tr><th>Banka / Aracı Kurum</th><th>Not</th><th>İşlem</th><th>Tarih</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }else if(histAll.length){
+      html+=`<div class="hint" style="margin-top:14px">Bu hisse için büyük banka/aracı kurumlardan güncel not bulunamadı.</div>`;
+    }
+    box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
+  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
 }
 
 /* ---------- Canlı + dönemsel hisse fiyatı (Yahoo Finance — anahtarsız köprü) ---------- */
@@ -923,9 +1035,11 @@ function setPeriodHeaders(curDate, prevDate){
 }
 function hidePriceUI(){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
+  const tc=document.getElementById('targetCard');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
   if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
+  if(tc) tc.classList.add('hidden');
 }
 function loadSample(){
   FIN=null; hidePriceUI();
@@ -1031,7 +1145,7 @@ function analyze(){
 /* ---------- Dışa aktarma: PDF (yazdır) & Excel (CSV) ---------- */
 function exportPDF(){ window.print(); }
 
-function csvCell(s){ s=String(s==null?'':s).replace(/ /g,' ').replace(/\s*\n\s*/g,' ').trim(); return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+function csvCell(s){ s=String(s==null?'':s).replace(/ /g,' ').replace(/\s*\n\s*/g,' ').trim(); return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
 function domTableRows(bodySel){
   const tb=document.querySelector(bodySel); if(!tb) return [];
   return [...tb.querySelectorAll('tr')].map(tr=>[...tr.querySelectorAll('th,td')]
