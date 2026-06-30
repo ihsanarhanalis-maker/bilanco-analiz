@@ -11,8 +11,41 @@ const PORT = process.env.PORT || 8723;  // internette sunucu portu atar; yerelde
 const ROOT = __dirname;
 // SEC, kendini tanıtan bir User-Agent ister:
 const UA = 'Bilanco Analiz Araci (kisisel kullanim; contact@example.com)';
+const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8',
                '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8' };
+
+/* Yahoo quoteSummary (analist hedefleri) için çerez + crumb gerekir. Önbelleğe alınır. */
+let Y_COOKIE = null, Y_CRUMB = null;
+function getYahooAuth(cb){
+  if (Y_COOKIE && Y_CRUMB) return cb(null);
+  https.get('https://fc.yahoo.com/', { headers: { 'User-Agent': BUA } }, r => {
+    const sc = r.headers['set-cookie'];
+    Y_COOKIE = sc ? sc.map(c => c.split(';')[0]).join('; ') : '';
+    r.resume();
+    https.get('https://query2.finance.yahoo.com/v1/test/getcrumb', { headers: { 'User-Agent': BUA, 'Cookie': Y_COOKIE } }, r2 => {
+      let b = ''; r2.on('data', d => b += d); r2.on('end', () => {
+        Y_CRUMB = b.trim();
+        cb(Y_CRUMB ? null : new Error('crumb alinamadi'));
+      });
+    }).on('error', e => cb(e));
+  }).on('error', e => cb(e));
+}
+/* quoteSummary çağrısı; 401 olursa crumb yenileyip bir kez yeniden dener. */
+function yahooSummary(sym, res, retry){
+  getYahooAuth(err => {
+    if (err) { res.writeHead(502); res.end('{}'); return; }
+    const url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(sym) +
+                '?modules=financialData,recommendationTrend,upgradeDowngradeHistory,price&crumb=' + encodeURIComponent(Y_CRUMB);
+    https.get(url, { headers: { 'User-Agent': BUA, 'Cookie': Y_COOKIE } }, pr => {
+      let b = ''; pr.on('data', c => b += c); pr.on('end', () => {
+        if (pr.statusCode === 401 && !retry) { Y_COOKIE = null; Y_CRUMB = null; return yahooSummary(sym, res, true); }
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(b);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{}'); });
+  });
+}
 
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
@@ -54,6 +87,13 @@ http.createServer((req, res) => {
         res.end(body);
       });
     }).on('error', e => { res.writeHead(502); res.end(JSON.stringify({ error: e.message })); });
+    return;
+  }
+
+  // --- Analist hedef fiyatları köprüsü (Yahoo quoteSummary, anahtarsız) ---
+  if (urlPath === '/targets') {
+    const sym = new URLSearchParams(req.url.split('?')[1] || '').get('s') || '';
+    yahooSummary(sym, res, false);
     return;
   }
 
