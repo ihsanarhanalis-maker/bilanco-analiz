@@ -135,10 +135,13 @@ http.createServer((req, res) => {
 
   // --- Çeviri köprüsü (MyMemory, anahtarsız — translate.googleapis.com'un resmi olmayan
   //     scrape uç noktası Render'ın bulut IP'sinde de engellendiği/oran sınırlandığı için
-  //     değiştirildi; MyMemory gerçek bir genel API olduğundan bulut IP'lerini engellemiyor) ---
+  //     değiştirildi; MyMemory gerçek bir genel API olduğundan bulut IP'lerini engellemiyor).
+  //     "de" (iletişim e-postası) parametresi anonim günlük kotayı 5000 -> 10000 kelimeye
+  //     çıkarır ve Render'ın paylaşılan IP'sinin (başka kiracılar yüzünden) o gün tükenmiş
+  //     anonim kotasından ayrı, kendi kotamıza düşmemizi sağlar. ---
   if (urlPath === '/tr') {
     const q = (req.url.split('?')[1] || '').replace(/^q=/, '');
-    const trUrl = 'https://api.mymemory.translated.net/get?langpair=en|tr&q=' + q;
+    const trUrl = 'https://api.mymemory.translated.net/get?langpair=en|tr&de=bilanco.analiz.app@gmail.com&q=' + q;
     https.get(trUrl, { headers: { 'User-Agent': BUA } }, pr => {
       let body = '';
       pr.on('data', c => body += c);
