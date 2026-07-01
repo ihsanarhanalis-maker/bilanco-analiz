@@ -15,7 +15,12 @@ const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8',
                '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8' };
 
-/* Yahoo quoteSummary (analist hedefleri) için çerez + crumb gerekir. Önbelleğe alınır. */
+/* Yahoo quoteSummary (analist hedefleri) için çerez + crumb gerekir. Önbelleğe alınır.
+   Not: fc.yahoo.com küçük/az çerez döner (finance.yahoo.com kök sayfası çok fazla çerez
+   dönüp Node'un header limitini aşıyor — "Header overflow" hatası verir, o yüzden KULLANILMAZ).
+   Yahoo'nun crumb doğrulaması bazı bulut sunucu IP'lerinde (Render, AWS vb.) ara sıra
+   "Invalid Crumb" ile reddedebiliyor — bu Yahoo tarafındaki IP itibarına dayalı bir kısıtlama;
+   aşağıdaki fonksiyon başarısız olursa tüm oturumu (çerez+crumb) yeniden kurup 1 kez daha dener. */
 let Y_COOKIE = null, Y_CRUMB = null;
 function getYahooAuth(cb){
   if (Y_COOKIE && Y_CRUMB) return cb(null);
@@ -26,12 +31,12 @@ function getYahooAuth(cb){
     https.get('https://query2.finance.yahoo.com/v1/test/getcrumb', { headers: { 'User-Agent': BUA, 'Cookie': Y_COOKIE } }, r2 => {
       let b = ''; r2.on('data', d => b += d); r2.on('end', () => {
         Y_CRUMB = b.trim();
-        cb(Y_CRUMB ? null : new Error('crumb alinamadi'));
+        cb(Y_CRUMB && Y_CRUMB.length < 50 ? null : new Error('crumb alinamadi'));
       });
     }).on('error', e => cb(e));
   }).on('error', e => cb(e));
 }
-/* quoteSummary çağrısı; 401 olursa crumb yenileyip bir kez yeniden dener. */
+/* quoteSummary çağrısı; 401/geçersiz crumb olursa oturumu sıfırlayıp bir kez yeniden dener. */
 function yahooSummary(sym, res, retry){
   getYahooAuth(err => {
     if (err) { res.writeHead(502); res.end('{}'); return; }
@@ -39,7 +44,8 @@ function yahooSummary(sym, res, retry){
                 '?modules=financialData,recommendationTrend,upgradeDowngradeHistory,price&crumb=' + encodeURIComponent(Y_CRUMB);
     https.get(url, { headers: { 'User-Agent': BUA, 'Cookie': Y_COOKIE } }, pr => {
       let b = ''; pr.on('data', c => b += c); pr.on('end', () => {
-        if (pr.statusCode === 401 && !retry) { Y_COOKIE = null; Y_CRUMB = null; return yahooSummary(sym, res, true); }
+        const looksInvalid = pr.statusCode === 401 || /Invalid Crumb/i.test(b);
+        if (looksInvalid && !retry) { Y_COOKIE = null; Y_CRUMB = null; return yahooSummary(sym, res, true); }
         res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
         res.end(b);
       });
