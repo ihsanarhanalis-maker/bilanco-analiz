@@ -890,31 +890,55 @@ function relTime(d){
   if(diff<604800) return Math.round(diff/86400)+' gün önce';
   return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
 }
-/* Tek bir metni Türkçe'ye çevir (sunucu /tr köprüsü çoklu yedekli kaynak kullanır → tek tip {text}).
-   Boş/hata olursa kısa beklemeyle 4 kez yeniden dener; son çare orijinal metin. */
+/* --- Çeviri DOĞRUDAN TARAYICIDAN yapılır (sunucu köprüsü DEĞİL). ---
+   Neden: Render'ın veri merkezi IP'si Google Translate & MyMemory tarafından engelleniyor →
+   sunucu tarafı çeviri canlıda hep İngilizce'ye düşüyordu ve her metin için 2 boş denemeyle
+   çok yavaşlıyordu. Her iki servis de "Access-Control-Allow-Origin: *" döndürdüğü için tarayıcı
+   onları doğrudan çağırabilir; tarayıcı KULLANICININ ev IP'sini kullandığından engel yok, hızlı
+   ve canlıda da Türkçe geliyor. */
+async function gTranslate(t){   // Google gtx (kalite en iyi)
+  const u='https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=tr&dt=t&q='+encodeURIComponent(t);
+  const r=await fetch(u); if(!r.ok) throw new Error('g '+r.status);
+  const j=await r.json();
+  if(Array.isArray(j) && Array.isArray(j[0])){ const out=j[0].map(s=>(s&&s[0])?s[0]:'').join('').trim(); if(out) return out; }
+  throw new Error('g bos');
+}
+async function mmTranslate(t){  // MyMemory (yedek)
+  const q=t.length>480?t.slice(0,480):t;
+  const u='https://api.mymemory.translated.net/get?langpair=en|tr&de=bilanco.analiz.app@gmail.com&q='+encodeURIComponent(q);
+  const r=await fetch(u); if(!r.ok) throw new Error('mm '+r.status);
+  const j=await r.json();
+  const out=j&&j.responseData&&j.responseData.translatedText;
+  if(out && !/MYMEMORY WARNING|QUOTA/i.test(out)) return out.trim();
+  throw new Error('mm bos');
+}
+/* Tek bir metni Türkçe'ye çevir: Google → MyMemory → (son çare sunucu /tr) → orijinal.
+   Zincir bir kez düşerse kısa beklemeyle 2 kez yeniden dener. */
 async function translateOne(text, tries){
   const t=(text||'').trim();
   if(!t || t==='—') return text;
   try{
-    const r=await fetch('/tr?q='+encodeURIComponent(t));
-    if(!r.ok) throw new Error('http '+r.status);
-    const j=await r.json();
-    const out=j && typeof j.text==='string' ? j.text.trim() : '';
-    if(out && out.toLowerCase()!==t.toLowerCase()) return out;   // gerçekten çevrildiyse
-    if(out) return out;
-    throw new Error('bos');
+    try{ return await gTranslate(t); }
+    catch(e1){
+      try{ return await mmTranslate(t); }
+      catch(e2){
+        const r=await fetch('/tr?q='+encodeURIComponent(t)); const j=await r.json();
+        const out=j&&typeof j.text==='string'?j.text.trim():'';
+        if(out) return out;
+        throw new Error('hepsi bos');
+      }
+    }
   }catch(e){
-    if((tries||0) < 4){ await new Promise(res=>setTimeout(res, 400*((tries||0)+1))); return translateOne(text,(tries||0)+1); }
+    if((tries||0) < 2){ await new Promise(res=>setTimeout(res, 350*((tries||0)+1))); return translateOne(text,(tries||0)+1); }
     return text;
   }
 }
-/* Diziyi çevir — eşzamanlılığı 3'le sınırla (Google throttle'ını önler, İngilizce'ye düşmez).
-   5 deneme hakkı (translateOne) ile hemen hemen her zaman Türkçe döner; yalnızca art arda
-   5 istek de başarısız olursa (çok nadir) orijinal İngilizce metne düşülür. */
+/* Diziyi çevir — eşzamanlılığı 6'yla sınırla. Çeviri artık doğrudan tarayıcıdan (kullanıcı IP'si)
+   yapıldığı için sunucu turu yok; 6 paralel istek Google'ı zorlamadan tümünü hızlıca çevirir. */
 async function translateTR(arr){
   const out=new Array(arr.length); let idx=0;
   const worker=async()=>{ while(idx<arr.length){ const k=idx++; out[k]=await translateOne(arr[k]); } };
-  await Promise.all([worker(),worker(),worker()]);
+  await Promise.all(Array.from({length:6}, worker));
   return out;
 }
 /* Üst düzey kaynaklar (sıralamada öne alınır; "msn" elenir). Yahoo Finance öne alındı. */
