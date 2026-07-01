@@ -435,6 +435,9 @@ const SAMPLE = [
 
 let CUR = 'TL';  // şirketin raporlama para birimi
 let FIN = null;  // son çekilen şirketin çok yıllı verisi (bilanço + gelir tablosu)
+/* İstek nesli sayacı: hızlı ardışık aramalarda eski (yavaş biten) isteklerin sonucu
+   ekrana geç gelip yanlış şirketin verisini göstermesini engeller. */
+let REQ_GEN = 0;
 const fmt = n => (n===0?'0':Math.round(n).toLocaleString('tr-TR',{maximumFractionDigits:0}));
 const pct = n => (n>=0?'+':'')+n.toFixed(1)+'%';
 /* Okunaklı kısaltma: milyar -> B, milyon -> M, küçükler binlik ayraçla */
@@ -674,9 +677,11 @@ async function fetchTicker(){
   if(!map[sym]){ setStatus('✕ "'+sym+'" ABD borsa listesinde bulunamadı. (BIST/uluslararası kodlar bu kaynakta yok.)','bad'); return; }
   const cik=String(map[sym]).padStart(10,'0');
   setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
+  const myGen=++REQ_GEN;   // bu arama için nesil numarası — sonuçlar yazılırken kontrol edilir
 
   try{
     const { D, I, filed } = await fetchSeries(cik, mode, formPrefix);
+    if(myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
 
     if(!Object.keys(D.assets).length){ setStatus('✕ '+sym+' için bilanço verisi bulunamadı (form: '+formPrefix+').','bad'); return; }
     // Referans dönem tarihleri: toplam aktiften en güncel iki dönem sonu
@@ -687,7 +692,11 @@ async function fetchTicker(){
     CUR='USD';
     // Çok yıllı analiz/grafik/karşılaştırma için sakla
     FIN = { ticker:sym, mode, cur:'USD', D0, D1, balance:D, income:I,
-            filedD0:(filed&&filed[D0])||null, filedD1:(filed&&D1&&filed[D1])||null };
+            filedD0:(filed&&filed[D0])||null,
+            // Not: mali yıl sonu çeyreği (Q4) ayrı bir 10-Q'da raporlanmaz, sadece 10-K'da yer alır.
+            // Bu durumda "ilk açıklanma" araması cari dönemin dosyalama tarihini bulur (filedD1===filedD0) —
+            // bu yanlış/yanıltıcı olur (aynı fiyat iki kez gösterilir). Böyle durumlarda bilinmiyor sayılır.
+            filedD1:(filed&&D1&&filed[D1]&&filed[D1]!==filed[D0])?filed[D1]:null };
 
     const rows=buildRowsFromSEC(D,D0,D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
@@ -696,9 +705,9 @@ async function fetchTicker(){
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
     setStatus(`✓ ${sym} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
     analyze();
-    fetchNews(sym);
-    fetchPrice(sym, cik);
-    fetchTargets(sym);
+    fetchNews(sym, myGen);
+    fetchPrice(sym, cik, myGen);
+    fetchTargets(sym, myGen);
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -721,7 +730,7 @@ const BIG_FIRMS = [
 ];
 const actionTR = { up:'Yükseltti ▲', down:'Düşürdü ▼', main:'Korudu', reit:'Yineledi', init:'Başlattı' };
 const recoTR = { strong_buy:'Güçlü Al', buy:'Al', hold:'Tut', sell:'Sat', strong_sell:'Güçlü Sat', underperform:'Sat', none:'—' };
-async function fetchTargets(sym){
+async function fetchTargets(sym, myGen){
   const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
   if(!card) return;
   card.classList.remove('hidden');
@@ -729,6 +738,7 @@ async function fetchTargets(sym){
   try{
     const r=await fetch('/targets?s='+encodeURIComponent(sym));
     const j=await r.json();
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const res=j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
     if(!res){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
     const fd=res.financialData||{};
@@ -813,7 +823,7 @@ async function fetchShares(cik){
   }
   return null;
 }
-async function fetchPrice(sym, cik){
+async function fetchPrice(sym, cik, myGen){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote');
   const fd0=FIN&&FIN.filedD0, fd1=FIN&&FIN.filedD1;
   try{
@@ -826,6 +836,7 @@ async function fetchPrice(sym, cik){
       fetch(`/price?s=${encodeURIComponent(sym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
       cik? fetchShares(cik) : Promise.resolve(null)
     ]);
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const res = histR&&histR.chart&&histR.chart.result&&histR.chart.result[0];
     const liveRes = liveR&&liveR.chart&&liveR.chart.result&&liveR.chart.result[0];
     if(!res && !liveRes){ lp.classList.add('hidden'); return; }
@@ -937,7 +948,7 @@ function parseNewsXML(xml){
     return {title,link,src,host,desc,d:(d&&!isNaN(d))?d:null};
   });
 }
-async function fetchNews(sym){
+async function fetchNews(sym, myGen){
   const box=document.getElementById('newsList');
   if(!box) return;
   box.innerHTML='<div class="hint">Haberler yükleniyor…</div>';
@@ -947,6 +958,7 @@ async function fetchNews(sym){
       fetch('/news?q='+encodeURIComponent(sym+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
       fetch('/news?q='+encodeURIComponent(sym+' stock')).then(r=>r.text()).catch(()=>'')
     ]);
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     let items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
 
     // MSN'i ele (msn.com host'u ya da "... on MSN" kaynağı) — MSNBC hariç tutulmaz
@@ -969,6 +981,7 @@ async function fetchNews(sym){
     // Başlık + özetleri tek havuzda Türkçe'ye çevir (eşzamanlılık sınırlı → İngilizce'ye düşmez)
     const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
     const tr=await translateTR(allTexts);
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
@@ -1086,13 +1099,13 @@ function hidePriceUI(){
   if(tc) tc.classList.add('hidden');
 }
 function loadSample(){
-  FIN=null; hidePriceUI();
+  REQ_GEN++; FIN=null; hidePriceUI();
   const b=document.getElementById('inputBody'); b.innerHTML='';
   SAMPLE.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
   setPeriodHeaders(null,null);
   analyze();
 }
-function clearAll(){ FIN=null; hidePriceUI(); document.getElementById('inputBody').innerHTML=''; setPeriodHeaders(null,null); document.getElementById('results').classList.add('hidden'); }
+function clearAll(){ REQ_GEN++; FIN=null; hidePriceUI(); document.getElementById('inputBody').innerHTML=''; setPeriodHeaders(null,null); document.getElementById('results').classList.add('hidden'); }
 
 /* ---------- Verileri oku ---------- */
 function readData(){
@@ -1223,7 +1236,7 @@ function exportCSV(){
   }
   section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki','Değişim ($)','Değişim (%)','Yön'], '#varBody');
 
-  const csv='﻿'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
+  const csv='\ufeff'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   const name=(FIN?FIN.ticker:'bilanco')+'-analiz-'+new Date().toISOString().slice(0,10)+'.csv';
