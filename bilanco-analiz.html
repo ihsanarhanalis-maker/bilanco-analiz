@@ -323,6 +323,12 @@
       <div class="grid" id="kpis"></div>
     </div>
 
+    <div class="card hidden" id="valCard">
+      <h2>Değerleme Oranları (Canlı)</h2>
+      <div class="sub">Anlık piyasa fiyatına göre hesaplanır. F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak (Defter Değeri). Sektöre göre yorumlanmalıdır.</div>
+      <div class="grid" id="valBody"></div>
+    </div>
+
     <div class="card" id="incomeCard">
       <h2>Gelir Tablosu & Kârlılık</h2>
       <div class="sub">SEC'ten çekilen gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
@@ -861,15 +867,18 @@ async function fetchPrice(sym, cik, myGen){
       lp.classList.remove('hidden');
     }else lp.classList.add('hidden');
     // Piyasa değeri (≈ canlı fiyat × dolaşımdaki pay) → sağ üstteki rozet
+    const mcap = (live!=null && shares) ? live*shares : null;
     const badge=document.getElementById('hdBadge');
     if(badge){
-      if(live!=null && shares){
+      if(mcap!=null){
         badge.className='hd-badge mcap';
-        badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(live*shares)}</span>`;
+        badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
       }else{
         badge.className='hd-badge'; badge.textContent='SEC EDGAR + Bing News';
       }
     }
+    // Değerleme oranları (canlı): F/K, PD/DD — en güncel piyasa değeri + SEC verisiyle
+    renderValuation(mcap);
     // Dönemsel fiyatlar (açıklandığı gün) — Bilanço Verisi
     const pCur=closeOn(fd0), pPrev=closeOn(fd1);
     const chip=(lbl,date,price,color)=> price==null?'' :
@@ -879,6 +888,42 @@ async function fetchPrice(sym, cik, myGen){
     pn.innerHTML = chip('Cari dönem fiyatı', fd0, pCur, 'var(--accent)') + chip('Önceki dönem fiyatı', fd1, pPrev, 'var(--muted)');
     pn.classList.toggle('hidden', !pn.innerHTML.trim());
   }catch(e){ lp.classList.add('hidden'); }
+}
+
+/* Değerleme oranları (canlı): F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak.
+   "En güncel": Piyasa Değeri anlık fiyattan; Net Kâr yıllık modda son tam yıl, çeyreklik modda
+   son 4 çeyreğin toplamı (TTM); Defter Değeri (özkaynak) en güncel bilançodan. */
+function renderValuation(mcap){
+  const card=document.getElementById('valCard'), box=document.getElementById('valBody');
+  if(!card||!box) return;
+  if(!FIN || mcap==null){ card.classList.add('hidden'); return; }
+  const D=FIN.balance, D0=FIN.D0;
+  const vv=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+  // Defter Değeri (özkaynak) — uygulamanın her yerinde kullanılan sağlam türetme
+  const bookValue = vv(D.assets,D0) - liabTotal(D,D0);
+  // Net Kâr (F/K için): yıllık = son tam yıl; çeyreklik = son 4 çeyrek toplamı (TTM)
+  const niSeries=FIN.income&&FIN.income.netIncome||{};
+  const niDates=Object.keys(niSeries).sort().reverse();
+  let netIncome=null, niLabel='';
+  if(FIN.mode==='quarter'){
+    if(niDates.length>=4){ netIncome=niDates.slice(0,4).reduce((a,d)=>a+niSeries[d],0); niLabel='son 4 çeyrek (TTM)'; }
+  }else if(niDates.length){ netIncome=niSeries[niDates[0]]; niLabel='son yıl ('+String(niDates[0]).slice(0,4)+')'; }
+
+  const fk = (netIncome && netIncome>0) ? mcap/netIncome : null;
+  const pddd = (bookValue && bookValue>0) ? mcap/bookValue : null;
+  const x2=v=> v==null?'—':v.toFixed(2)+'x';
+  // F/K eşik: 0-15 ucuz(iyi), 15-30 orta, >30 pahalı; negatif kâr → hesaplanamaz
+  const fkCls = fk==null?'neutral':(fk<=15?'up':fk<=30?'neutral':'down');
+  const pdCls = pddd==null?'neutral':(pddd<=1.5?'up':pddd<=4?'neutral':'down');
+  const cell=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
+    <div class="val ${cls||''}" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
+    <div class="delta neutral">${sub}</div></div>`;
+  box.innerHTML =
+    cell('Piyasa Değeri (PD)', fmtMcap(mcap), 'anlık fiyat × dolaşımdaki pay') +
+    cell('F/K (Fiyat / Kazanç)', x2(fk), netIncome==null?'net kâr verisi yetersiz':(netIncome<0?'şirket zararda — hesaplanamaz':'Net Kâr: '+fmtMcap(netIncome)+' · '+niLabel), fkCls) +
+    cell('PD/DD (Piyasa Değ. / Defter Değ.)', x2(pddd), bookValue>0?'Defter Değeri: '+fmtMcap(bookValue):'özkaynak negatif — hesaplanamaz', pdCls) +
+    cell('Defter Değeri (DD)', fmtMcap(bookValue), 'özkaynak (en güncel bilanço)');
+  card.classList.remove('hidden');
 }
 
 /* Güncel haberler — Google News (en güncel) + Türkçe çeviri (anahtarsız köprü) */
@@ -1134,11 +1179,12 @@ function setPeriodHeaders(curDate, prevDate){
 }
 function hidePriceUI(){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
-  const tc=document.getElementById('targetCard');
+  const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
   if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
   if(tc) tc.classList.add('hidden');
+  if(vc) vc.classList.add('hidden');
 }
 function loadSample(){
   REQ_GEN++; FIN=null; hidePriceUI();
