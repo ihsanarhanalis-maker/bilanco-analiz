@@ -346,7 +346,7 @@
 
     <div class="card">
       <h2>Güncel Haberler</h2>
-      <div class="sub">Üst düzey kaynaklardan (Bloomberg, CNBC, Reuters, Barron's, WSJ, MarketWatch, Forbes…) bu şirketle ilgili son haberler — Türkçe. Başlığa tıklayınca <b>özeti uygulama içinde</b> açılır; "🌐 Haberi Türkçe oku" ile makalenin tamamını Türkçe okuyabilirsin. (MSN kaynakları gösterilmez.)</div>
+      <div class="sub">Üst düzey kaynaklardan (Bloomberg, CNBC, Reuters, WSJ, MarketWatch, Forbes, Yahoo Finance…) bu şirketle ilgili en az 12 güncel haber — başlık ve özet Türkçe. Başlığa tıklayınca <b>Türkçe özet uygulama içinde</b> açılır; "Orijinal habere git" ile kaynağın İngilizce sayfasına gidersin. (MSN, Barron's, Seeking Alpha gibi sorunlu kaynaklar hiç gösterilmez.)</div>
       <div id="newsList"><div class="hint">—</div></div>
     </div>
 
@@ -890,15 +890,6 @@ function relTime(d){
   if(diff<604800) return Math.round(diff/86400)+' gün önce';
   return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
 }
-/* Bir makale URL'sini Google Translate sayfa-çeviri proxy'sine çevirir (tüm site Türkçe açılır) */
-function gtUrl(u){
-  try{
-    const a=new URL(u);
-    const host=a.hostname.replace(/-/g,'--').replace(/\./g,'-')+'.translate.goog';
-    const sep=a.search?'&':'?';
-    return a.protocol+'//'+host+a.pathname+a.search+sep+'_x_tr_sl=auto&_x_tr_tl=tr&_x_tr_hl=tr&_x_tr_pto=wapp';
-  }catch(e){ return u; }
-}
 /* Tek bir metni Türkçe'ye çevir; hata/boş olursa kısa beklemeyle 2 kez yeniden dener. */
 async function translateOne(text, tries){
   const t=(text||'').trim();
@@ -930,12 +921,9 @@ const TOP_SOURCES = ['yahoo finance','bloomberg','reuters','cnbc','marketwatch',
 const PREMIUM_SITES = '(site:finance.yahoo.com OR site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR '+
   'site:wsj.com OR site:ft.com OR site:marketwatch.com OR site:forbes.com OR site:fortune.com OR '+
   'site:investors.com OR site:businessinsider.com OR site:economist.com OR site:morningstar.com)';
-/* Sorun çıkaran kaynaklar gösterilmez */
+/* Sorun çıkaran/engellenen kaynaklar listede hiç gösterilmez */
 const BLOCK_HOST = /(^|\.)(msn\.com|barrons\.com|seekingalpha\.com)$/i;
 const BLOCK_SRC  = /\bon msn\b|^\s*msn\s*$|barron|seeking ?alpha/i;
-/* Google Translate sayfa-proxy'sini neredeyse hiç kabul etmeyen (bot/paywall engelli) siteler —
-   bunlarda "Türkçe oku" linki yerine sadece orijinal (İngilizce) link gösterilir. */
-const NO_TRANSLATE_HOST = /(^|\.)(wsj\.com|ft\.com|bloomberg\.com)$/i;
 function parseNewsXML(xml){
   const doc=new DOMParser().parseFromString(xml||'','application/xml');
   return [...doc.querySelectorAll('item')].map(it=>{
@@ -979,17 +967,27 @@ async function fetchNews(sym, myGen){
     const tier=it=>{ const s=((it.src||'')+' '+(it.host||'')).toLowerCase(); const i=TOP_SOURCES.findIndex(t=>s.includes(t)); return i<0?999:i; };
     items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
 
-    // Çeşitlilik: aynı kaynaktan en fazla 2 haber → tek bir kaynak listeye hakim olmasın
-    const capped=[], srcCount={};
-    for(const it of items){
+    // Çeşitlilik: önce aynı kaynaktan en fazla 3 haber alınır (tek kaynak listeye hakim olmasın).
+    // Bu sınırla en az 12'ye ulaşılamazsa (kaynak çeşitliliği azsa), aynı sıralamayı koruyarak
+    // eksik kalan yerleri sınırı esnetip aynı kaynaklardan tamamlar → her zaman en az 12 haber.
+    const MIN_ITEMS=12, MAX_ITEMS=16, CAP=3;
+    const included=new Array(items.length).fill(false);
+    const srcCount={};
+    let n=0;
+    items.forEach((it,i)=>{
+      if(n>=MAX_ITEMS) return;
       const key=(it.src||it.host||'').toLowerCase();
       const c=srcCount[key]||0;
-      if(c>=2) continue;
-      srcCount[key]=c+1;
-      capped.push(it);
-      if(capped.length>=8) break;
+      if(c>=CAP) return;
+      srcCount[key]=c+1; included[i]=true; n++;
+    });
+    if(n<MIN_ITEMS){
+      items.forEach((it,i)=>{
+        if(n>=MIN_ITEMS || included[i]) return;
+        included[i]=true; n++;
+      });
     }
-    items=capped;
+    items=items.filter((it,i)=>included[i]);
     if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
 
     // Başlık + özetleri tek havuzda Türkçe'ye çevir (eşzamanlılık sınırlı → İngilizce'ye düşmez)
@@ -1000,13 +998,7 @@ async function fetchNews(sym, myGen){
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
       const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
-      // Bazı siteler (WSJ, FT, Bloomberg) paywall/bot koruması nedeniyle Google Translate
-      // sayfa-proxy'sini neredeyse hiç kabul etmiyor → o linki göstermenin anlamı yok.
-      const noTranslate = NO_TRANSLATE_HOST.test(it.host||'');
-      const links = noTranslate
-        ? `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Orijinal makaleyi oku (İng.) →</a>
-           <div class="hint" style="margin-top:4px">Bu kaynak Google Çeviri'yi engellediği için başlık/özet Türkçesi yukarıda; tam metin İngilizce açılır.</div>`
-        : `<a href="${gtUrl(it.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 Haberi Türkçe oku →</a><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="margin-left:16px;color:var(--muted);font-weight:500">Orijinal (İng.)</a>`;
+      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Orijinal habere git (İng.) →</a>`;
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
