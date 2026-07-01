@@ -922,17 +922,21 @@ async function translateTR(arr){
   await Promise.all([worker(),worker(),worker(),worker()]);
   return out;
 }
-/* Üst düzey kaynaklar (sıralamada öne alınır; "msn" elenir) */
-const TOP_SOURCES = ['bloomberg','reuters','wall street journal','wsj','financial times','ft.com','cnbc',
-  'marketwatch','forbes','fortune','economist','business insider','businessinsider',
+/* Üst düzey kaynaklar (sıralamada öne alınır; "msn" elenir). Yahoo Finance öne alındı. */
+const TOP_SOURCES = ['yahoo finance','bloomberg','reuters','cnbc','marketwatch',
+  'wall street journal','wsj','financial times','ft.com',
+  'forbes','fortune','economist','business insider','businessinsider',
   'investor\'s business','investors.com','morningstar','investing.com',
-  'yahoo finance','benzinga','motley fool','fool.com','thestreet','axios','the information'];
-const PREMIUM_SITES = '(site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR site:wsj.com OR '+
-  'site:ft.com OR site:marketwatch.com OR site:forbes.com OR site:fortune.com OR '+
+  'benzinga','motley fool','fool.com','thestreet','axios','the information'];
+const PREMIUM_SITES = '(site:finance.yahoo.com OR site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR '+
+  'site:wsj.com OR site:ft.com OR site:marketwatch.com OR site:forbes.com OR site:fortune.com OR '+
   'site:investors.com OR site:businessinsider.com OR site:economist.com OR site:morningstar.com)';
-/* Sorun çıkaran / çeviriyi engelleyen kaynaklar gösterilmez */
+/* Sorun çıkaran kaynaklar gösterilmez */
 const BLOCK_HOST = /(^|\.)(msn\.com|barrons\.com|seekingalpha\.com)$/i;
 const BLOCK_SRC  = /\bon msn\b|^\s*msn\s*$|barron|seeking ?alpha/i;
+/* Google Translate sayfa-proxy'sini neredeyse hiç kabul etmeyen (bot/paywall engelli) siteler —
+   bunlarda "Türkçe oku" linki yerine sadece orijinal (İngilizce) link gösterilir. */
+const NO_TRANSLATE_HOST = /(^|\.)(wsj\.com|ft\.com|bloomberg\.com)$/i;
 function parseNewsXML(xml){
   const doc=new DOMParser().parseFromString(xml||'','application/xml');
   return [...doc.querySelectorAll('item')].map(it=>{
@@ -961,8 +965,8 @@ async function fetchNews(sym, myGen){
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     let items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
 
-    // MSN'i ele (msn.com host'u ya da "... on MSN" kaynağı) — MSNBC hariç tutulmaz
-    items=items.filter(it=> !/(^|\.)msn\.com$/i.test(it.host||'') && !/\bon msn\b|^\s*msn\s*$/i.test(it.src||''));
+    // Sorunlu kaynakları ele (MSN, Barron's, Seeking Alpha — çeviri/erişim sorunu çıkarıyor)
+    items=items.filter(it=> !BLOCK_HOST.test(it.host||'') && !BLOCK_SRC.test(it.src||''));
 
     // Tekrarları temizle (host+yol ya da başlık)
     const seen=new Set();
@@ -975,7 +979,18 @@ async function fetchNews(sym, myGen){
     // Üst düzey kaynak önce, sonra en güncel
     const tier=it=>{ const s=((it.src||'')+' '+(it.host||'')).toLowerCase(); const i=TOP_SOURCES.findIndex(t=>s.includes(t)); return i<0?999:i; };
     items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
-    items=items.slice(0,8);
+
+    // Çeşitlilik: aynı kaynaktan en fazla 2 haber → tek bir kaynak listeye hakim olmasın
+    const capped=[], srcCount={};
+    for(const it of items){
+      const key=(it.src||it.host||'').toLowerCase();
+      const c=srcCount[key]||0;
+      if(c>=2) continue;
+      srcCount[key]=c+1;
+      capped.push(it);
+      if(capped.length>=8) break;
+    }
+    items=capped;
     if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
 
     // Başlık + özetleri tek havuzda Türkçe'ye çevir (eşzamanlılık sınırlı → İngilizce'ye düşmez)
@@ -986,10 +1001,17 @@ async function fetchNews(sym, myGen){
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
       const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
+      // Bazı siteler (WSJ, FT, Bloomberg) paywall/bot koruması nedeniyle Google Translate
+      // sayfa-proxy'sini neredeyse hiç kabul etmiyor → o linki göstermenin anlamı yok.
+      const noTranslate = NO_TRANSLATE_HOST.test(it.host||'');
+      const links = noTranslate
+        ? `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Orijinal makaleyi oku (İng.) →</a>
+           <div class="hint" style="margin-top:4px">Bu kaynak Google Çeviri'yi engellediği için başlık/özet Türkçesi yukarıda; tam metin İngilizce açılır.</div>`
+        : `<a href="${gtUrl(it.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 Haberi Türkçe oku →</a><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="margin-left:16px;color:var(--muted);font-weight:500">Orijinal (İng.)</a>`;
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
-        <div class="news-sum">${sum}<br><a href="${gtUrl(it.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 Haberi Türkçe oku →</a><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="margin-left:16px;color:var(--muted);font-weight:500">Orijinal (İng.)</a></div>
+        <div class="news-sum">${sum}<br>${links}</div>
       </div>`;
     }).join('');
   }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
