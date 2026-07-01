@@ -901,15 +901,17 @@ async function translateOne(text, tries){
     if(j && j[0]){ const out=j[0].map(s=>s[0]).join('').trim(); if(out) return out; }
     throw new Error('bos');
   }catch(e){
-    if((tries||0) < 2){ await new Promise(res=>setTimeout(res, 300*((tries||0)+1))); return translateOne(text,(tries||0)+1); }
+    if((tries||0) < 4){ await new Promise(res=>setTimeout(res, 400*((tries||0)+1))); return translateOne(text,(tries||0)+1); }
     return text;
   }
 }
-/* Diziyi çevir — eşzamanlılığı 4'le sınırla (Google throttle'ını önler, İngilizce'ye düşmez) */
+/* Diziyi çevir — eşzamanlılığı 3'le sınırla (Google throttle'ını önler, İngilizce'ye düşmez).
+   5 deneme hakkı (translateOne) ile hemen hemen her zaman Türkçe döner; yalnızca art arda
+   5 istek de başarısız olursa (çok nadir) orijinal İngilizce metne düşülür. */
 async function translateTR(arr){
   const out=new Array(arr.length); let idx=0;
   const worker=async()=>{ while(idx<arr.length){ const k=idx++; out[k]=await translateOne(arr[k]); } };
-  await Promise.all([worker(),worker(),worker(),worker()]);
+  await Promise.all([worker(),worker(),worker()]);
   return out;
 }
 /* Üst düzey kaynaklar (sıralamada öne alınır; "msn" elenir). Yahoo Finance öne alındı. */
