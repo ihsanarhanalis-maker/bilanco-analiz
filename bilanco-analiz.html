@@ -352,7 +352,7 @@
 
     <div class="card hidden" id="targetCard">
       <h2>Analist Hedef Fiyatları</h2>
-      <div class="sub">Büyük ABD bankaları ve aracı kurumlarının konsensüs hedef fiyatı, tavsiye dağılımı ve en güncel not değişiklikleri (kaynak: Yahoo Finance). Firma başına tam $ hedef ücretli veridir; burada konsensüs + her bankanın güncel notu gösterilir.</div>
+      <div class="sub">Büyük ABD bankaları ve aracı kurumlarının konsensüs hedef fiyatı, genel tavsiye ve en güncel not değişiklikleri (kaynak: Finviz). Firma başına hedef fiyat geçmişi ve işlem (yükseltme/düşürme/yineleme) gösterilir.</div>
       <div id="targetBody"><div class="hint">—</div></div>
     </div>
 
@@ -713,14 +713,14 @@ async function fetchTicker(){
   }
 }
 
-/* ---------- Analist hedef fiyatları (Yahoo quoteSummary — anahtarsız köprü) ---------- */
+/* ---------- Analist hedef fiyatları (Finviz — anahtarsız köprü; Yahoo Render'da IP engeli yediği için değiştirildi) ---------- */
 function gradeClass(g){
   const s=(g||'').toLowerCase();
   if(/buy|outperform|overweight|positive|accumulate|add|strong/.test(s)) return 'g-buy';
   if(/sell|underperform|underweight|reduce|negative/.test(s)) return 'g-sell';
   return 'g-hold';
 }
-/* Yalnızca en büyük ABD/global banka & aracı kurumlar (Yahoo firma adında geçen parça, küçük harf) */
+/* Yalnızca en büyük ABD/global banka & aracı kurumlar (Finviz firma adında geçen parça, küçük harf) */
 const BIG_FIRMS = [
   'jp morgan','jpmorgan','j.p. morgan','morgan stanley','goldman','bank of america','b of a','bofa','merrill',
   'citigroup','citi','wells fargo','barclays','ubs','deutsche bank','rbc','bmo','jefferies','evercore',
@@ -728,70 +728,69 @@ const BIG_FIRMS = [
   'keybanc','key banc','baird','cantor','bernstein','guggenheim','wolfe','hsbc','bnp paribas','scotiabank',
   'scotia','susquehanna','nomura','macquarie','loop capital','william blair','canaccord','citizens'
 ];
-const actionTR = { up:'Yükseltti ▲', down:'Düşürdü ▼', main:'Korudu', reit:'Yineledi', init:'Başlattı' };
-const recoTR = { strong_buy:'Güçlü Al', buy:'Al', hold:'Tut', sell:'Sat', strong_sell:'Güçlü Sat', underperform:'Sat', none:'—' };
+const actionTR = { Upgrade:'Yükseltti ▲', Downgrade:'Düşürdü ▼', Reiterated:'Yineledi', Initiated:'Başlattı' };
+/* Finviz "Recom" skoru 1 (Güçlü Al) — 5 (Güçlü Sat) arası ortalama analist puanı */
+function recomLabel(v){
+  if(v==null || isNaN(v)) return null;
+  if(v<=1.5) return ['Güçlü Al','g-buy'];
+  if(v<=2.5) return ['Al','g-buy'];
+  if(v<=3.5) return ['Tut','g-hold'];
+  if(v<=4.5) return ['Sat','g-sell'];
+  return ['Güçlü Sat','g-sell'];
+}
 async function fetchTargets(sym, myGen){
   const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
   if(!card) return;
   card.classList.remove('hidden');
   box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
   try{
-    const r=await fetch('/targets?s='+encodeURIComponent(sym));
-    const j=await r.json();
+    const [tR, pR] = await Promise.all([
+      fetch('/targets?s='+encodeURIComponent(sym)).then(x=>x.json()).catch(()=>null),
+      fetch('/price?s='+encodeURIComponent(sym)+'&range=1d').then(x=>x.json()).catch(()=>null)
+    ]);
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
-    const res=j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
-    if(!res){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
-    const fd=res.financialData||{};
-    const g=o=> (o && typeof o.raw==='number') ? o.raw : null;
-    const cur=g(fd.currentPrice), mean=g(fd.targetMeanPrice), hi=g(fd.targetHighPrice), lo=g(fd.targetLowPrice), n=g(fd.numberOfAnalystOpinions);
+    if(!tR || !tR.ok){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
+    const meta = pR && pR.chart && pR.chart.result && pR.chart.result[0] && pR.chart.result[0].meta;
+    const cur = meta ? meta.regularMarketPrice : null;
+    const mean = tR.targetPrice;
+    const ratings = tR.ratings || [];
 
     let html='';
-    // 1) Konsensüs kartları
-    if(mean!=null){
+    // 1) Konsensüs + tavsiye kartları
+    if(mean!=null || tR.recom!=null){
       const up = (cur && mean) ? (mean-cur)/cur*100 : null;
       const upCls = up==null?'neutral':(up>0?'up':'down');
+      const rl = recomLabel(tR.recom);
       html+=`<div class="tgt-grid">
         <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
           <div class="big">${fmtUSD(mean)}</div>
-          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}</div>
-        <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
-          <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
-          <div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div></div>
-        <div class="tgt-box"><div class="lbl">Analist Sayısı</div>
-          <div class="big">${n!=null?n:'—'}</div>
-          <div class="sm neutral">hedef veren kurum</div></div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+          ${cur!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+          <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+          <div class="sm neutral">${tR.recom!=null?'Finviz skoru: '+tR.recom.toFixed(2)+' (1=Güçlü Al, 5=Güçlü Sat)':''}</div></div>
+        <div class="tgt-box"><div class="lbl">Son Not Sayısı</div>
+          <div class="big">${ratings.length||'—'}</div>
+          <div class="sm neutral">yakın zamandaki değişiklik</div></div>
       </div>`;
     }
-    // 2) Tavsiye dağılımı
-    const tr=res.recommendationTrend && res.recommendationTrend.trend && res.recommendationTrend.trend[0];
-    if(tr){
-      const segs=[['strongBuy','Güçlü Al','#1f9d6b'],['buy','Al','#34d39a'],['hold','Tut','#f3b44e'],['sell','Sat','#f08a5d'],['strongSell','Güçlü Sat','#f06a72']];
-      const tot=segs.reduce((a,[k])=>a+(tr[k]||0),0);
-      if(tot>0){
-        const key=(fd.recommendationKey||'none').toLowerCase();
-        html+=`<div style="margin-bottom:6px"><b>Tavsiye:</b> <span class="grade ${gradeClass(key)}">${recoTR[key]||fd.recommendationKey||'—'}</span>
-          <span class="neutral" style="font-size:12px">· toplam ${tot} analist</span></div>`;
-        html+='<div class="reco-bar">'+segs.map(([k,lbl,c])=>{ const v=tr[k]||0; if(!v)return ''; const w=v/tot*100;
-          return `<span style="width:${w}%;background:${c}" title="${lbl}: ${v}">${w>9?v:''}</span>`; }).join('')+'</div>';
-        html+='<div class="reco-leg">'+segs.map(([k,lbl,c])=>`<span><i style="background:${c}"></i>${lbl}: ${tr[k]||0}</span>`).join('')+'</div>';
-      }
-    }
-    // 3) Firma bazlı son notlar — yalnızca büyük ABD bankaları & aracı kurumlar
-    const histAll=(res.upgradeDowngradeHistory && res.upgradeDowngradeHistory.history) || [];
-    const hist=histAll.filter(x=> BIG_FIRMS.some(f=> (x.firm||'').toLowerCase().includes(f)));
+    // 2) Firma bazlı son notlar — yalnızca büyük ABD bankaları & aracı kurumlar
+    const hist=ratings.filter(x=> BIG_FIRMS.some(f=> (x.firm||'').toLowerCase().includes(f)));
     if(hist.length){
       const rows=hist.slice(0,12).map(x=>{
-        const d=new Date((x.epochGradeDate||0)*1000);
+        const d=new Date((x.date||0)*1000);
         const ds=isNaN(d)?'':d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
-        const act=actionTR[x.action]||x.action||'';
-        const actCls=x.action==='up'?'up':x.action==='down'?'down':'neutral';
+        const act=actionTR[x.action]||x.action||'—';
+        const actCls=x.action==='Upgrade'?'up':x.action==='Downgrade'?'down':'neutral';
         return `<tr><td>${safeHTML(x.firm||'')}</td>
-          <td><span class="grade ${gradeClass(x.toGrade)}">${safeHTML(x.toGrade||'—')}</span></td>
-          <td class="${actCls}">${act}</td><td>${ds}</td></tr>`;
+          <td><span class="grade ${gradeClass(x.rating)}">${safeHTML(x.rating||'—')}</span></td>
+          <td class="${actCls}">${act}</td>
+          <td>${safeHTML(x.priceChange||'—')}</td>
+          <td>${ds}</td></tr>`;
       }).join('');
       html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Son Analist Notları — Büyük Banka & Aracı Kurumlar</div>
-        <table style="margin-top:8px"><thead><tr><th>Banka / Aracı Kurum</th><th>Not</th><th>İşlem</th><th>Tarih</th></tr></thead><tbody>${rows}</tbody></table>`;
-    }else if(histAll.length){
+        <table style="margin-top:8px"><thead><tr><th>Banka / Aracı Kurum</th><th>Not</th><th>İşlem</th><th>Hedef Fiyat</th><th>Tarih</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }else if(ratings.length){
       html+=`<div class="hint" style="margin-top:14px">Bu hisse için büyük banka/aracı kurumlardan güncel not bulunamadı.</div>`;
     }
     box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
@@ -1258,7 +1257,7 @@ function exportCSV(){
   }
   section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki','Değişim ($)','Değişim (%)','Yön'], '#varBody');
 
-  const csv='\ufeff'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
+  const csv='﻿'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   const name=(FIN?FIN.ticker:'bilanco')+'-analiz-'+new Date().toISOString().slice(0,10)+'.csv';

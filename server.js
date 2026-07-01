@@ -15,41 +15,71 @@ const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8',
                '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8' };
 
-/* Yahoo quoteSummary (analist hedefleri) için çerez + crumb gerekir. Önbelleğe alınır.
-   Not: fc.yahoo.com küçük/az çerez döner (finance.yahoo.com kök sayfası çok fazla çerez
-   dönüp Node'un header limitini aşıyor — "Header overflow" hatası verir, o yüzden KULLANILMAZ).
-   Yahoo'nun crumb doğrulaması bazı bulut sunucu IP'lerinde (Render, AWS vb.) ara sıra
-   "Invalid Crumb" ile reddedebiliyor — bu Yahoo tarafındaki IP itibarına dayalı bir kısıtlama;
-   aşağıdaki fonksiyon başarısız olursa tüm oturumu (çerez+crumb) yeniden kurup 1 kez daha dener. */
-let Y_COOKIE = null, Y_CRUMB = null;
-function getYahooAuth(cb){
-  if (Y_COOKIE && Y_CRUMB) return cb(null);
-  https.get('https://fc.yahoo.com/', { headers: { 'User-Agent': BUA } }, r => {
-    const sc = r.headers['set-cookie'];
-    Y_COOKIE = sc ? sc.map(c => c.split(';')[0]).join('; ') : '';
-    r.resume();
-    https.get('https://query2.finance.yahoo.com/v1/test/getcrumb', { headers: { 'User-Agent': BUA, 'Cookie': Y_COOKIE } }, r2 => {
-      let b = ''; r2.on('data', d => b += d); r2.on('end', () => {
-        Y_CRUMB = b.trim();
-        cb(Y_CRUMB && Y_CRUMB.length < 50 ? null : new Error('crumb alinamadi'));
-      });
-    }).on('error', e => cb(e));
+/* Analist hedef fiyatları — Yahoo quoteSummary yerine Finviz'den kazınır.
+   Neden: Yahoo'nun crumb doğrulaması bazı bulut sunucu IP'lerinde (Render, AWS vb.)
+   sürekli "Invalid Crumb" ile reddediyor (IP itibarına dayalı, koddan düzeltilemez).
+   Finviz'in tek şirket sayfası (quote.ashx) anahtarsız, crumb'sız erişilebiliyor ve
+   sayfa içine gömülü bir JSON bloğunda ("chartEvent/ratings") banka bazlı not/hedef
+   fiyat geçmişini de içeriyor — Yahoo'dan bile daha zengin. */
+function extractStat(html, label){
+  const idx = html.indexOf('>' + label + '</a>');
+  if (idx < 0) return null;
+  const slice = html.slice(idx, idx + 400);
+  const m = slice.match(/<b>(?:<span[^>]*>)?([^<]+)/);
+  return m ? m[1].trim() : null;
+}
+function extractRatingEvents(html){
+  const marker = '"eventType":"chartEvent/ratings"';
+  const out = [];
+  let from = 0;
+  while (true) {
+    const mi = html.indexOf(marker, from);
+    if (mi < 0) break;
+    from = mi + marker.length;
+    let start = mi;
+    while (start > 0 && html[start] !== '{') start--;
+    let depth = 0, end = -1;
+    for (let i = start; i < html.length && i < start + 20000; i++) {
+      if (html[i] === '{') depth++;
+      else if (html[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end < 0) continue;
+    try {
+      const obj = JSON.parse(html.slice(start, end + 1));
+      (obj.ratings || []).forEach(r => out.push({
+        date: obj.dateTimestamp,
+        firm: (r.analyst || '').replace(/&amp;/g, '&'),
+        action: r.action || '',
+        rating: (r.rating || '').replace(/&rarr;/g, '→').replace(/&amp;/g, '&'),
+        priceChange: (r.targetPrice || '').replace(/&rarr;/g, '→')
+      }));
+    } catch (e) {}
+  }
+  out.sort((a, b) => (b.date || 0) - (a.date || 0));
+  return out;
+}
+function httpGetHtmlFollow(url, headers, maxRedirects, cb){
+  https.get(url, { headers }, pr => {
+    if ((pr.statusCode === 301 || pr.statusCode === 302) && pr.headers.location && maxRedirects > 0) {
+      pr.resume();
+      const next = new URL(pr.headers.location, url).toString();
+      return httpGetHtmlFollow(next, headers, maxRedirects - 1, cb);
+    }
+    let html = ''; pr.on('data', c => html += c);
+    pr.on('end', () => cb(null, pr.statusCode, html));
   }).on('error', e => cb(e));
 }
-/* quoteSummary çağrısı; 401/geçersiz crumb olursa oturumu sıfırlayıp bir kez yeniden dener. */
-function yahooSummary(sym, res, retry){
-  getYahooAuth(err => {
-    if (err) { res.writeHead(502); res.end('{}'); return; }
-    const url = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + encodeURIComponent(sym) +
-                '?modules=financialData,recommendationTrend,upgradeDowngradeHistory,price&crumb=' + encodeURIComponent(Y_CRUMB);
-    https.get(url, { headers: { 'User-Agent': BUA, 'Cookie': Y_COOKIE } }, pr => {
-      let b = ''; pr.on('data', c => b += c); pr.on('end', () => {
-        const looksInvalid = pr.statusCode === 401 || /Invalid Crumb/i.test(b);
-        if (looksInvalid && !retry) { Y_COOKIE = null; Y_CRUMB = null; return yahooSummary(sym, res, true); }
-        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
-        res.end(b);
-      });
-    }).on('error', e => { res.writeHead(502); res.end('{}'); });
+function finvizTargets(sym, res){
+  const url = 'https://finviz.com/quote.ashx?t=' + encodeURIComponent(sym);
+  httpGetHtmlFollow(url, { 'User-Agent': BUA, 'Accept': 'text/html' }, 4, (err, status, html) => {
+    if (err || status !== 200 || !html) { res.writeHead(200); res.end(JSON.stringify({ ok: false })); return; }
+    const targetPriceRaw = extractStat(html, 'Target Price');
+    const recomRaw = extractStat(html, 'Recom');
+    const targetPrice = targetPriceRaw ? parseFloat(targetPriceRaw) : null;
+    const recom = recomRaw ? parseFloat(recomRaw) : null;
+    const ratings = extractRatingEvents(html).slice(0, 30);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ ok: true, targetPrice, recom, ratings }));
   });
 }
 
@@ -96,10 +126,10 @@ http.createServer((req, res) => {
     return;
   }
 
-  // --- Analist hedef fiyatları köprüsü (Yahoo quoteSummary, anahtarsız) ---
+  // --- Analist hedef fiyatları köprüsü (Finviz, anahtarsız — Yahoo crumb'a bağımlı değil) ---
   if (urlPath === '/targets') {
     const sym = new URLSearchParams(req.url.split('?')[1] || '').get('s') || '';
-    yahooSummary(sym, res, false);
+    finvizTargets(sym, res);
     return;
   }
 
