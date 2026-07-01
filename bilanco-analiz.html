@@ -890,15 +890,17 @@ function relTime(d){
   if(diff<604800) return Math.round(diff/86400)+' gün önce';
   return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
 }
-/* Tek bir metni Türkçe'ye çevir; hata/boş olursa kısa beklemeyle 2 kez yeniden dener. */
+/* Tek bir metni Türkçe'ye çevir (MyMemory köprüsü); hata/boş olursa kısa beklemeyle 4 kez yeniden dener. */
 async function translateOne(text, tries){
   const t=(text||'').trim();
   if(!t || t==='—') return text;
+  const q = t.length>480 ? t.slice(0,480) : t;   // MyMemory anonim istekte ~500 karakter sınırı var
   try{
-    const r=await fetch('/tr?q='+encodeURIComponent(t));
+    const r=await fetch('/tr?q='+encodeURIComponent(q));
     if(!r.ok) throw new Error('http '+r.status);
     const j=await r.json();
-    if(j && j[0]){ const out=j[0].map(s=>s[0]).join('').trim(); if(out) return out; }
+    const out = j && j.responseData && j.responseData.translatedText;
+    if(out && !/MYMEMORY WARNING/i.test(out)) return out.trim();
     throw new Error('bos');
   }catch(e){
     if((tries||0) < 4){ await new Promise(res=>setTimeout(res, 400*((tries||0)+1))); return translateOne(text,(tries||0)+1); }

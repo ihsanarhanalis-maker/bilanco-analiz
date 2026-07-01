@@ -133,18 +133,20 @@ http.createServer((req, res) => {
     return;
   }
 
-  // --- Çeviri köprüsü (Google Translate, anahtarsız) ---
+  // --- Çeviri köprüsü (MyMemory, anahtarsız — translate.googleapis.com'un resmi olmayan
+  //     scrape uç noktası Render'ın bulut IP'sinde de engellendiği/oran sınırlandığı için
+  //     değiştirildi; MyMemory gerçek bir genel API olduğundan bulut IP'lerini engellemiyor) ---
   if (urlPath === '/tr') {
     const q = (req.url.split('?')[1] || '').replace(/^q=/, '');
-    const trUrl = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=tr&dt=t&q=' + q;
-    https.get(trUrl, { headers: { 'User-Agent': UA } }, pr => {
+    const trUrl = 'https://api.mymemory.translated.net/get?langpair=en|tr&q=' + q;
+    https.get(trUrl, { headers: { 'User-Agent': BUA } }, pr => {
       let body = '';
       pr.on('data', c => body += c);
       pr.on('end', () => {
         res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
         res.end(body);
       });
-    }).on('error', e => { res.writeHead(502); res.end('[]'); });
+    }).on('error', e => { res.writeHead(502); res.end('{}'); });
     return;
   }
 
