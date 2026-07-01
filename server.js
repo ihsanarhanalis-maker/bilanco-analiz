@@ -83,6 +83,54 @@ function finvizTargets(sym, res){
   });
 }
 
+/* Basit HTTPS GET → { status, body } döndüren küçük yardımcı (Promise). */
+function httpsGetText(url, headers) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: headers || {} }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => resolve({ status: pr.statusCode, body }));
+    }).on('error', reject);
+  });
+}
+
+/* Metni Türkçe'ye çevir — çoklu YEDEKLİ kaynak zinciri.
+   Neden zincir: tek bir çeviri kaynağı Render'ın PAYLAŞILAN bulut IP'sinde ya oran
+   sınırına takılıyor (Google gtx, ara sıra 429) ya da günlük ücretsiz kotası başka
+   kiracılar yüzünden tükeniyor (MyMemory). İkisini sırayla deneyince biri düşse bile
+   diğeri devreye girip haber neredeyse her zaman Türkçe geliyor.
+   1) Google gtx (kalite en iyi; "Apple" gibi özel adları doğru bırakır)
+   2) MyMemory (yedek; e-posta parametresiyle daha yüksek kota)
+   Sonuç tek tip: { text } — istemci hangi kaynağın döndüğünü bilmek zorunda değil. */
+async function translateToTR(text) {
+  const t = (text || '').trim();
+  if (!t) return '';
+  // 1) Google gtx
+  try {
+    const u = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=tr&dt=t&q=' + encodeURIComponent(t);
+    const r = await httpsGetText(u, { 'User-Agent': BUA });
+    if (r.status === 200) {
+      const j = JSON.parse(r.body);
+      if (Array.isArray(j) && Array.isArray(j[0])) {
+        const out = j[0].map(s => (s && s[0]) ? s[0] : '').join('').trim();
+        if (out) return out;
+      }
+    }
+  } catch (e) {}
+  // 2) MyMemory (yedek)
+  try {
+    const q = t.length > 480 ? t.slice(0, 480) : t;
+    const u = 'https://api.mymemory.translated.net/get?langpair=en|tr&de=bilanco.analiz.app@gmail.com&q=' + encodeURIComponent(q);
+    const r = await httpsGetText(u, { 'User-Agent': BUA });
+    if (r.status === 200) {
+      const j = JSON.parse(r.body);
+      const out = j && j.responseData && j.responseData.translatedText;
+      if (out && !/MYMEMORY WARNING|QUOTA/i.test(out)) return out.trim();
+    }
+  } catch (e) {}
+  return t; // hiçbiri olmazsa orijinal metin
+}
+
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
 
@@ -133,23 +181,17 @@ http.createServer((req, res) => {
     return;
   }
 
-  // --- Çeviri köprüsü (MyMemory, anahtarsız — translate.googleapis.com'un resmi olmayan
-  //     scrape uç noktası Render'ın bulut IP'sinde de engellendiği/oran sınırlandığı için
-  //     değiştirildi; MyMemory gerçek bir genel API olduğundan bulut IP'lerini engellemiyor).
-  //     "de" (iletişim e-postası) parametresi anonim günlük kotayı 5000 -> 10000 kelimeye
-  //     çıkarır ve Render'ın paylaşılan IP'sinin (başka kiracılar yüzünden) o gün tükenmiş
-  //     anonim kotasından ayrı, kendi kotamıza düşmemizi sağlar. ---
+  // --- Çeviri köprüsü (çoklu yedekli: Google gtx → MyMemory) ---
+  //     Yanıt tek tip: { text: "<türkçe>" } (translateToTR yukarıda açıklandı).
   if (urlPath === '/tr') {
-    const q = (req.url.split('?')[1] || '').replace(/^q=/, '');
-    const trUrl = 'https://api.mymemory.translated.net/get?langpair=en|tr&de=bilanco.analiz.app@gmail.com&q=' + q;
-    https.get(trUrl, { headers: { 'User-Agent': BUA } }, pr => {
-      let body = '';
-      pr.on('data', c => body += c);
-      pr.on('end', () => {
-        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
-        res.end(body);
-      });
-    }).on('error', e => { res.writeHead(502); res.end('{}'); });
+    const q = decodeURIComponent((req.url.split('?')[1] || '').replace(/^q=/, ''));
+    translateToTR(q).then(text => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ text }));
+    }).catch(() => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ text: q }));
+    });
     return;
   }
 
