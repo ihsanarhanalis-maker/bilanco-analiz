@@ -290,6 +290,7 @@
     <h2>Bilanço Verisi</h2>
     <div class="sub">Otomatik gelen veriyi buradan düzenleyebilir veya elle girebilirsiniz. Tutarlar şirketin <span id="curNote">para biriminde</span>dir.</div>
     <div id="priceNote" class="hidden" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px"></div>
+    <div id="earnNote" class="hidden" style="margin-bottom:14px"></div>
     <div class="toolbar">
       <button class="primary" onclick="analyze()">🔍 Analiz Et</button>
       <button onclick="loadSample()">📋 Örnek Veri</button>
@@ -853,6 +854,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
     fetchTargetsBIST(sym, myGen);   // kurum bazlı hedef fiyatlar (Fintables; yedek TV konsensüsü)
     fetchKapFeed(sym, myGen);       // KAP bildirimleri (kısa özet + resmi KAP linki)
+    fetchNextEarnings(sym, 'BIST', myGen);
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -910,6 +912,7 @@ async function fetchTicker(){
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
     fetchTargets(sym, myGen);
+    fetchNextEarnings(sym, 'US', myGen);
     const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
@@ -998,6 +1001,37 @@ async function fetchTargets(sym, myGen){
     }
     box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- Sonraki bilanço tarihi (her iki pazar) ----------
+   Kaynak: TradingView scanner `earnings_release_next_date` (beklenen açıklanma tarihi,
+   Unix saniye). BIST için turkey/scan + BIST:SYM; ABD için america/scan — borsa öneki
+   bilinmediğinden NASDAQ/NYSE/AMEX üçü birden sorulur, veri dönen ilk satır alınır.
+   Tarayıcıdan çağrılır (Content-Type başlıksız POST = preflight'sız; TV Origin yansıtır). */
+async function fetchNextEarnings(sym, market, myGen){
+  const el=document.getElementById('earnNote');
+  if(!el) return;
+  el.classList.add('hidden'); el.innerHTML='';
+  try{
+    const scan = market==='BIST' ? 'turkey' : 'america';
+    const tickers = market==='BIST' ? ['BIST:'+sym] : ['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
+    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['earnings_release_next_date']})});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
+    const row=(j.data||[]).find(x=>x.d && x.d[0]!=null);
+    const ts=row && row.d[0];
+    if(!ts) return;
+    const d=new Date(ts*1000);
+    const days=Math.round((d-Date.now())/86400000);
+    const ds=d.toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'});
+    el.innerHTML=`<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:9px;padding:7px 11px;font-size:12px;display:inline-block">
+      <span style="color:var(--muted)">📅 Sonraki bilanço (beklenen):</span>
+      <b style="color:var(--ink);margin-left:5px">${ds}</b>
+      ${days>=0?`<span style="color:var(--muted);margin-left:5px">· ${days===0?'bugün':days+' gün sonra'}</span>`:''}</div>`;
+    el.classList.remove('hidden');
+  }catch(e){}
 }
 
 /* ---------- KAP Bildirimleri (yalnızca BIST) ----------
@@ -1584,12 +1618,14 @@ function setPeriodHeaders(curDate, prevDate){
 function hidePriceUI(){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
   const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard'), kc=document.getElementById('kapCard');
+  const en=document.getElementById('earnNote');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
   if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
   if(tc) tc.classList.add('hidden');
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
+  if(en){ en.classList.add('hidden'); en.innerHTML=''; }
 }
 function loadSample(){
   REQ_GEN++; FIN=null; hidePriceUI();
