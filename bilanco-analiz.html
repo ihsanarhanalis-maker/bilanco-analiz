@@ -356,6 +356,12 @@
       <div id="newsList"><div class="hint">—</div></div>
     </div>
 
+    <div class="card hidden" id="kapCard">
+      <h2>KAP Bildirimleri</h2>
+      <div class="sub">Şirketin Kamuyu Aydınlatma Platformu'na yaptığı son bildirimler — yeni iş ilişkileri, pay alım satımı, sermaye/temettü kararları, derecelendirme vb. Kısa özet burada; başlığa tıklayıp <b>"KAP'ta tam bildirimi oku"</b> ile resmi bildirime gidebilirsin. (Yalnızca BIST hisselerinde görünür.)</div>
+      <div id="kapBody"><div class="hint">—</div></div>
+    </div>
+
     <div class="card hidden" id="targetCard">
       <h2>Analist Hedef Fiyatları</h2>
       <div class="sub">Hisseyi izleyen banka ve aracı kurumların konsensüs hedef fiyatı, genel tavsiye ve dağılım. ABD hisselerinde kaynak Finviz (kurum bazlı not geçmişiyle); BIST hisselerinde kaynak TradingView/Refinitiv (Türk ve uluslararası aracı kurum tahminlerinin konsensüsü: ortalama/en yüksek/en düşük hedef + Al-Tut-Sat dağılımı).</div>
@@ -845,7 +851,8 @@ async function fetchTickerBIST(sym, mode, myGen){
     analyze();
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
-    fetchTargetsBIST(sym, myGen);   // TradingView/Refinitiv konsensüsü (Türk aracı kurum tahminleri)
+    fetchTargetsBIST(sym, myGen);   // kurum bazlı hedef fiyatlar (Fintables; yedek TV konsensüsü)
+    fetchKapFeed(sym, myGen);       // KAP bildirimleri (kısa özet + resmi KAP linki)
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -903,6 +910,7 @@ async function fetchTicker(){
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
     fetchTargets(sym, myGen);
+    const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -990,6 +998,43 @@ async function fetchTargets(sym, myGen){
     }
     box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- KAP Bildirimleri (yalnızca BIST) ----------
+   Kaynak: Fintables topic-feed API'si (CORS *, tarayıcıdan çağrılır — CF gerçek tarayıcıyı
+   geçirir). Akıştaki type==='news' öğeleri KAP bildirimleridir; kap_id ile resmi KAP
+   bildirim sayfasına (kap.org.tr/tr/Bildirim/{id}) link kurulur. KAP'ın kendi API'si
+   bot korumalı olduğundan doğrudan kullanılamıyor. */
+async function fetchKapFeed(sym, myGen){
+  const card=document.getElementById('kapCard'), box=document.getElementById('kapBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">KAP bildirimleri yükleniyor…</div>';
+  try{
+    let url='https://api.fintables.com/topic-feed/?symbols='+encodeURIComponent(sym)+'&for_everyone=1&only_pro=0';
+    const news=[];
+    for(let p=0; p<3 && url && news.length<10; p++){   // akışta bültenler de var → yeterli
+      const r=await fetch(url);                         // bildirim toplanana dek en çok 3 sayfa
+      if(!r.ok) break;
+      const j=await r.json();
+      (j.results||[]).forEach(it=>{ if(it.type==='news' && it.news) news.push(it.news); });
+      url=j.next||null;
+    }
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
+    if(!news.length){ box.innerHTML='<div class="hint">Bu şirket için yakın tarihli KAP bildirimi bulunamadı.</div>'; return; }
+    box.innerHTML=news.slice(0,10).map(n=>{
+      const d=n.published_at?new Date(n.published_at):null;
+      const meta=[n.subject||'', (d&&!isNaN(d))?relTime(d):''].filter(Boolean).join(' · ');
+      const kapLink=n.kap_id?('https://www.kap.org.tr/tr/Bildirim/'+n.kap_id):(n.embed_url||'#');
+      const detay=[n.title, n.note_title, n.note].filter(Boolean).map(safeHTML).join('<br>');
+      return `<div class="news" onclick="toggleNews(this)">
+        <div class="news-t"><span class="chev">▶</span><span>${safeHTML(n.summary||n.subject||'KAP bildirimi')}</span></div>
+        <div class="news-m">${safeHTML(meta)}</div>
+        <div class="news-sum">${detay||safeHTML(n.subject||'')}<br>
+          <a href="${kapLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()">KAP'ta tam bildirimi oku →</a></div>
+      </div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<div class="hint">KAP bildirimleri alınamadı: '+e.message+'</div>'; }
 }
 
 /* ---------- BIST analist hedef fiyatları ----------
@@ -1538,12 +1583,13 @@ function setPeriodHeaders(curDate, prevDate){
 }
 function hidePriceUI(){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
-  const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard');
+  const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard'), kc=document.getElementById('kapCard');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
   if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
   if(tc) tc.classList.add('hidden');
   if(vc) vc.classList.add('hidden');
+  if(kc) kc.classList.add('hidden');
 }
 function loadSample(){
   REQ_GEN++; FIN=null; hidePriceUI();
