@@ -135,9 +135,12 @@ http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
 
   // --- Haber köprüsü (Bing News RSS — linkler gerçek yayıncıya gider) ---
+  //     m=tr parametresi BIST hisseleri için Türkçe haber pazarını seçer.
   if (urlPath === '/news') {
-    const q = (req.url.split('?')[1] || '').replace(/^q=/, '');
-    const newsUrl = 'https://www.bing.com/news/search?q=' + q + '&format=rss&setlang=en-US';
+    const nq = new URLSearchParams(req.url.split('?')[1] || '');
+    const q = encodeURIComponent(nq.get('q') || '');
+    const mkt = nq.get('m') === 'tr' ? '&setlang=tr-TR&cc=TR&mkt=tr-TR' : '&setlang=en-US';
+    const newsUrl = 'https://www.bing.com/news/search?q=' + q + '&format=rss' + mkt;
     https.get(newsUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, pr => {
       let body = '';
       pr.on('data', c => body += c);
@@ -171,6 +174,44 @@ http.createServer((req, res) => {
         res.end(body);
       });
     }).on('error', e => { res.writeHead(502); res.end(JSON.stringify({ error: e.message })); });
+    return;
+  }
+
+  // --- BIST mali tablo köprüsü (İş Yatırım'ın halka açık KAP verisi, anahtarsız) ---
+  //     İstemci year1/period1..year4/period4 + companyCode + financialGroup gönderir;
+  //     parametreler olduğu gibi İş Yatırım'a iletilir. CORS göndermediği için proxy şart.
+  if (urlPath === '/bist') {
+    const qs = req.url.split('?')[1] || '';
+    const bUrl = 'https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/MaliTablo?exchange=TRY&' + qs;
+    https.get(bUrl, { headers: { 'User-Agent': BUA, 'Accept': 'application/json' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"value":[]}'); });
+    return;
+  }
+
+  // --- BIST analist hedef fiyatları YEDEK köprüsü (TradingView tarayıcı API'si) ---
+  //     Birincil yol tarayıcıdan doğrudandır (TV CORS'u origin yansıtır); bu rota yalnızca
+  //     tarayıcı çağrısı başarısız olursa kullanılır.
+  if (urlPath === '/tvt') {
+    const sym = new URLSearchParams(req.url.split('?')[1] || '').get('s') || '';
+    const payload = JSON.stringify({ symbols: { tickers: ['BIST:' + sym] },
+      columns: ['price_target_average','price_target_high','price_target_low','recommendation_total','recommendation_buy','recommendation_over','recommendation_hold','recommendation_under','recommendation_sell','recommendation_mark','close'] });
+    const preq = https.request('https://scanner.tradingview.com/turkey/scan',
+      { method: 'POST', headers: { 'User-Agent': BUA, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } }, pr => {
+        let body = '';
+        pr.on('data', c => body += c);
+        pr.on('end', () => {
+          res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+          res.end(body);
+        });
+      });
+    preq.on('error', e => { res.writeHead(502); res.end('{"data":[]}'); });
+    preq.write(payload); preq.end();
     return;
   }
 

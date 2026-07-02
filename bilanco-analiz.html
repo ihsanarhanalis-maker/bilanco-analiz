@@ -243,7 +243,7 @@
     </div>
     <div>
       <h1>Bilanço Analiz</h1>
-      <p>ABD hisseleri · bilanço, oranlar ve güncel haberler · dolar cinsinden</p>
+      <p>ABD + Borsa İstanbul hisseleri · bilanço, oranlar ve güncel haberler</p>
     </div>
     <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div id="livePrice" class="live-price hidden"></div>
@@ -257,7 +257,7 @@
   <!-- ŞİRKET ARAMA -->
   <div class="card no-print">
     <h2>Hisse Ara</h2>
-    <div class="sub">Bir ABD hissesinin kodunu yaz, <b>Ara</b>'ya bas. Bilanço, oranlar ve güncel haberler dolar cinsinden gelir. Örnek: NVDA, AAPL, MSFT, TSLA, AMZN</div>
+    <div class="sub">ABD veya Borsa İstanbul hissesinin kodunu yaz, <b>Ara</b>'ya bas. ABD örneği: NVDA, AAPL, MSFT · BIST örneği: THYAO, ASELS, TUPRS, GARAN. (Kod iki borsada da varsa BIST için sonuna <b>.IS</b> ekle: örn. SASA.IS)</div>
     <div class="toolbar" style="align-items:center">
       <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()">
       <select id="periodType" class="cell" style="width:auto">
@@ -272,7 +272,7 @@
   <!-- ŞİRKET KARŞILAŞTIRMA -->
   <div class="card no-print">
     <h2>Şirket Karşılaştırma</h2>
-    <div class="sub">2–4 ABD hisse kodunu virgülle ayırarak yaz, oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b></div>
+    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (ABD + BIST karışık olabilir), oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b> veya <b>THYAO, PGSUS</b>. Not: ABD-BIST karışımında mutlak tutarlar USD/TL farklıdır; oranlara (marj, ROE, borçluluk) bakın.</div>
     <div class="toolbar" style="align-items:center">
       <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
       <select id="cmpPeriod" class="cell" style="width:auto">
@@ -358,7 +358,7 @@
 
     <div class="card hidden" id="targetCard">
       <h2>Analist Hedef Fiyatları</h2>
-      <div class="sub">Büyük ABD bankaları ve aracı kurumlarının konsensüs hedef fiyatı, genel tavsiye ve en güncel not değişiklikleri (kaynak: Finviz). Firma başına hedef fiyat geçmişi ve işlem (yükseltme/düşürme/yineleme) gösterilir.</div>
+      <div class="sub">Hisseyi izleyen banka ve aracı kurumların konsensüs hedef fiyatı, genel tavsiye ve dağılım. ABD hisselerinde kaynak Finviz (kurum bazlı not geçmişiyle); BIST hisselerinde kaynak TradingView/Refinitiv (Türk ve uluslararası aracı kurum tahminlerinin konsensüsü: ortalama/en yüksek/en düşük hedef + Al-Tut-Sat dağılımı).</div>
       <div id="targetBody"><div class="hint">—</div></div>
     </div>
 
@@ -399,7 +399,7 @@
 
   <div class="footer">
     Bu araç finansal danışmanlık değildir; sonuçlar nitelikli bir analist tarafından gözden geçirilmelidir.<br>
-    Bilanço verisi: SEC EDGAR · Haberler: Bing News · Hesaplamalar tarayıcınızda yapılır.
+    Bilanço verisi: SEC EDGAR (ABD) + KAP/İş Yatırım (BIST) · Haberler: Bing News · Hesaplamalar tarayıcınızda yapılır.
   </div>
 </div>
 
@@ -439,7 +439,8 @@ const SAMPLE = [
 /* Denge kontrolü (cari): Aktif 9.200.000 = KV 3.670.000 + UV 2.030.000 + Özkaynak 3.500.000
    Denge kontrolü (önceki): Aktif 8.220.000 = KV 2.390.000 + UV 2.260.000 + Özkaynak 3.570.000 */
 
-let CUR = 'TL';  // şirketin raporlama para birimi
+let CUR = 'TL';     // şirketin raporlama para birimi
+let CURSYM = '$';   // fiyat/değer gösterimlerinde kullanılan sembol (ABD: $, BIST: ₺)
 let FIN = null;  // son çekilen şirketin çok yıllı verisi (bilanço + gelir tablosu)
 /* İstek nesli sayacı: hızlı ardışık aramalarda eski (yavaş biten) isteklerin sonucu
    ekrana geç gelip yanlış şirketin verisini göstermesini engeller. */
@@ -583,15 +584,26 @@ async function fetchSeries(cik, mode, formPrefix){
   return { D, I, filed };
 }
 
-/* Tek bir hissenin karşılaştırma metriklerini hesaplar (DOM'a dokunmaz). */
+/* Tek bir hissenin karşılaştırma metriklerini hesaplar (DOM'a dokunmaz).
+   ABD listesinde yoksa BIST'ten dener → ABD ve BIST hisseleri yan yana karşılaştırılabilir
+   (mutlak tutarlar USD/TL karışık olur; oranlar birimden bağımsızdır). */
 async function fetchMetrics(sym, mode){
   const map=window.CIK_MAP||{};
-  if(!map[sym]) return { sym, ok:false, err:'listede yok' };
-  const cik=String(map[sym]).padStart(10,'0');
-  const formPrefix = mode==='annual' ? '10-K' : '10-Q';
+  const forceBist=/\.IS$/.test(sym);
+  const bSym=forceBist?sym.replace(/\.IS$/,''):sym;
   let D,I;
-  try{ ({D,I}=await fetchSeries(cik,mode,formPrefix)); }
-  catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+  if(!forceBist && map[sym]){
+    const cik=String(map[sym]).padStart(10,'0');
+    const formPrefix = mode==='annual' ? '10-K' : '10-Q';
+    try{ ({D,I}=await fetchSeries(cik,mode,formPrefix)); }
+    catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+  }else{
+    try{
+      const s=await fetchBistSeries(bSym,mode);
+      if(!s) return { sym, ok:false, err:'bulunamadı' };
+      ({D,I}=s);
+    }catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+  }
   if(!Object.keys(D.assets).length) return { sym, ok:false, err:'veri yok' };
   const bd=Object.keys(D.assets).sort().reverse()[0];
   const rd=Object.keys(I.revenue||{}).sort().reverse()[0]||bd;
@@ -670,17 +682,194 @@ function renderComparison(list){
      <div class="hint" style="margin-top:8px">Yeşil = o metrikte en iyi, kırmızı = en kötü değer. Borç/Özkaynak'ta düşük olan iyidir.</div>`;
 }
 
+/* ================== BIST (Borsa İstanbul) veri katmanı ================== */
+/* Kaynak: İş Yatırım'ın halka açık KAP mali tablo servisi (sunucudaki /bist köprüsü).
+   Sanayi/holding şirketleri XI_29 şemasını, bankalar UFRS şemasını kullanır.
+   itemCode'lar sabittir (ör. 1BL = TOPLAM VARLIKLAR, 1Z = banka AKTİF TOPLAMI); değerler TL. */
+const BIST_PERIOD_END = {3:'-03-31', 6:'-06-30', 9:'-09-30', 12:'-12-31'};
+async function bistCall(sym, group, pairs){
+  let qs='companyCode='+encodeURIComponent(sym)+'&financialGroup='+encodeURIComponent(group);
+  pairs.forEach((p,i)=>{ qs+='&year'+(i+1)+'='+p[0]+'&period'+(i+1)+'='+p[1]; });
+  const r=await fetch('/bist?'+qs);
+  if(!r.ok) return null;
+  const j=await r.json();
+  return (j&&j.value&&j.value.length)?{pairs,items:j.value}:null;
+}
+/* Bir çağrının sonuçlarını byCode haritasına işler: itemCode -> { 'YYYY-AA-GG': değer } */
+function bistMerge(byCode, call){
+  if(!call) return;
+  call.items.forEach(it=>{
+    const code=it.itemCode;
+    if(!byCode[code]) byCode[code]={};
+    call.pairs.forEach((p,i)=>{
+      const v=it['value'+(i+1)];
+      if(v==null||v==='') return;
+      const num=Number(v);
+      if(!isNaN(num)) byCode[code][p[0]+BIST_PERIOD_END[p[1]]]=num;
+    });
+  });
+}
+const bc=(byCode,code)=> byCode[code]||{};
+function bcAdd(a,b,sign){ const out={...(a||{})}; Object.keys(b||{}).forEach(d=>{ out[d]=(out[d]||0)+(sign||1)*b[d]; }); return out; }
+function bcAbs(a){ const out={}; Object.keys(a||{}).forEach(d=>out[d]=Math.abs(a[d])); return out; }
+/* Çeyreklik gelir kalemleri KAP'ta KÜMÜLATİFTİR (3/6/9/12 ay) — ABD verisiyle aynı
+   davranış için ayrık çeyreğe çevrilir: q(p) = küm(p) − küm(p−3); Q1 olduğu gibi. */
+function bistDiscreteQuarters(cum){
+  const out={};
+  Object.keys(cum||{}).forEach(d=>{
+    const y=d.slice(0,4), mm=d.slice(5,7);
+    const prevKey={ '06':y+'-03-31', '09':y+'-06-30', '12':y+'-09-30' }[mm];
+    if(!prevKey){ out[d]=cum[d]; return; }
+    if(prevKey in cum) out[d]=cum[d]-cum[prevKey];
+  });
+  return out;
+}
+/* BIST şirketinin serilerini ABD fetchSeries ile AYNI ŞEKİLDE ({D,I}) döndürür →
+   analiz/trend/oran/karşılaştırma kodu hiçbir değişiklik istemeden çalışır. */
+async function fetchBistSeries(sym, mode){
+  const thisY=new Date().getFullYear();
+  let calls;
+  if(mode==='annual'){
+    calls=[ [[thisY,12],[thisY-1,12],[thisY-2,12],[thisY-3,12]],
+            [[thisY-4,12],[thisY-5,12],[thisY-6,12],[thisY-7,12]] ];
+  }else{
+    calls=[ [[thisY,3],[thisY,6],[thisY,9],[thisY,12]],
+            [[thisY-1,3],[thisY-1,6],[thisY-1,9],[thisY-1,12]],
+            [[thisY-2,3],[thisY-2,6],[thisY-2,9],[thisY-2,12]] ];
+  }
+  // Şema tespiti: önce sanayi/holding (XI_29), veri boşsa banka (UFRS)
+  const hasData=c=> c && c.items.some(it=> [1,2,3,4].some(i=> it['value'+i]!=null && it['value'+i]!==''));
+  let group='XI_29';
+  let first=await bistCall(sym, group, calls[0]);
+  if(!hasData(first)){ group='UFRS'; first=await bistCall(sym, group, calls[0]); }
+  if(!hasData(first)) return null;
+  const byCode={};
+  bistMerge(byCode, first);
+  for(let i=1;i<calls.length;i++) bistMerge(byCode, await bistCall(sym, group, calls[i]));
+  // Kod → Türkçe açıklama haritası (banka/sigorta satır etiketleri ve açıklamaya-göre-arama için)
+  const descOf={};
+  first.items.forEach(it=>{ descOf[it.itemCode]=(it.itemDescTr||'').trim(); });
+  const findByDesc=rx=>{ const c=Object.keys(descOf).find(k=> rx.test(descOf[k]) && Object.keys(bc(byCode,k)).length); return c?bc(byCode,c):{}; };
+
+  const D={}, I={};
+  if(group==='XI_29'){
+    D.assets=bc(byCode,'1BL'); D.assetsCur=bc(byCode,'1A');
+    D.cash=bc(byCode,'1AA'); D.stInv=bc(byCode,'1AB'); D.recv=bc(byCode,'1AC'); D.inv=bc(byCode,'1AF');
+    D.ppe=bc(byCode,'1BG'); D.goodwill=bc(byCode,'1BGA'); D.intang=bc(byCode,'1BH'); D.ltInv=bc(byCode,'1BC');
+    D.liabCur=bc(byCode,'2A'); D.liabNoncur=bc(byCode,'2B');
+    D.liab=bcAdd(bc(byCode,'2A'), bc(byCode,'2B'));
+    D.liabEquity=bc(byCode,'2ODB');
+    D.ap=bc(byCode,'2AAGAA'); D.stDebt=bc(byCode,'2AA'); D.defRev=bc(byCode,'2AAGCA'); D.ltDebt=bc(byCode,'2BA');
+    D.equity=bc(byCode,'2O'); D.equityIncl=bc(byCode,'2N'); D.minority=bc(byCode,'2ODA');
+    D.common=bc(byCode,'2OA'); D.retained=bc(byCode,'2OCE');
+    I.revenue=bc(byCode,'3C'); I.costRev=bcAbs(bc(byCode,'3CA'));
+    I.grossProfit=bc(byCode,'3D'); I.opIncome=bc(byCode,'3DF');
+    I.netIncome=Object.keys(bc(byCode,'3Z')).length?bc(byCode,'3Z'):bc(byCode,'3L');
+    I.rnd=bcAbs(bc(byCode,'3DC')); I.interest=bcAbs(bc(byCode,'3HC'));
+  }else{
+    // Banka (UFRS): dönen/duran ayrımı yoktur; ana toplamlar + banka kalemleri
+    D.assets=bc(byCode,'1Z'); D.assetsCur={};
+    D.cash=bc(byCode,'1A'); D.stInv={}; D.recv={}; D.inv={};
+    D.ppe={}; D.goodwill={}; D.intang={}; D.ltInv={};
+    D.liabCur={}; D.liabNoncur={};
+    D.equity=bc(byCode,'2O'); D.equityIncl=bc(byCode,'2O'); D.minority={};
+    D.liab=bcAdd(bc(byCode,'2Z'), bc(byCode,'2O'), -1);   // Pasif Toplamı − Özkaynak
+    D.liabEquity=bc(byCode,'2Z');
+    D.ap={}; D.stDebt={}; D.defRev={}; D.ltDebt={};
+    D.common=bc(byCode,'2OA'); D.retained=bc(byCode,'2OU');
+    // Sigorta şirketlerinde ödenmiş sermaye 2OA'da olmayabilir → açıklamadan bul
+    if(!Object.keys(D.common).length) D.common=findByDesc(/Ödenmiş Sermaye/i);
+    if(!Object.keys(D.retained).length) D.retained=findByDesc(/Geçmiş Y[ıi]llar Kar/i);
+    D.bankKrediler=bc(byCode,'1AF'); D.bankMevduat=bc(byCode,'2A'); D.bankBankalar=bc(byCode,'1AC');
+    // Satır etiketleri gerçek şemadan (banka: "MEVDUAT", sigorta: "Finansal Borçlar" vb.)
+    const clean=s=>(s||'').replace(/^[IVXLC0-9]+[\.\)]\s*/i,'').replace(/^[A-ZÇĞİÖŞÜ0-9]{1,2}-\s*/,'').trim();
+    D.bankLabels={
+      nakit:  clean(descOf['1A'])  || 'Nakit Değerler ve Merkez Bankası',
+      bankalar:clean(descOf['1AC'])|| 'Bankalar',
+      krediler:clean(descOf['1AF'])|| 'Krediler',
+      mevduat: clean(descOf['2A']) || 'Mevduat'
+    };
+    I.revenue=bc(byCode,'3A'); I.costRev=bcAbs(bc(byCode,'3B'));
+    I.grossProfit=bc(byCode,'3C'); I.opIncome=bc(byCode,'3CH');
+    I.netIncome=Object.keys(bc(byCode,'3ZA')).length?bc(byCode,'3ZA'):bc(byCode,'3Z');
+    I.rnd={}; I.interest={};
+  }
+  if(mode==='quarter'){ Object.keys(I).forEach(k=> I[k]=bistDiscreteQuarters(I[k])); }
+  return { D, I, group };
+}
+/* Banka bilançosu satırları (dönen/duran şeması bankaya uymaz → özel kurulum).
+   "Diğer" satırları fark (plug) olduğundan bilanço her zaman dengelenir. */
+function buildRowsBank(D,D0,D1){
+  const v=(m,d)=> (d&&m&&(d in m))?m[d]:0;
+  const L=D.bankLabels||{};
+  const rows=[];
+  const push=(lbl,cat,c,p)=>{ if(c!==0||p!==0) rows.push([lbl,cat,c,p]); };
+  push(L.nakit||'Nakit Değerler ve Merkez Bankası','asset_current', v(D.cash,D0), v(D.cash,D1));
+  push(L.bankalar||'Bankalar','asset_current', v(D.bankBankalar,D0), v(D.bankBankalar,D1));
+  push(L.krediler||'Krediler','asset_noncur', v(D.bankKrediler,D0), v(D.bankKrediler,D1));
+  push('Diğer Varlıklar (Menkul Değerler vb.)','asset_noncur',
+    v(D.assets,D0)-v(D.cash,D0)-v(D.bankBankalar,D0)-v(D.bankKrediler,D0),
+    v(D.assets,D1)-v(D.cash,D1)-v(D.bankBankalar,D1)-v(D.bankKrediler,D1));
+  push(L.mevduat||'Mevduat','liab_current', v(D.bankMevduat,D0), v(D.bankMevduat,D1));
+  push('Diğer Yükümlülükler','liab_noncur',
+    v(D.liabEquity,D0)-v(D.equity,D0)-v(D.bankMevduat,D0),
+    v(D.liabEquity,D1)-v(D.equity,D1)-v(D.bankMevduat,D1));
+  push('Ödenmiş Sermaye','equity', v(D.common,D0), v(D.common,D1));
+  push('Geçmiş Yıllar Kar/Zararı','equity', v(D.retained,D0), v(D.retained,D1));
+  push('Diğer Özkaynak Kalemleri','equity',
+    v(D.equity,D0)-v(D.common,D0)-v(D.retained,D0),
+    v(D.equity,D1)-v(D.common,D1)-v(D.retained,D1));
+  return rows;
+}
+/* BIST hissesi için ana arama akışı (ABD fetchTicker ile aynı adımlar). */
+async function fetchTickerBIST(sym, mode, myGen){
+  try{
+    const s=await fetchBistSeries(sym, mode);
+    if(myGen!==REQ_GEN) return;
+    if(!s || !Object.keys(s.D.assets).length){
+      setStatus('✕ "'+sym+'" ne ABD listesinde ne BIST\'te bulunamadı (ya da mali tablo verisi yok).','bad'); return;
+    }
+    const {D,I,group}=s;
+    const dates=Object.keys(D.assets).sort().reverse();
+    const D0=dates[0], D1=dates[1]||null;
+    CUR='TL'; CURSYM='₺';
+    const shares=(D.common&&D.common[D0])||null;   // Ödenmiş sermaye (nominal 1 TL) ≈ pay adedi
+    FIN={ ticker:sym, mode, cur:'TRY', market:'BIST', bankGroup:group, D0, D1, balance:D, income:I,
+          filedD0:null, filedD1:null, sharesBist:shares };
+    const rows = group==='UFRS' ? buildRowsBank(D,D0,D1) : buildRowsFromSEC(D,D0,D1);
+    const b=document.getElementById('inputBody'); b.innerHTML='';
+    rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+    document.getElementById('curNote').textContent='TL cinsinden';
+    setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+    setStatus(`✓ ${sym} — BIST${group==='UFRS'?' (banka/sigorta)':''} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
+    analyze();
+    fetchNews(sym, myGen);
+    fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
+    fetchTargetsBIST(sym, myGen);   // TradingView/Refinitiv konsensüsü (Türk aracı kurum tahminleri)
+  }catch(e){
+    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+  }
+}
+
 async function fetchTicker(){
   if(location.protocol==='file:'){
     setStatus('⚠ Bu dosyayı çift tıklamak yerine "Bilanco-Baslat.bat" ile açın (anahtarsız veri için yerel köprü gerekir).','bad');
     return;
   }
-  const sym=(document.getElementById('ticker').value||'').trim().toUpperCase();
+  let sym=(document.getElementById('ticker').value||'').trim().toUpperCase();
   if(!sym){ setStatus('Lütfen bir hisse kodu yazın.','bad'); return; }
   const mode=document.getElementById('periodType').value;        // 'annual' | 'quarter'
   const formPrefix = mode==='annual' ? '10-K' : '10-Q';
   const map=window.CIK_MAP||{};
-  if(!map[sym]){ setStatus('✕ "'+sym+'" ABD borsa listesinde bulunamadı. (BIST/uluslararası kodlar bu kaynakta yok.)','bad'); return; }
+  // Pazar tespiti: ".IS" ekiyle yazılmışsa BIST'e zorla; ABD listesinde yoksa BIST dene.
+  const forceBist=/\.IS$/.test(sym);
+  if(forceBist) sym=sym.replace(/\.IS$/,'');
+  if(forceBist || !map[sym]){
+    setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
+    const myGen=++REQ_GEN;
+    fetchTickerBIST(sym, mode, myGen);
+    return;
+  }
   const cik=String(map[sym]).padStart(10,'0');
   setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
   const myGen=++REQ_GEN;   // bu arama için nesil numarası — sonuçlar yazılırken kontrol edilir
@@ -695,9 +884,9 @@ async function fetchTicker(){
     const D0=dates[0], D1=dates[1]||null;
     if(!D1){ setStatus('⚠ '+sym+' için yalnızca tek dönem bulundu; değişim analizi sınırlı olacak.','muted'); }
 
-    CUR='USD';
+    CUR='USD'; CURSYM='$';
     // Çok yıllı analiz/grafik/karşılaştırma için sakla
-    FIN = { ticker:sym, mode, cur:'USD', D0, D1, balance:D, income:I,
+    FIN = { ticker:sym, mode, cur:'USD', market:'US', D0, D1, balance:D, income:I,
             filedD0:(filed&&filed[D0])||null,
             // Not: mali yıl sonu çeyreği (Q4) ayrı bir 10-Q'da raporlanmaz, sadece 10-K'da yer alır.
             // Bu durumda "ilk açıklanma" araması cari dönemin dosyalama tarihini bulur (filedD1===filedD0) —
@@ -803,16 +992,143 @@ async function fetchTargets(sym, myGen){
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
 }
 
+/* ---------- BIST analist hedef fiyatları ----------
+   BİRİNCİL: Fintables analyst-ratings API'si (kurum bazlı: Şeker/İş/Garanti/Ziraat Yatırım…
+   hedef + tavsiye + tarih). CORS açık (*); Cloudflare GERÇEK tarayıcı isteklerini geçirir,
+   sunucu/veri merkezi isteklerini engeller → çağrı bilerek İSTEMCİDE yapılır.
+   YEDEK: TradingView scanner konsensüsü (Content-Type başlıksız POST = preflight'sız;
+   o da olmazsa sunucudaki /tvt köprüsü). */
+const TVT_COLS=['price_target_average','price_target_high','price_target_low','recommendation_total',
+  'recommendation_buy','recommendation_over','recommendation_hold','recommendation_under','recommendation_sell',
+  'recommendation_mark','close'];
+/* TradingView analist skoru: 1=Al … 3=Sat (Finviz'in 1-5 skalasından farklı) */
+function tvMarkLabel(m){
+  if(m==null || isNaN(m)) return null;
+  if(m<=1.3) return ['Güçlü Al','g-buy'];
+  if(m<=1.7) return ['Al','g-buy'];
+  if(m<=2.3) return ['Tut','g-hold'];
+  if(m<=2.7) return ['Sat','g-sell'];
+  return ['Güçlü Sat','g-sell'];
+}
+/* Fintables tavsiye tipi → Türkçe rozet (skor: 1=olumlu, 2=nötr, 3=olumsuz — konsensüs için) */
+const FT_TYPE={
+  al:['Al','g-buy',1], endeks_ustu:['Endeks Üstü','g-buy',1], guclu_al:['Güçlü Al','g-buy',1],
+  tut:['Tut','g-hold',2], endekse_paralel:['Endekse Paralel','g-hold',2], notr:['Nötr','g-hold',2],
+  sat:['Sat','g-sell',3], endeks_alti:['Endeks Altı','g-sell',3]
+};
+async function fetchTargetsBIST(sym, myGen){
+  const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  try{
+    // 1) BİRİNCİL KAYNAK: Fintables (kurum bazlı!) — tarayıcıdan doğrudan (CORS: *).
+    //    Gerçek tarayıcı istekleri Cloudflare'dan geçiyor; sunucu/veri merkezi istekleri geçmez,
+    //    o yüzden bu çağrı bilerek İSTEMCİDE yapılır. Cari fiyat paralel alınır.
+    let ratings=null, cur=null;
+    const [ftR, pR]=await Promise.all([
+      fetch('https://api.fintables.com/analyst-ratings/?code='+encodeURIComponent(sym))
+        .then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('/price?s='+encodeURIComponent(sym+'.IS')+'&range=1d').then(r=>r.json()).catch(()=>null)
+    ]);
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
+    const meta=pR&&pR.chart&&pR.chart.result&&pR.chart.result[0]&&pR.chart.result[0].meta;
+    cur=meta?meta.regularMarketPrice:null;
+    if(ftR && Array.isArray(ftR.results)) ratings=ftR.results;
+
+    let html='';
+    if(ratings && ratings.length){
+      // Son 12 ayın notları; kurum başına en güncel kayıt (liste zaten kurum başına tekil geliyor)
+      const cutoff=Date.now()-365*86400000;
+      const rows=ratings
+        .map(r=>({ firm:(r.brokerage&&(r.brokerage.title||r.brokerage.short_title))||'—',
+                   tgt:(typeof r.price_target==='number')?r.price_target:null,
+                   type:r.type||null, d:new Date(r.published_at) }))
+        .filter(r=> !isNaN(r.d) && r.d.getTime()>=cutoff)
+        .sort((a,b)=>b.d-a.d);
+      // Konsensüs bu listeden hesaplanır (en güncel kurum hedeflerinin ort/en yüksek/en düşük)
+      const tgts=rows.map(r=>r.tgt).filter(v=>v!=null);
+      const mean=tgts.length?tgts.reduce((a,b)=>a+b,0)/tgts.length:null;
+      const hi=tgts.length?Math.max(...tgts):null, lo=tgts.length?Math.min(...tgts):null;
+      const scores=rows.map(r=>FT_TYPE[r.type]&&FT_TYPE[r.type][2]).filter(Boolean);
+      const rl=scores.length?tvMarkLabel(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+      const up=(cur&&mean)?(mean-cur)/cur*100:null;
+      const upCls=up==null?'neutral':(up>0?'up':'down');
+      html+=`<div class="tgt-grid">
+        <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+          <div class="big">${fmtUSD(mean)}</div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+          ${cur!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+          <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
+          <div class="sm neutral">kurum hedef aralığı</div></div>
+        <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+          <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+          <div class="sm neutral">${rows.length} aracı kurum · son 12 ay</div></div>
+      </div>`;
+      // Kurum bazlı tablo — ABD tarafındaki tabloyla aynı düzen
+      const trRows=rows.slice(0,20).map(r=>{
+        const t=FT_TYPE[r.type]||['—','g-hold'];
+        const ds=r.d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+        return `<tr><td>${safeHTML(r.firm)}</td>
+          <td><span class="grade ${t[1]}">${t[0]}</span></td>
+          <td>${r.tgt!=null?fmtUSD(r.tgt):'—'}</td>
+          <td>${ds}</td></tr>`;
+      }).join('');
+      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Aracı Kurum Hedef Fiyatları — Kurum Bazında</div>
+        <table style="margin-top:8px"><thead><tr><th>Aracı Kurum</th><th>Tavsiye</th><th>Hedef Fiyat</th><th>Tarih</th></tr></thead><tbody>${trRows}</tbody></table>
+        <div class="hint" style="margin-top:10px">Kaynak: Fintables (aracı kurum araştırma raporları) · her kurumun en güncel hedefi.</div>`;
+      box.innerHTML=html;
+      return;
+    }
+
+    // 2) YEDEK: Fintables boş/erişilemezse TradingView/Refinitiv konsensüsü (kurum adları olmadan)
+    let d=null;
+    try{
+      const r=await fetch('https://scanner.tradingview.com/turkey/scan',
+        {method:'POST',body:JSON.stringify({symbols:{tickers:['BIST:'+sym]},columns:TVT_COLS})});
+      if(r.ok){ const j=await r.json(); d=j&&j.data&&j.data[0]&&j.data[0].d; }
+    }catch(e){}
+    if(!d){
+      try{ const r=await fetch('/tvt?s='+encodeURIComponent(sym)); const j=await r.json(); d=j&&j.data&&j.data[0]&&j.data[0].d; }catch(e){}
+    }
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(!d || d[0]==null){
+      box.innerHTML='<div class="hint">Bu hisse için analist hedef fiyatı bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
+      return;
+    }
+    const [mean,hi,lo,tot]=d, mark=d[9], close=d[10];
+    const cur2=cur!=null?cur:close;
+    const up=(cur2&&mean)?(mean-cur2)/cur2*100:null;
+    const upCls=up==null?'neutral':(up>0?'up':'down');
+    const rl=tvMarkLabel(mark);
+    box.innerHTML=`<div class="tgt-grid">
+      <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+        <div class="big">${fmtUSD(mean)}</div>
+        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+        ${cur2!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur2)}</div>`:''}</div>
+      <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+        <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
+        <div class="sm neutral">aracı kurum hedef aralığı</div></div>
+      <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+        <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+        <div class="sm neutral">${tot!=null?tot+' aracı kurum analisti':''}</div></div>
+    </div>
+    <div class="hint" style="margin-top:10px">Kurum bazlı liste şu an alınamadı; TradingView/Refinitiv konsensüsü gösteriliyor.</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
 /* ---------- Canlı + dönemsel hisse fiyatı (Yahoo Finance — anahtarsız köprü) ---------- */
-function fmtUSD(n){ return (n==null)?'—':'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-/* Piyasa değeri biçimi: $4,17 T / $281,50 B / $950,00 M */
+/* Not: adı fmtUSD kalsa da aktif para sembolünü (CURSYM: $ veya ₺) kullanır. */
+function fmtUSD(n){ return (n==null)?'—':CURSYM+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+/* Piyasa değeri biçimi: $4,17 T / ₺281,50 B / $950,00 M */
 function fmtMcap(n){
   if(n==null) return '—';
   const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
-  if(n>=1e12) return '$'+two(n/1e12)+' T';
-  if(n>=1e9)  return '$'+two(n/1e9)+' B';
-  if(n>=1e6)  return '$'+two(n/1e6)+' M';
-  return '$'+Math.round(n).toLocaleString('tr-TR');
+  if(n>=1e12) return CURSYM+two(n/1e12)+' T';
+  if(n>=1e9)  return CURSYM+two(n/1e9)+' B';
+  if(n>=1e6)  return CURSYM+two(n/1e6)+' M';
+  return CURSYM+Math.round(n).toLocaleString('tr-TR');
 }
 /* Dolaşımdaki en güncel pay sayısı (SEC dei kapak sayfası; yedek: us-gaap) */
 async function fetchShares(cik){
@@ -828,18 +1144,20 @@ async function fetchShares(cik){
   }
   return null;
 }
-async function fetchPrice(sym, cik, myGen){
+/* opts: { ysym: Yahoo sembolü (BIST için "THYAO.IS"), shares: hazır pay adedi (BIST: ödenmiş sermaye) } */
+async function fetchPrice(sym, cik, myGen, opts){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote');
   const fd0=FIN&&FIN.filedD0, fd1=FIN&&FIN.filedD1;
+  const ysym=(opts&&opts.ysym)||sym;   // Yahoo'ya giden sembol; ekranda sym gösterilir
   try{
     const now=Math.floor(Date.now()/1000)+86400;
     const earliest = fd1||fd0||'2015-01-01';
     const p1=Math.floor(new Date(earliest).getTime()/1000) - 10*86400;
     // Canlı (range=1d) + geçmiş (tarih aralığı) + dolaşımdaki pay sayısı paralel
     const [liveR, histR, shares]=await Promise.all([
-      fetch(`/price?s=${encodeURIComponent(sym)}&range=1d`).then(x=>x.json()).catch(()=>null),
-      fetch(`/price?s=${encodeURIComponent(sym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
-      cik? fetchShares(cik) : Promise.resolve(null)
+      fetch(`/price?s=${encodeURIComponent(ysym)}&range=1d`).then(x=>x.json()).catch(()=>null),
+      fetch(`/price?s=${encodeURIComponent(ysym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
+      (opts&&opts.shares!=null)? Promise.resolve(opts.shares) : (cik? fetchShares(cik) : Promise.resolve(null))
     ]);
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const res = histR&&histR.chart&&histR.chart.result&&histR.chart.result[0];
@@ -998,6 +1316,8 @@ const PREMIUM_SITES = '(site:finance.yahoo.com OR site:bloomberg.com OR site:reu
 /* Sorun çıkaran/engellenen kaynaklar listede hiç gösterilmez */
 const BLOCK_HOST = /(^|\.)(msn\.com|barrons\.com|seekingalpha\.com)$/i;
 const BLOCK_SRC  = /\bon msn\b|^\s*msn\s*$|barron|seeking ?alpha/i;
+/* BIST: düşük öncelikli kaynaklar — yalnızca başka kaynak yoksa listeye girer (en sona atılır) */
+const TR_LOW_SOURCES=/mynet|haberler\.com|sondakika|ensonhaber|internethaber|takvim|aksam|star\.com/i;
 function parseNewsXML(xml){
   const doc=new DOMParser().parseFromString(xml||'','application/xml');
   return [...doc.querySelectorAll('item')].map(it=>{
@@ -1017,14 +1337,45 @@ async function fetchNews(sym, myGen){
   const box=document.getElementById('newsList');
   if(!box) return;
   box.innerHTML='<div class="hint">Haberler yükleniyor…</div>';
+  const isBist = FIN && FIN.market==='BIST';
   try{
-    // İki sorgu: premium kaynaklar + genel — paralel
-    const [xPrem, xGen]=await Promise.all([
-      fetch('/news?q='+encodeURIComponent(sym+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
-      fetch('/news?q='+encodeURIComponent(sym+' stock')).then(r=>r.text()).catch(()=>'')
-    ]);
-    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
-    let items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
+    let items;
+    if(isBist){
+      // BIST: en zengin haber havuzu ŞİRKET ADIYLA çıkıyor (test: "Garanti BBVA" 12 haber,
+      // "GARAN hisse" 4) → şirket adını TradingView'den al (tek hafif çağrı), kod + adla ara.
+      let coName='';
+      try{
+        const r=await fetch('https://scanner.tradingview.com/turkey/scan',
+          {method:'POST',body:JSON.stringify({symbols:{tickers:['BIST:'+sym]},columns:['description']})});
+        if(r.ok){ const j=await r.json(); coName=(j.data&&j.data[0]&&j.data[0].d&&j.data[0].d[0])||''; }
+      }catch(e){}
+      coName=coName.replace(/\b(A\.?[SŞ]\.?|AO|T\.?A\.?[SŞ]\.?|TURKIYE|TÜRKİYE)\b\.?/gi,' ')
+                   .replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' ');
+      const queries=[sym+' hisse', sym, coName].filter(Boolean);
+      const xmls=await Promise.all(queries.map(q=>
+        fetch('/news?q='+encodeURIComponent(q)+'&m=tr').then(r=>r.text()).catch(()=>'')));
+      if(myGen!=null && myGen!==REQ_GEN) return;
+      // Yalın kod sorgusu alakasız sonuç sızdırabilir (örn. "GARAN" bir soyadı da olabilir) →
+      // kod sorgusundan gelenlerde hem kod hem finans/borsa bağlam kelimesi aranır;
+      // "SYM hisse" ve şirket adı sorguları zaten bağlamlı olduğundan olduğu gibi alınır.
+      const finRx=/hisse|borsa|bist|hedef|bilanç|temettü|kâr|kar[ıi]|yatır[ıi]m|halka arz|piyasa|analiz|teknik|fiyat|endeks|finans|sermaye|şirket/i;
+      const fromCode=parseNewsXML(xmls[1]||'').filter(it=>{
+        const txt=((it.title||'')+' '+(it.desc||''));
+        return new RegExp('\\b'+sym+'\\b','i').test(txt) && finRx.test(txt);
+      });
+      items=[...parseNewsXML(xmls[0]||''), ...parseNewsXML(xmls[2]||''), ...fromCode];
+      // Güncellik: 90 günden eski haberler KOŞULSUZ elenir (tarihsizler de elenir)
+      const cutoff=Date.now()-90*86400000;
+      items=items.filter(it=> it.d && it.d.getTime()>=cutoff);
+    }else{
+      // ABD: premium kaynaklar + genel — paralel
+      const [xPrem, xGen]=await Promise.all([
+        fetch('/news?q='+encodeURIComponent(sym+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
+        fetch('/news?q='+encodeURIComponent(sym+' stock')).then(r=>r.text()).catch(()=>'')
+      ]);
+      if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
+      items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
+    }
 
     // Sorunlu kaynakları ele (MSN, Barron's, Seeking Alpha — çeviri/erişim sorunu çıkarıyor)
     items=items.filter(it=> !BLOCK_HOST.test(it.host||'') && !BLOCK_SRC.test(it.src||''));
@@ -1037,9 +1388,16 @@ async function fetchNews(sym, myGen){
       if(seen.has(key)) return false; seen.add(key); return true;
     });
 
-    // Üst düzey kaynak önce, sonra en güncel
-    const tier=it=>{ const s=((it.src||'')+' '+(it.host||'')).toLowerCase(); const i=TOP_SOURCES.findIndex(t=>s.includes(t)); return i<0?999:i; };
-    items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
+    // Sıralama — BIST: EN GÜNCEL en üstte; yalnızca düşük kaliteli kaynaklar (Mynet,
+    // haberler.com vb.) en sona atılır — onlar ancak başka kaynak yoksa görünür.
+    // ABD: üst düzey kaynak önce, sonra en güncel.
+    if(isBist){
+      const trTier=it=> TR_LOW_SOURCES.test(((it.src||'')+' '+(it.host||'')).toLowerCase()) ? 1 : 0;
+      items.sort((a,b)=>{ const t=trTier(a)-trTier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
+    }else{
+      const tier=it=>{ const s=((it.src||'')+' '+(it.host||'')).toLowerCase(); const i=TOP_SOURCES.findIndex(t=>s.includes(t)); return i<0?999:i; };
+      items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
+    }
 
     // Çeşitlilik: önce aynı kaynaktan en fazla 3 haber alınır (tek kaynak listeye hakim olmasın).
     // Bu sınırla en az 12'ye ulaşılamazsa (kaynak çeşitliliği azsa), aynı sıralamayı koruyarak
@@ -1064,15 +1422,16 @@ async function fetchNews(sym, myGen){
     items=items.filter((it,i)=>included[i]);
     if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
 
-    // Başlık + özetleri tek havuzda Türkçe'ye çevir (eşzamanlılık sınırlı → İngilizce'ye düşmez)
+    // Başlık + özetler: BIST haberleri zaten Türkçe → çeviri atlanır (hız + doğruluk);
+    // ABD haberleri tek havuzda Türkçe'ye çevrilir (eşzamanlılık sınırlı)
     const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
-    const tr=await translateTR(allTexts);
+    const tr = isBist ? allTexts : await translateTR(allTexts);
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
       const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
-      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Orijinal habere git (İng.) →</a>`;
+      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${isBist?'Habere git →':'Orijinal habere git (İng.) →'}</a>`;
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
@@ -1269,13 +1628,18 @@ function analyze(){
   const rt=document.getElementById('reportTitle');
   if(rt){
     rt.textContent = FIN
-      ? `${FIN.ticker} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · USD`
+      ? `${FIN.ticker} · ${FIN.market==='BIST'?'BIST':'ABD'} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${FIN.market==='BIST'?'TL':'USD'}`
       : 'Elle girilen veri';
   }
   // Dönem notu: bildirilme tarihi + yıllık veride gecikme açıklaması
   const pn=document.getElementById('periodNote');
   if(pn){
-    if(FIN){
+    if(FIN && FIN.market==='BIST'){
+      const bankTxt = FIN.bankGroup==='UFRS' ? ' <b>Banka/sigorta bilançosu:</b> dönen/duran ayrımı olmadığı için likidite oranları (cari oran vb.) bu şirketlerde sınırlı anlam taşır.' : '';
+      pn.innerHTML = (FIN.mode==='annual'
+        ? `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel tamamlanmış mali yıl. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
+        : `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel açıklanan çeyrek.`) + bankTxt;
+    }else if(FIN){
       const filedTxt = FIN.filedD0 ? `📅 SEC'e bildirilme: ${fmtDate(FIN.filedD0)}.` : '';
       const lagTxt = FIN.mode==='annual'
         ? ` Yıllık rapor (10-K) yılda bir, tamamlanmış mali yıl için yayımlanır — bu en güncel tamamlanmış mali yıldır. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
