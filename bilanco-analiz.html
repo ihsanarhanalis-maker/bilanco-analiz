@@ -248,6 +248,7 @@
     <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div id="livePrice" class="live-price hidden"></div>
       <span id="hdBadge" class="hd-badge">SEC EDGAR + Bing News</span>
+      <div id="nyClock" class="hidden" style="font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:600"></div>
     </div>
   </div>
 </header>
@@ -855,6 +856,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchTargetsBIST(sym, myGen);   // kurum bazlı hedef fiyatlar (Fintables; yedek TV konsensüsü)
     fetchKapFeed(sym, myGen);       // KAP bildirimleri (kısa özet + resmi KAP linki)
     fetchNextEarnings(sym, 'BIST', myGen);
+    stopNyClock();                  // NY saati yalnızca ABD hisselerinde
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -913,6 +915,7 @@ async function fetchTicker(){
     fetchPrice(sym, cik, myGen);
     fetchTargets(sym, myGen);
     fetchNextEarnings(sym, 'US', myGen);
+    startNyClock();   // sağ üstte saniyelik canlı New York saati
     const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
@@ -1001,6 +1004,36 @@ async function fetchTargets(sym, myGen){
     }
     box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- New York canlı saati (yalnızca ABD hissesi görüntülenirken) ----------
+   Saniyede bir güncellenir; 09:30–16:00 NY hafta içi = seans saatleri (resmi tatiller
+   hesaba katılmaz, o yüzden "borsa açık" değil "seans içi" denir). */
+let NY_TIMER=null;
+function startNyClock(){
+  const el=document.getElementById('nyClock');
+  if(!el) return;
+  const fTime=new Intl.DateTimeFormat('tr-TR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const fDay =new Intl.DateTimeFormat('tr-TR',{timeZone:'America/New_York',weekday:'long'});
+  const fNum =new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+  const tick=()=>{
+    const now=new Date();
+    const p=fNum.formatToParts(now), g=t=>p.find(x=>x.type===t)?.value||'';
+    const wd=g('weekday'), mins=parseInt(g('hour'),10)*60+parseInt(g('minute'),10);
+    const inSession=!['Sat','Sun'].includes(wd) && mins>=570 && mins<960;   // 09:30–16:00
+    el.innerHTML='🗽 New York: <span style="color:#fff">'+fTime.format(now)+'</span> · '+fDay.format(now)+
+      (inSession?' · <span style="color:var(--good)">● seans içi</span>'
+                :' · <span style="color:var(--muted)">○ seans dışı</span>');
+  };
+  tick();
+  if(NY_TIMER) clearInterval(NY_TIMER);
+  NY_TIMER=setInterval(tick,1000);
+  el.classList.remove('hidden');
+}
+function stopNyClock(){
+  const el=document.getElementById('nyClock');
+  if(NY_TIMER){ clearInterval(NY_TIMER); NY_TIMER=null; }
+  if(el){ el.classList.add('hidden'); el.innerHTML=''; }
 }
 
 /* ---------- Sonraki bilanço tarihi (her iki pazar) ----------
@@ -1626,6 +1659,7 @@ function hidePriceUI(){
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
+  stopNyClock();
 }
 function loadSample(){
   REQ_GEN++; FIN=null; hidePriceUI();
