@@ -1,0 +1,12 @@
+{
+  "name": "bilanco-analiz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ABD (SEC EDGAR) + BIST (KAP/İş Yatırım) hisseleri için anahtarsız bilanço, gelir tablosu, nakit akışı, fiyat grafiği, analist hedefleri ve haber analiz aracı",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

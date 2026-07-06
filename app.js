@@ -1,0 +1,1992 @@
+/* ---------- Kalem kategorileri ---------- */
+const CATS = {
+  asset_current:  "Dönen Varlık",
+  asset_noncur:   "Duran Varlık",
+  liab_current:   "Kısa Vade Yük.",
+  liab_noncur:    "Uzun Vade Yük.",
+  equity:         "Özkaynak"
+};
+const CAT_GROUP = { // hangi büyük gruba ait
+  asset_current:'asset', asset_noncur:'asset',
+  liab_current:'liab', liab_noncur:'liab', equity:'equity'
+};
+
+/* Örnek bilanço (Türk tipi) */
+const SAMPLE = [
+  ["Nakit ve Nakit Benzerleri","asset_current",450000,620000],
+  ["Ticari Alacaklar","asset_current",1850000,1200000],
+  ["Stoklar","asset_current",2100000,1450000],
+  ["Diğer Dönen Varlıklar","asset_current",320000,280000],
+  ["Maddi Duran Varlıklar","asset_noncur",3400000,3550000],
+  ["Maddi Olmayan Duran Varlıklar","asset_noncur",480000,520000],
+  ["Finansal Yatırımlar (Uzun V.)","asset_noncur",600000,600000],
+  ["Banka Kredileri (Kısa V.)","liab_current",1900000,900000],
+  ["Ticari Borçlar","liab_current",1350000,1100000],
+  ["Diğer Kısa Vadeli Yük.","liab_current",420000,390000],
+  ["Banka Kredileri (Uzun V.)","liab_noncur",1800000,2050000],
+  ["Ertelenmiş Vergi Yük.","liab_noncur",230000,210000],
+  ["Ödenmiş Sermaye","equity",2000000,2000000],
+  ["Geçmiş Yıl Kârları","equity",900000,700000],
+  ["Dönem Net Kârı","equity",600000,870000]
+];
+
+let CUR = 'TL';     // şirketin raporlama para birimi
+let CURSYM = '$';   // fiyat/değer gösterimlerinde kullanılan sembol (ABD: $, BIST: ₺)
+let FIN = null;  // son çekilen şirketin çok yıllı verisi (bilanço + gelir tablosu)
+/* İstek nesli sayacı: hızlı ardışık aramalarda eski (yavaş biten) isteklerin sonucu
+   ekrana geç gelip yanlış şirketin verisini göstermesini engeller. */
+let REQ_GEN = 0;
+const fmt = n => (n===0?'0':Math.round(n).toLocaleString('tr-TR',{maximumFractionDigits:0}));
+const pct = n => (n>=0?'+':'')+n.toFixed(1)+'%';
+/* Okunaklı kısaltma: milyar -> B, milyon -> M, küçükler binlik ayraçla */
+function fmtAbbr(n){
+  if(!n) return '0';
+  const sign=n<0?'-':'', a=Math.abs(n);
+  const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(a>=1e9) return sign+two(a/1e9)+' B';
+  if(a>=1e6) return sign+two(a/1e6)+' M';
+  return sign+Math.round(a).toLocaleString('tr-TR');
+}
+/* ISO tarih -> GG/AA/YYYY */
+const fmtDate = iso => { const p=String(iso).split('-'); return (p.length===3)?`${p[2]}/${p[1]}/${p[0]}`:iso; };
+/* Sayı çöz: "206,80 B" / "5,72 M" / "206.803.000.000" hepsini anlar */
+function num(s){
+  if(typeof s==='number') return s;
+  let str=String(s).trim().toUpperCase();
+  let mult=1;
+  if(/\bB\b|MR|MILYAR|MİLYAR/.test(str)) mult=1e9;
+  else if(/\bM\b|MN|MILYON|MİLYON/.test(str)) mult=1e6;
+  str=str.replace(/[^0-9.,\-]/g,'').replace(/\./g,'').replace(/,/g,'.');
+  const v=parseFloat(str);
+  return isNaN(v)?0:v*mult;
+}
+
+/* ---------- Şirket verisi çekme (SEC EDGAR — anahtarsız) ---------- */
+function setStatus(msg,kind){
+  const el=document.getElementById('fetchStatus');
+  el.textContent=msg;
+  el.style.color = kind==='bad'?'var(--bad)':kind==='good'?'var(--good)':'var(--muted)';
+}
+
+/* ---- Paylaşılan us-gaap kavram tanımları (tekli analiz + karşılaştırma) ---- */
+const CONCEPTS_BALANCE = {
+  assets:        ['Assets'],
+  assetsCur:     ['AssetsCurrent'],
+  cash:          ['CashAndCashEquivalentsAtCarryingValue','CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents'],
+  stInv:         ['ShortTermInvestments','MarketableSecuritiesCurrent','AvailableForSaleSecuritiesCurrent'],
+  recv:          ['AccountsReceivableNetCurrent','ReceivablesNetCurrent'],
+  inv:           ['InventoryNet'],
+  ppe:           ['PropertyPlantAndEquipmentNet'],
+  goodwill:      ['Goodwill'],
+  intang:        ['IntangibleAssetsNetExcludingGoodwill','FiniteLivedIntangibleAssetsNet'],
+  ltInv:         ['LongTermInvestments','MarketableSecuritiesNoncurrent'],
+  liab:          ['Liabilities'],
+  liabCur:       ['LiabilitiesCurrent'],
+  liabNoncur:    ['LiabilitiesNoncurrent'],
+  liabEquity:    ['LiabilitiesAndStockholdersEquity'],
+  ap:            ['AccountsPayableCurrent','AccountsPayableAndAccruedLiabilitiesCurrent'],
+  stDebt:        ['LongTermDebtCurrent','DebtCurrent','ShortTermBorrowings','CommercialPaper'],
+  defRev:        ['ContractWithCustomerLiabilityCurrent','DeferredRevenueCurrent'],
+  ltDebt:        ['LongTermDebtNoncurrent','LongTermDebt'],
+  equity:        ['StockholdersEquity'],
+  equityIncl:    ['StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest'],
+  minority:      ['MinorityInterest'],
+  common:        ['CommonStockValue','CommonStocksIncludingAdditionalPaidInCapital'],
+  retained:      ['RetainedEarningsAccumulatedDeficit'],
+};
+const CONCEPTS_INCOME = {
+  revenue:    ['RevenueFromContractWithCustomerExcludingAssessedTax','Revenues','RevenueFromContractWithCustomerIncludingAssessedTax','SalesRevenueNet'],
+  costRev:    ['CostOfRevenue','CostOfGoodsAndServicesSold','CostOfGoodsSold'],
+  grossProfit:['GrossProfit'],
+  opIncome:   ['OperatingIncomeLoss'],
+  netIncome:  ['NetIncomeLoss','ProfitLoss'],
+  rnd:        ['ResearchAndDevelopmentExpense'],
+  interest:   ['InterestExpense','InterestExpenseDebt','InterestExpenseNonoperating'],
+};
+/* Nakit akış tablosu (süre/akış kavramları — gelir gibi pickDuration ile işlenir) */
+const CONCEPTS_CASHFLOW = {
+  opCF:  ['NetCashProvidedByUsedInOperatingActivities','NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],
+  invCF: ['NetCashProvidedByUsedInInvestingActivities','NetCashProvidedByUsedInInvestingActivitiesContinuingOperations'],
+  finCF: ['NetCashProvidedByUsedInFinancingActivities','NetCashProvidedByUsedInFinancingActivitiesContinuingOperations'],
+  capex: ['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets','PaymentsForCapitalImprovements'],
+  dep:   ['DepreciationDepletionAndAmortization','DepreciationAmortizationAndAccretionNet','DepreciationAndAmortization'],
+};
+
+/* Bir us-gaap kavramının ham USD kayıtlarını çeker (aday etiketleri sırayla dener).
+   Sonuç: doğru formdaki ham kayıt dizisi [{start?,end,val,filed,form}, …]. */
+async function fetchConceptRaw(cik, tags, formPrefix){
+  for(const tag of tags){
+    let j;
+    try{
+      const r=await fetch(`/sec/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`);
+      if(!r.ok) continue;
+      j=await r.json();
+    }catch(e){ continue; }
+    const usd = j.units && (j.units.USD || j.units['USD']);
+    if(!usd) continue;
+    const arr = usd.filter(e=> e.form && e.form.indexOf(formPrefix)===0);
+    if(arr.length) return arr;
+  }
+  return [];
+}
+/* Anlık (stok) kavram: dönem sonuna göre en güncel dosyalamayı al → { 'YYYY-MM-DD': değer } */
+function pickInstant(arr){
+  const map={}, filed={};
+  arr.forEach(e=>{
+    const d=e.end;
+    if(!(d in map) || e.filed>filed[d]){ map[d]=Number(e.val); filed[d]=e.filed; }
+  });
+  return map;
+}
+/* Süre (akış) kavram: dönem uzunluğu moda uyanları al (yıllık ~1 yıl / çeyrek ~3 ay) */
+function pickDuration(arr, mode){
+  const map={}, filed={};
+  arr.forEach(e=>{
+    if(!e.start) return;
+    const days=(new Date(e.end)-new Date(e.start))/86400000;
+    const ok = mode==='annual' ? (days>=300 && days<=400) : (days>=60 && days<=100);
+    if(!ok) return;
+    const d=e.end;
+    if(!(d in map) || e.filed>filed[d]){ map[d]=Number(e.val); filed[d]=e.filed; }
+  });
+  return map;
+}
+/* Geriye dönük uyumluluk: anlık kavram için { tarih: değer } döndürür */
+async function fetchConcept(cik, tags, formPrefix){
+  return pickInstant(await fetchConceptRaw(cik, tags, formPrefix));
+}
+
+/* Bir şirketin tüm bilanço (anlık) + gelir + nakit akış (süre) serilerini çeker.
+   SEC saniye limitini aşmamak için 5'erli gruplar halinde. → { D, I, C, filed } */
+async function fetchSeries(cik, mode, formPrefix){
+  const grab = async (defs)=>{
+    const keys=Object.keys(defs), raw={};
+    for(let i=0;i<keys.length;i+=5){
+      const chunk=keys.slice(i,i+5);
+      const r=await Promise.all(chunk.map(k=>fetchConceptRaw(cik,defs[k],formPrefix)));
+      chunk.forEach((k,j)=>raw[k]=r[j]);
+    }
+    return {keys,raw};
+  };
+  const b=await grab(CONCEPTS_BALANCE);
+  const ic=await grab(CONCEPTS_INCOME);
+  const cf=await grab(CONCEPTS_CASHFLOW);
+  const D={}; b.keys.forEach(k=>D[k]=pickInstant(b.raw[k]));
+  const I={}; ic.keys.forEach(k=>I[k]=pickDuration(ic.raw[k],mode));
+  const C={}; cf.keys.forEach(k=>C[k]=pickDuration(cf.raw[k],mode));
+  // Brüt kâr yoksa gelir − satış maliyetinden türet
+  if(!Object.keys(I.grossProfit).length && Object.keys(I.revenue).length && Object.keys(I.costRev).length){
+    const g={}; Object.keys(I.revenue).forEach(d=>{ if(d in I.costRev) g[d]=I.revenue[d]-I.costRev[d]; }); I.grossProfit=g;
+  }
+  // Toplam aktifin dönem sonuna göre İLK (orijinal) SEC bildirim tarihi — o dönem ilk
+  // açıklandığında. (En güncel 10-K karşılaştırmalı yılları da içerir; en erkeni alırız.)
+  const filed={};
+  (b.raw.assets||[]).forEach(e=>{ if(!(e.end in filed)||e.filed<filed[e.end]) filed[e.end]=e.filed; });
+  return { D, I, C, filed };
+}
+
+/* Tek bir hissenin karşılaştırma metriklerini hesaplar (DOM'a dokunmaz).
+   ABD listesinde yoksa BIST'ten dener → ABD ve BIST hisseleri yan yana karşılaştırılabilir
+   (mutlak tutarlar USD/TL karışık olur; oranlar birimden bağımsızdır). */
+async function fetchMetrics(sym, mode){
+  const map=window.CIK_MAP||{};
+  const forceBist=/\.IS$/.test(sym);
+  const bSym=forceBist?sym.replace(/\.IS$/,''):sym;
+  let D,I;
+  if(!forceBist && map[sym]){
+    const cik=String(map[sym]).padStart(10,'0');
+    const formPrefix = mode==='annual' ? '10-K' : '10-Q';
+    try{ ({D,I}=await fetchSeries(cik,mode,formPrefix)); }
+    catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+  }else{
+    try{
+      const s=await fetchBistSeries(bSym,mode);
+      if(!s) return { sym, ok:false, err:'bulunamadı' };
+      ({D,I}=s);
+    }catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+  }
+  if(!Object.keys(D.assets).length) return { sym, ok:false, err:'veri yok' };
+  const bd=Object.keys(D.assets).sort().reverse()[0];
+  const rd=Object.keys(I.revenue||{}).sort().reverse()[0]||bd;
+  const v=(m,d)=> (d&&m&&(d in m))?m[d]:null;
+  const assets=v(D.assets,bd), assetsCur=v(D.assetsCur,bd),
+        liabCur=v(D.liabCur,bd), inv=v(D.inv,bd)||0;
+  // Sağlam toplam yükümlülük + özkaynak (tekli analizle tutarlı; NCI/mezzanine dahil)
+  const liab=liabTotal(D,bd);
+  const equity=(assets!=null)? assets-liab : equityAllIn(D,bd);
+  const rev=v(I.revenue,rd), ni=v(I.netIncome,rd), gp=v(I.grossProfit,rd), op=v(I.opIncome,rd);
+  const sd=(a,b)=> (a==null||b==null||b===0)?null:a/b;
+  return {
+    sym, ok:true, asOf:bd,
+    revenue:rev, netIncome:ni,
+    netMargin: sd(ni,rev), grossMargin: sd(gp,rev), opMargin: sd(op,rev),
+    roe: sd(ni,equity), roa: sd(ni,assets),
+    current: sd(assetsCur,liabCur),
+    quick: (assetsCur!=null&&liabCur)?(assetsCur-inv)/liabCur:null,
+    debtEq: sd(liab,equity),
+    equityRatio: sd(equity,assets),
+    assets, equity,
+  };
+}
+
+/* ---------- Şirket karşılaştırma ---------- */
+async function compareTickers(){
+  const st=document.getElementById('cmpStatus');
+  if(location.protocol==='file:'){ st.textContent='⚠ Bu dosyayı "Bilanco-Baslat.bat" ile açın.'; st.style.color='var(--bad)'; return; }
+  const raw=(document.getElementById('cmpTickers').value||'').toUpperCase();
+  const syms=[...new Set(raw.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean))].slice(0,4);
+  const mode=document.getElementById('cmpPeriod').value;
+  if(syms.length<2){ st.textContent='En az 2 hisse kodu girin (virgülle ayırın).'; st.style.color='var(--bad)'; return; }
+  st.textContent='⏳ '+syms.join(', ')+' çekiliyor…'; st.style.color='var(--muted)';
+  const data=[];
+  for(const s of syms){ data.push(await fetchMetrics(s,mode)); }   // sıralı: SEC saniye limiti
+  const okData=data.filter(d=>d.ok), bad=data.filter(d=>!d.ok);
+  if(!okData.length){ st.textContent='✕ Hiçbiri için veri alınamadı.'; st.style.color='var(--bad)'; document.getElementById('cmpResult').innerHTML=''; return; }
+  st.textContent='✓ '+okData.map(d=>d.sym).join(', ')+(bad.length?'  ·  alınamadı: '+bad.map(d=>d.sym+' ('+d.err+')').join(', '):'');
+  st.style.color = bad.length?'var(--warn)':'var(--good)';
+  renderComparison(okData);
+}
+function renderComparison(list){
+  const pp=v=>v==null?'—':(v*100).toFixed(1)+'%';
+  const xx=v=>v==null?'—':v.toFixed(2)+'x';
+  const ab=v=>v==null?'—':fmtAbbr(v);
+  // [etiket, anahtar, biçim, yön(+1 yüksek iyi / −1 düşük iyi)]
+  const rows=[
+    ['Gelir (Hasılat)','revenue',ab,1],
+    ['Net Kâr','netIncome',ab,1],
+    ['Brüt Marj','grossMargin',pp,1],
+    ['Faaliyet Marjı','opMargin',pp,1],
+    ['Net Kâr Marjı','netMargin',pp,1],
+    ['Özkaynak Kârlılığı (ROE)','roe',pp,1],
+    ['Aktif Kârlılığı (ROA)','roa',pp,1],
+    ['Cari Oran','current',xx,1],
+    ['Asit-Test','quick',xx,1],
+    ['Borç / Özkaynak','debtEq',xx,-1],
+    ['Özkaynak Oranı','equityRatio',pp,1],
+  ];
+  const head='<tr><th>Metrik</th>'+list.map(d=>`<th>${d.sym}<br><span class="thd">${d.asOf?fmtDate(d.asOf):''}</span></th>`).join('')+'</tr>';
+  const body=rows.map(([lbl,key,fmt,dir])=>{
+    const present=list.map(d=>d[key]).filter(v=>v!=null);
+    const best  = present.length>1 ? (dir>0?Math.max(...present):Math.min(...present)) : null;
+    const worst = present.length>1 ? (dir>0?Math.min(...present):Math.max(...present)) : null;
+    const cells=list.map(d=>{
+      const v=d[key]; let cls='';
+      if(v!=null && best!=null && best!==worst){           // en az iki farklı değer varsa renklendir
+        if(v===best) cls='up'; else if(v===worst) cls='down';
+      }
+      return `<td class="${cls}" style="${cls?'font-weight:700':''}">${fmt(v)}</td>`;
+    }).join('');
+    return `<tr><td>${lbl}</td>${cells}</tr>`;
+  }).join('');
+  document.getElementById('cmpResult').innerHTML =
+    `<table style="margin-top:14px;min-width:480px"><thead>${head}</thead><tbody>${body}</tbody></table>
+     <div class="hint" style="margin-top:8px">Yeşil = o metrikte en iyi, kırmızı = en kötü değer. Borç/Özkaynak'ta düşük olan iyidir.</div>`;
+}
+
+/* ================== BIST (Borsa İstanbul) veri katmanı ================== */
+const BIST_PERIOD_END = {3:'-03-31', 6:'-06-30', 9:'-09-30', 12:'-12-31'};
+async function bistCall(sym, group, pairs){
+  let qs='companyCode='+encodeURIComponent(sym)+'&financialGroup='+encodeURIComponent(group);
+  pairs.forEach((p,i)=>{ qs+='&year'+(i+1)+'='+p[0]+'&period'+(i+1)+'='+p[1]; });
+  const r=await fetch('/bist?'+qs);
+  if(!r.ok) return null;
+  const j=await r.json();
+  return (j&&j.value&&j.value.length)?{pairs,items:j.value}:null;
+}
+function bistMerge(byCode, call){
+  if(!call) return;
+  call.items.forEach(it=>{
+    const code=it.itemCode;
+    if(!byCode[code]) byCode[code]={};
+    call.pairs.forEach((p,i)=>{
+      const v=it['value'+(i+1)];
+      if(v==null||v==='') return;
+      const num=Number(v);
+      if(!isNaN(num)) byCode[code][p[0]+BIST_PERIOD_END[p[1]]]=num;
+    });
+  });
+}
+const bc=(byCode,code)=> byCode[code]||{};
+function bcAdd(a,b,sign){ const out={...(a||{})}; Object.keys(b||{}).forEach(d=>{ out[d]=(out[d]||0)+(sign||1)*b[d]; }); return out; }
+function bcAbs(a){ const out={}; Object.keys(a||{}).forEach(d=>out[d]=Math.abs(a[d])); return out; }
+function bistDiscreteQuarters(cum){
+  const out={};
+  Object.keys(cum||{}).forEach(d=>{
+    const y=d.slice(0,4), mm=d.slice(5,7);
+    const prevKey={ '06':y+'-03-31', '09':y+'-06-30', '12':y+'-09-30' }[mm];
+    if(!prevKey){ out[d]=cum[d]; return; }
+    if(prevKey in cum) out[d]=cum[d]-cum[prevKey];
+  });
+  return out;
+}
+async function fetchBistSeries(sym, mode){
+  const thisY=new Date().getFullYear();
+  let calls;
+  if(mode==='annual'){
+    calls=[ [[thisY,12],[thisY-1,12],[thisY-2,12],[thisY-3,12]],
+            [[thisY-4,12],[thisY-5,12],[thisY-6,12],[thisY-7,12]] ];
+  }else{
+    calls=[ [[thisY,3],[thisY,6],[thisY,9],[thisY,12]],
+            [[thisY-1,3],[thisY-1,6],[thisY-1,9],[thisY-1,12]],
+            [[thisY-2,3],[thisY-2,6],[thisY-2,9],[thisY-2,12]] ];
+  }
+  const hasData=c=> c && c.items.some(it=> [1,2,3,4].some(i=> it['value'+i]!=null && it['value'+i]!==''));
+  let group='XI_29';
+  let first=await bistCall(sym, group, calls[0]);
+  if(!hasData(first)){ group='UFRS'; first=await bistCall(sym, group, calls[0]); }
+  if(!hasData(first)) return null;
+  const byCode={};
+  bistMerge(byCode, first);
+  for(let i=1;i<calls.length;i++) bistMerge(byCode, await bistCall(sym, group, calls[i]));
+  const descOf={};
+  first.items.forEach(it=>{ descOf[it.itemCode]=(it.itemDescTr||'').trim(); });
+  const findByDesc=rx=>{ const c=Object.keys(descOf).find(k=> rx.test(descOf[k]) && Object.keys(bc(byCode,k)).length); return c?bc(byCode,c):{}; };
+
+  const D={}, I={};
+  if(group==='XI_29'){
+    D.assets=bc(byCode,'1BL'); D.assetsCur=bc(byCode,'1A');
+    D.cash=bc(byCode,'1AA'); D.stInv=bc(byCode,'1AB'); D.recv=bc(byCode,'1AC'); D.inv=bc(byCode,'1AF');
+    D.ppe=bc(byCode,'1BG'); D.goodwill=bc(byCode,'1BGA'); D.intang=bc(byCode,'1BH'); D.ltInv=bc(byCode,'1BC');
+    D.liabCur=bc(byCode,'2A'); D.liabNoncur=bc(byCode,'2B');
+    D.liab=bcAdd(bc(byCode,'2A'), bc(byCode,'2B'));
+    D.liabEquity=bc(byCode,'2ODB');
+    D.ap=bc(byCode,'2AAGAA'); D.stDebt=bc(byCode,'2AA'); D.defRev=bc(byCode,'2AAGCA'); D.ltDebt=bc(byCode,'2BA');
+    D.equity=bc(byCode,'2O'); D.equityIncl=bc(byCode,'2N'); D.minority=bc(byCode,'2ODA');
+    D.common=bc(byCode,'2OA'); D.retained=bc(byCode,'2OCE');
+    I.revenue=bc(byCode,'3C'); I.costRev=bcAbs(bc(byCode,'3CA'));
+    I.grossProfit=bc(byCode,'3D'); I.opIncome=bc(byCode,'3DF');
+    I.netIncome=Object.keys(bc(byCode,'3Z')).length?bc(byCode,'3Z'):bc(byCode,'3L');
+    I.rnd=bcAbs(bc(byCode,'3DC')); I.interest=bcAbs(bc(byCode,'3HC'));
+  }else{
+    D.assets=bc(byCode,'1Z'); D.assetsCur={};
+    D.cash=bc(byCode,'1A'); D.stInv={}; D.recv={}; D.inv={};
+    D.ppe={}; D.goodwill={}; D.intang={}; D.ltInv={};
+    D.liabCur={}; D.liabNoncur={};
+    D.equity=bc(byCode,'2O'); D.equityIncl=bc(byCode,'2O'); D.minority={};
+    D.liab=bcAdd(bc(byCode,'2Z'), bc(byCode,'2O'), -1);
+    D.liabEquity=bc(byCode,'2Z');
+    D.ap={}; D.stDebt={}; D.defRev={}; D.ltDebt={};
+    D.common=bc(byCode,'2OA'); D.retained=bc(byCode,'2OU');
+    if(!Object.keys(D.common).length) D.common=findByDesc(/Ödenmiş Sermaye/i);
+    if(!Object.keys(D.retained).length) D.retained=findByDesc(/Geçmiş Y[ıi]llar Kar/i);
+    D.bankKrediler=bc(byCode,'1AF'); D.bankMevduat=bc(byCode,'2A'); D.bankBankalar=bc(byCode,'1AC');
+    const clean=s=>(s||'').replace(/^[IVXLC0-9]+[\.\)]\s*/i,'').replace(/^[A-ZÇĞİÖŞÜ0-9]{1,2}-\s*/,'').trim();
+    D.bankLabels={
+      nakit:  clean(descOf['1A'])  || 'Nakit Değerler ve Merkez Bankası',
+      bankalar:clean(descOf['1AC'])|| 'Bankalar',
+      krediler:clean(descOf['1AF'])|| 'Krediler',
+      mevduat: clean(descOf['2A']) || 'Mevduat'
+    };
+    I.revenue=bc(byCode,'3A'); I.costRev=bcAbs(bc(byCode,'3B'));
+    I.grossProfit=bc(byCode,'3C'); I.opIncome=bc(byCode,'3CH');
+    I.netIncome=Object.keys(bc(byCode,'3ZA')).length?bc(byCode,'3ZA'):bc(byCode,'3Z');
+    I.rnd={}; I.interest={};
+  }
+  if(mode==='quarter'){ Object.keys(I).forEach(k=> I[k]=bistDiscreteQuarters(I[k])); }
+  return { D, I, group };
+}
+function buildRowsBank(D,D0,D1){
+  const v=(m,d)=> (d&&m&&(d in m))?m[d]:0;
+  const L=D.bankLabels||{};
+  const rows=[];
+  const push=(lbl,cat,c,p)=>{ if(c!==0||p!==0) rows.push([lbl,cat,c,p]); };
+  push(L.nakit||'Nakit Değerler ve Merkez Bankası','asset_current', v(D.cash,D0), v(D.cash,D1));
+  push(L.bankalar||'Bankalar','asset_current', v(D.bankBankalar,D0), v(D.bankBankalar,D1));
+  push(L.krediler||'Krediler','asset_noncur', v(D.bankKrediler,D0), v(D.bankKrediler,D1));
+  push('Diğer Varlıklar (Menkul Değerler vb.)','asset_noncur',
+    v(D.assets,D0)-v(D.cash,D0)-v(D.bankBankalar,D0)-v(D.bankKrediler,D0),
+    v(D.assets,D1)-v(D.cash,D1)-v(D.bankBankalar,D1)-v(D.bankKrediler,D1));
+  push(L.mevduat||'Mevduat','liab_current', v(D.bankMevduat,D0), v(D.bankMevduat,D1));
+  push('Diğer Yükümlülükler','liab_noncur',
+    v(D.liabEquity,D0)-v(D.equity,D0)-v(D.bankMevduat,D0),
+    v(D.liabEquity,D1)-v(D.equity,D1)-v(D.bankMevduat,D1));
+  push('Ödenmiş Sermaye','equity', v(D.common,D0), v(D.common,D1));
+  push('Geçmiş Yıllar Kar/Zararı','equity', v(D.retained,D0), v(D.retained,D1));
+  push('Diğer Özkaynak Kalemleri','equity',
+    v(D.equity,D0)-v(D.common,D0)-v(D.retained,D0),
+    v(D.equity,D1)-v(D.common,D1)-v(D.retained,D1));
+  return rows;
+}
+async function fetchTickerBIST(sym, mode, myGen){
+  try{
+    const s=await fetchBistSeries(sym, mode);
+    if(myGen!==REQ_GEN) return;
+    if(!s || !Object.keys(s.D.assets).length){
+      setStatus('✕ "'+sym+'" ne ABD listesinde ne BIST\'te bulunamadı (ya da mali tablo verisi yok).','bad'); return;
+    }
+    const {D,I,group}=s;
+    const dates=Object.keys(D.assets).sort().reverse();
+    const D0=dates[0], D1=dates[1]||null;
+    CUR='TL'; CURSYM='₺';
+    const shares=(D.common&&D.common[D0])||null;
+    FIN={ ticker:sym, mode, cur:'TRY', market:'BIST', bankGroup:group, D0, D1, balance:D, income:I,
+          cashflow:null, filedD0:null, filedD1:null, sharesBist:shares };
+    const rows = group==='UFRS' ? buildRowsBank(D,D0,D1) : buildRowsFromSEC(D,D0,D1);
+    const b=document.getElementById('inputBody'); b.innerHTML='';
+    rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+    document.getElementById('curNote').textContent='TL cinsinden';
+    setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+    setStatus(`✓ ${sym} — BIST${group==='UFRS'?' (banka/sigorta)':''} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
+    analyze();
+    fetchNews(sym, myGen);
+    fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
+    fetchChart(myGen);
+    fetchTargetsBIST(sym, myGen);
+    fetchKapFeed(sym, myGen);
+    fetchEconCalendar(myGen, 'TR');
+    fetchNextEarnings(sym, 'BIST', myGen);
+    stopNyClock();
+  }catch(e){
+    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+  }
+}
+
+async function fetchTicker(){
+  if(location.protocol==='file:'){
+    setStatus('⚠ Bu dosyayı çift tıklamak yerine "Bilanco-Baslat.bat" ile açın (anahtarsız veri için yerel köprü gerekir).','bad');
+    return;
+  }
+  let sym=(document.getElementById('ticker').value||'').trim().toUpperCase();
+  if(!sym){ setStatus('Lütfen bir hisse kodu yazın.','bad'); return; }
+  const mode=document.getElementById('periodType').value;        // 'annual' | 'quarter'
+  const formPrefix = mode==='annual' ? '10-K' : '10-Q';
+  const map=window.CIK_MAP||{};
+  const forceBist=/\.IS$/.test(sym);
+  if(forceBist) sym=sym.replace(/\.IS$/,'');
+  if(forceBist || !map[sym]){
+    setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
+    const myGen=++REQ_GEN;
+    fetchTickerBIST(sym, mode, myGen);
+    return;
+  }
+  const cik=String(map[sym]).padStart(10,'0');
+  setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
+  const myGen=++REQ_GEN;
+
+  try{
+    const { D, I, C, filed } = await fetchSeries(cik, mode, formPrefix);
+    if(myGen!==REQ_GEN) return;
+
+    if(!Object.keys(D.assets).length){ setStatus('✕ '+sym+' için bilanço verisi bulunamadı (form: '+formPrefix+').','bad'); return; }
+    const dates=Object.keys(D.assets).sort().reverse();
+    const D0=dates[0], D1=dates[1]||null;
+    if(!D1){ setStatus('⚠ '+sym+' için yalnızca tek dönem bulundu; değişim analizi sınırlı olacak.','muted'); }
+
+    CUR='USD'; CURSYM='$';
+    FIN = { ticker:sym, mode, cur:'USD', market:'US', D0, D1, balance:D, income:I, cashflow:C,
+            filedD0:(filed&&filed[D0])||null,
+            filedD1:(filed&&D1&&filed[D1]&&filed[D1]!==filed[D0])?filed[D1]:null };
+
+    const rows=buildRowsFromSEC(D,D0,D1);
+    const b=document.getElementById('inputBody'); b.innerHTML='';
+    rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+    document.getElementById('curNote').textContent='USD cinsinden';
+    setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+    setStatus(`✓ ${sym} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
+    analyze();
+    fetchNews(sym, myGen);
+    fetchPrice(sym, cik, myGen);
+    fetchChart(myGen);
+    fetchTargets(sym, myGen);
+    fetchNextEarnings(sym, 'US', myGen);
+    startNyClock();
+    fetchEconCalendar(myGen, 'US');
+    const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');
+  }catch(e){
+    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+  }
+}
+
+/* ---------- Analist hedef fiyatları (Finviz — anahtarsız köprü) ---------- */
+function gradeClass(g){
+  const s=(g||'').toLowerCase();
+  if(/buy|outperform|overweight|positive|accumulate|add|strong/.test(s)) return 'g-buy';
+  if(/sell|underperform|underweight|reduce|negative/.test(s)) return 'g-sell';
+  return 'g-hold';
+}
+const BIG_FIRMS = [
+  'jp morgan','jpmorgan','j.p. morgan','morgan stanley','goldman','bank of america','b of a','bofa','merrill',
+  'citigroup','citi','wells fargo','barclays','ubs','deutsche bank','rbc','bmo','jefferies','evercore',
+  'cowen','stifel','wedbush','piper sandler','raymond james','truist','mizuho','oppenheimer','needham',
+  'keybanc','key banc','baird','cantor','bernstein','guggenheim','wolfe','hsbc','bnp paribas','scotiabank',
+  'scotia','susquehanna','nomura','macquarie','loop capital','william blair','canaccord','citizens'
+];
+const actionTR = { Upgrade:'Yükseltti ▲', Downgrade:'Düşürdü ▼', Reiterated:'Yineledi', Initiated:'Başlattı' };
+function recomLabel(v){
+  if(v==null || isNaN(v)) return null;
+  if(v<=1.5) return ['Güçlü Al','g-buy'];
+  if(v<=2.5) return ['Al','g-buy'];
+  if(v<=3.5) return ['Tut','g-hold'];
+  if(v<=4.5) return ['Sat','g-sell'];
+  return ['Güçlü Sat','g-sell'];
+}
+async function fetchTargets(sym, myGen){
+  const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  try{
+    const [tR, pR] = await Promise.all([
+      fetch('/targets?s='+encodeURIComponent(sym)).then(x=>x.json()).catch(()=>null),
+      fetch('/price?s='+encodeURIComponent(sym)+'&range=1d').then(x=>x.json()).catch(()=>null)
+    ]);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(!tR || !tR.ok){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
+    const meta = pR && pR.chart && pR.chart.result && pR.chart.result[0] && pR.chart.result[0].meta;
+    const cur = meta ? meta.regularMarketPrice : null;
+    const mean = tR.targetPrice;
+    const ratings = tR.ratings || [];
+
+    let html='';
+    if(mean!=null || tR.recom!=null){
+      const up = (cur && mean) ? (mean-cur)/cur*100 : null;
+      const upCls = up==null?'neutral':(up>0?'up':'down');
+      const rl = recomLabel(tR.recom);
+      html+=`<div class="tgt-grid">
+        <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+          <div class="big">${fmtUSD(mean)}</div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+          ${cur!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+          <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+          <div class="sm neutral">${tR.recom!=null?'Finviz skoru: '+tR.recom.toFixed(2)+' (1=Güçlü Al, 5=Güçlü Sat)':''}</div></div>
+        <div class="tgt-box"><div class="lbl">Son Not Sayısı</div>
+          <div class="big">${ratings.length||'—'}</div>
+          <div class="sm neutral">yakın zamandaki değişiklik</div></div>
+      </div>`;
+    }
+    const hist=ratings.filter(x=> BIG_FIRMS.some(f=> (x.firm||'').toLowerCase().includes(f)));
+    if(hist.length){
+      const rows=hist.slice(0,12).map(x=>{
+        const d=new Date((x.date||0)*1000);
+        const ds=isNaN(d)?'':d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+        const act=actionTR[x.action]||x.action||'—';
+        const actCls=x.action==='Upgrade'?'up':x.action==='Downgrade'?'down':'neutral';
+        return `<tr><td>${safeHTML(x.firm||'')}</td>
+          <td><span class="grade ${gradeClass(x.rating)}">${safeHTML(x.rating||'—')}</span></td>
+          <td class="${actCls}">${act}</td>
+          <td>${safeHTML(x.priceChange||'—')}</td>
+          <td>${ds}</td></tr>`;
+      }).join('');
+      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Son Analist Notları — Büyük Banka & Aracı Kurumlar</div>
+        <table style="margin-top:8px"><thead><tr><th>Banka / Aracı Kurum</th><th>Not</th><th>İşlem</th><th>Hedef Fiyat</th><th>Tarih</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }else if(ratings.length){
+      html+=`<div class="hint" style="margin-top:14px">Bu hisse için büyük banka/aracı kurumlardan güncel not bulunamadı.</div>`;
+    }
+    box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
+  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- New York canlı saati (yalnızca ABD hissesi görüntülenirken) ---------- */
+let NY_TIMER=null;
+function startNyClock(){
+  const el=document.getElementById('nyClock');
+  if(!el) return;
+  const fTime=new Intl.DateTimeFormat('tr-TR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const fDay =new Intl.DateTimeFormat('tr-TR',{timeZone:'America/New_York',weekday:'long'});
+  const fNum =new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+  const tick=()=>{
+    const now=new Date();
+    const p=fNum.formatToParts(now), g=t=>{const x=p.find(z=>z.type===t);return x?x.value:'';};
+    const wd=g('weekday'), mins=parseInt(g('hour'),10)*60+parseInt(g('minute'),10);
+    const inSession=!['Sat','Sun'].includes(wd) && mins>=570 && mins<960;
+    el.innerHTML='🗽 New York: <span style="color:#fff">'+fTime.format(now)+'</span> · '+fDay.format(now)+
+      (inSession?' · <span style="color:var(--good)">● seans içi</span>'
+                :' · <span style="color:var(--muted)">○ seans dışı</span>');
+  };
+  tick();
+  if(NY_TIMER) clearInterval(NY_TIMER);
+  NY_TIMER=setInterval(tick,1000);
+  el.classList.remove('hidden');
+}
+function stopNyClock(){
+  const el=document.getElementById('nyClock');
+  if(NY_TIMER){ clearInterval(NY_TIMER); NY_TIMER=null; }
+  if(el){ el.classList.add('hidden'); el.innerHTML=''; }
+}
+
+/* ---------- Sonraki bilanço tarihi (her iki pazar) ---------- */
+async function fetchNextEarnings(sym, market, myGen){
+  const el=document.getElementById('earnNote');
+  if(!el) return;
+  el.classList.add('hidden'); el.innerHTML='';
+  try{
+    const scan = market==='BIST' ? 'turkey' : 'america';
+    const tickers = market==='BIST' ? ['BIST:'+sym] : ['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
+    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['earnings_release_next_date']})});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const row=(j.data||[]).find(x=>x.d && x.d[0]!=null);
+    const ts=row && row.d[0];
+    if(!ts) return;
+    const d=new Date(ts*1000);
+    const days=Math.round((d-Date.now())/86400000);
+    const ds=d.toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'});
+    el.innerHTML=`<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:9px;padding:7px 11px;font-size:12px;display:inline-block">
+      <span style="color:var(--muted)">📅 Sonraki bilanço (beklenen):</span>
+      <b style="color:var(--ink);margin-left:5px">${ds}</b>
+      ${days>=0?`<span style="color:var(--muted);margin-left:5px">· ${days===0?'bugün':days+' gün sonra'}</span>`:''}</div>`;
+    el.classList.remove('hidden');
+  }catch(e){}
+}
+
+/* ---------- Ekonomik Takvim (BIST → Türkiye, ABD → ABD) ---------- */
+let ECON_IMP=1, ECON_TIME='buhafta', ECON_MARKET='TR';
+const ECON_CACHE={};
+const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
+const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+const TR_GUN=['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'];
+const TR_OFF=3*3600000;
+const trDayIdx=ms=> Math.floor((ms+TR_OFF)/86400000);
+const trMonday=idx=> idx-((idx+3)%7);
+function econInTime(e, t){
+  const ei=trDayIdx(e.d.getTime()), ti=trDayIdx(Date.now());
+  if(t==='dun') return ei===ti-1;
+  if(t==='bugun') return ei===ti;
+  if(t==='yarin') return ei===ti+1;
+  if(t==='buhafta') return trMonday(ei)===trMonday(ti);
+  if(t==='gelecekhafta') return trMonday(ei)===trMonday(ti)+7;
+  return true;
+}
+const MON_TR={Jan:'Oca',Feb:'Şub',Mar:'Mar',Apr:'Nis',May:'May',Jun:'Haz',Jul:'Tem',Aug:'Ağu',Sep:'Eyl',Oct:'Eki',Nov:'Kas',Dec:'Ara'};
+function econPeriodTR(p){
+  if(!p) return '';
+  let s=p.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g, m=>MON_TR[m]);
+  s=s.replace(/\bQ([1-4])\b/g, '$1Ç');
+  return s;
+}
+const ECON_MAP=[
+  [/api crude/i, 'API Ham Petrol Stokları', -1],
+  [/eia crude oil imports/i, 'EIA Ham Petrol İthalatı', -1],
+  [/eia crude oil stocks|eia crude oil stock/i, 'EIA Ham Petrol Stokları', -1],
+  [/eia cushing/i, 'EIA Cushing Ham Petrol Stokları', -1],
+  [/eia gasoline production/i, 'EIA Benzin Üretimi', -1],
+  [/eia gasoline stocks/i, 'EIA Benzin Stokları', -1],
+  [/eia distillate.*production/i, 'EIA Damıtık Yakıt Üretimi', -1],
+  [/eia distillate stocks/i, 'EIA Damıtık Yakıt Stokları', -1],
+  [/eia heating oil/i, 'EIA Kalorifer Yakıtı Stokları', -1],
+  [/eia natural gas/i, 'EIA Doğal Gaz Stokları', -1],
+  [/eia refinery/i, 'EIA Rafineri İşlem Değişimi', -1],
+  [/crude oil|\beia\b/i, 'Enerji Stokları', -1],
+  [/core (cpi|inflation)/i, 'Çekirdek Enflasyon', 1],
+  [/core pce/i, 'Çekirdek PCE Fiyat Endeksi', 1],
+  [/\bpce price/i, 'PCE Fiyat Endeksi', 1],
+  [/inflation rate|consumer price|^cpi\b|\bcpi\b/i, 'Enflasyon Oranı', 1],
+  [/fomc minutes|meeting minutes|fed minutes/i, 'FOMC Toplantı Tutanakları', 1],
+  [/beige book/i, 'Fed Bej Kitap', -1],
+  [/fed balance sheet/i, 'Fed Bilançosu', -1],
+  [/interest rate decision|fed interest rate|federal funds (rate|target)|fomc statement|fomc.*projections|policy rate|one.?week repo rate/i, 'Faiz Kararı', 1],
+  [/non.?farm payrolls private|private non.?farm/i, 'Özel Tarım Dışı İstihdam', 0],
+  [/(government|manufacturing) payrolls/i, 'Kamu/İmalat İstihdamı', -1],
+  [/non.?farm payroll/i, 'Tarım Dışı İstihdam', 1],
+  [/adp.*(employment|payroll)/i, 'ADP Tarım Dışı İstihdam', 0],
+  [/u.?6 unemployment/i, 'U-6 İşsizlik Oranı', 0],
+  [/unemployment rate/i, 'İşsizlik Oranı', 1],
+  [/gdp growth|gross domestic|\bgdp\b/i, 'GSYİH Büyüme', 1],
+  [/retail sales/i, 'Perakende Satışlar', 1],
+  [/ism manufacturing new orders/i, 'ISM İmalat Yeni Siparişler', 0],
+  [/ism manufacturing prices/i, 'ISM İmalat Fiyatlar', 0],
+  [/ism manufacturing employment/i, 'ISM İmalat İstihdam', 0],
+  [/ism manufacturing/i, 'ISM İmalat PMI', 1],
+  [/ism (services|non.?manufacturing) new orders/i, 'ISM Hizmet Yeni Siparişler', 0],
+  [/ism (services|non.?manufacturing) business activity/i, 'ISM Hizmet İş Faaliyeti', 0],
+  [/ism (services|non.?manufacturing) employment/i, 'ISM Hizmet İstihdam', 0],
+  [/ism (services|non.?manufacturing) prices/i, 'ISM Hizmet Fiyatlar', 0],
+  [/ism (services|non.?manufacturing)/i, 'ISM Hizmet PMI', 1],
+  [/core ppi/i, 'Çekirdek ÜFE', 0],
+  [/ppi|producer price/i, 'ÜFE', 0],
+  [/balance of trade|trade balance|foreign trade/i, 'Dış Ticaret Dengesi', 0],
+  [/current account/i, 'Cari İşlemler Dengesi', 0],
+  [/industrial production/i, 'Sanayi Üretimi', 0],
+  [/capacity utilization/i, 'Kapasite Kullanımı', 0],
+  [/initial jobless claims/i, 'İşsizlik Başvuruları (Haftalık)', 0],
+  [/(continuing|jobless).*(claims|4.week)/i, 'Devam Eden İşsizlik Başvuruları', -1],
+  [/durable goods/i, 'Dayanıklı Mal Siparişleri', 0],
+  [/average hourly earnings/i, 'Ortalama Saatlik Kazanç', 0],
+  [/s&p global manufacturing|markit manufacturing/i, 'S&P Global İmalat PMI', 0],
+  [/s&p global services|markit services/i, 'S&P Global Hizmet PMI', 0],
+  [/composite pmi/i, 'Bileşik PMI', 0],
+  [/manufacturing pmi/i, 'İmalat PMI', 0],
+  [/services pmi/i, 'Hizmet PMI', 0],
+  [/consumer confidence|consumer sentiment/i, 'Tüketici Güveni', 0],
+  [/business confidence/i, 'İş Güveni', 0],
+  [/economic confidence/i, 'Ekonomik Güven Endeksi', 0],
+  [/building permits/i, 'İnşaat İzinleri', 0],
+  [/housing starts/i, 'Konut Başlangıçları', 0],
+  [/existing home sales/i, 'İkinci El Konut Satışları', 0],
+  [/new home sales/i, 'Yeni Konut Satışları', 0],
+  [/pending home sales/i, 'Bekleyen Konut Satışları', 0],
+  [/factory orders/i, 'Fabrika Siparişleri', 0],
+  [/exports/i, 'İhracat', 0],
+  [/imports/i, 'İthalat', 0],
+  [/foreign exchange reserves|fx reserves/i, 'Döviz Rezervleri', -1],
+  [/tourism revenues|tourist arrivals/i, 'Turizm', -1],
+  [/car (registrations|sales)|auto sales|auto production/i, 'Otomotiv Satışları', -1],
+  [/budget balance|government budget/i, 'Bütçe Dengesi', -1],
+  [/government debt|central government debt/i, 'Kamu Borcu', -1],
+  [/participation rate/i, 'İşgücüne Katılım Oranı', -1],
+  [/redbook/i, 'Redbook Perakende', -1],
+  [/holiday|day of|memorial|independence/i, 'Resmi Tatil', -1],
+];
+function econQualifiers(title, base){
+  const t=(title||'').toLowerCase(), b=(base||'').toLowerCase(), q=[];
+  if(/\bcore\b/.test(t) && !/çekirdek/.test(b)) q.push('Çekirdek');
+  if(/ex[ -]?gas.*auto|ex.*gas.*auto/.test(t)) q.push('Benzin/Oto Hariç');
+  else if(/ex[ -]?autos?/.test(t)) q.push('Oto Hariç');
+  else if(/ex food.*energy.*trade/.test(t)) q.push('Gıda/Enerji/Ticaret Hariç');
+  else if(/ex food.*energy|ex food and energy/.test(t)) q.push('Gıda/Enerji Hariç');
+  if(/control group/.test(t)) q.push('Kontrol Grubu');
+  if(/\bmom\b/.test(t) && !/aylık/.test(b)) q.push('Aylık');
+  else if(/\byoy\b/.test(t) && !/yıllık/.test(b)) q.push('Yıllık');
+  if(/\bprel(iminary)?\b/.test(t)) q.push('Öncü');
+  else if(/\bfinal\b/.test(t) && !/nihai/.test(b)) q.push('Nihai');
+  if(/\bs\.a\.|seasonally adjusted/.test(t)) q.push('Mevs. Arınd.');
+  return q;
+}
+function econDir(title){
+  const t=(title||'').toLowerCase();
+  if(/rate decision|interest rate|fed funds|federal funds|fomc/.test(t)) return 0;
+  if(/inflation|cpi|pce|ppi|producer price|unemploy|jobless|deficit|debt|import/.test(t)) return -1;
+  return 1;
+}
+function econClassify(title){
+  let base=null, imp=null, mapped=false;
+  for(const [rx,tr,mi] of ECON_MAP){ if(rx.test(title)){ base=tr; imp=mi; mapped=true; break; } }
+  if(!mapped){
+    const t=(title||'').toLowerCase(); imp=-1;
+    if(/inflation|cpi|pce|interest rate|rate decision|non.?farm|unemployment rate|gdp|retail sales|ism/.test(t)) imp=1;
+    else if(/ppi|producer|trade|current account|industrial|confidence|durable|jobless|pmi|housing|permits|payroll/.test(t)) imp=0;
+  }
+  if(imp===1 && /\bex[ -]|control group/i.test(title) && !/\bcore\b/i.test(title)) imp=0;
+  return { tr:base, imp, mapped };
+}
+function econVal(v,e){
+  if(v==null) return '—';
+  if(e.unit==='%') return v+'%';
+  if(e.unit==='$') return '$'+v+(e.scale||'');
+  return v+(e.scale||'')+(e.unit||'');
+}
+function parseInvestingCal(htmlData){
+  const doc=new DOMParser().parseFromString('<table><tbody>'+(htmlData||'')+'</tbody></table>','text/html');
+  return [...doc.querySelectorAll('tr[id^="eventRowId_"]')].map(tr=>{
+    const a=tr.querySelector('td.event a'), evc=tr.querySelector('td.event');
+    const name=((a?a.textContent:evc?evc.textContent:'')||'').replace(/\s+/g,' ').trim();
+    if(!name) return null;
+    const skEl=tr.querySelector('td.sentiment'); const sk=skEl?skEl.getAttribute('data-img_key')||'':'';
+    const imp = sk==='bull3'?1 : sk==='bull2'?0 : -1;
+    const ac=tr.querySelector('td[id^="eventActual_"]');
+    const aStr=ac?ac.textContent.trim():'';
+    const aClr = ac && /greenFont/.test(ac.className)?'up' : (ac && /redFont/.test(ac.className)?'down':'');
+    const fEl=tr.querySelector('td[id^="eventForecast_"]'); const fStr=(fEl?fEl.textContent:'').trim();
+    const pEl=tr.querySelector('td[id^="eventPrevious_"]'); const pStr=(pEl?pEl.textContent:'').trim();
+    const dt=tr.getAttribute('data-event-datetime')||'';
+    let dateLbl='', tEl=tr.querySelector('td.time,td.first'), timeLbl=(tEl?tEl.textContent:'').trim();
+    const m=dt.match(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})/);
+    if(m){ const g=new Date(+m[1],+m[2]-1,+m[3]); dateLbl=m[3]+' '+TR_AY[+m[2]-1]+' '+TR_GUN[g.getDay()]; if(!timeLbl||/gün/i.test(timeLbl)) timeLbl=m[4]+':'+m[5]; }
+    return { name, imp, aStr, aClr, fStr:fStr||'—', pStr:pStr||'—', dateLbl, timeLbl };
+  }).filter(Boolean);
+}
+async function tvRowsForTab(myGen){
+  const from=new Date(Date.now()-3*86400000).toISOString();
+  const to=new Date(Date.now()+16*86400000).toISOString();
+  const j=await fetch('/econ?countries='+ECON_MARKET+'&from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to)).then(r=>r.ok?r.json():null).catch(()=>null);
+  if(myGen!=null && myGen!==REQ_GEN) return null;
+  let evs=((j&&j.result)||[]).map(e=>{
+    const cls=econClassify(e.title||'');
+    return { title:e.title||'', imp:cls.imp, mappedTr:cls.tr, period:econPeriodTR(e.period||''),
+      d:new Date(e.date), aRaw:e.actualRaw, fRaw:e.forecastRaw, pRaw:e.previousRaw,
+      aStr:econVal(e.actual,e), fStr:econVal(e.forecast,e), pStr:econVal(e.previous,e), dir:econDir(e.title) };
+  }).filter(e=>!isNaN(e.d) && econInTime(e,ECON_TIME)).sort((a,b)=>a.d-b.d);
+  const need=[...new Set(evs.filter(e=>!e.mappedTr).map(e=>e.title))];
+  if(need.length){
+    const tr=await translateTR(need);
+    if(myGen!=null && myGen!==REQ_GEN) return null;
+    const tmap={}; need.forEach((t,i)=>tmap[t]=tr[i]||t);
+    evs.forEach(e=>{ if(!e.mappedTr) e.trName=tmap[e.title]; });
+  }
+  const fD=new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'short',weekday:'short'});
+  const fT=new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'});
+  return evs.map(e=>{
+    const base=e.mappedTr||e.trName||e.title;
+    const quals=e.mappedTr?econQualifiers(e.title, base):[];
+    const name=base+(quals.length?' ('+quals.join(', ')+')':'')+(e.period?' ('+e.period+')':'');
+    let aClr=''; const ref=(e.fRaw!=null)?e.fRaw:e.pRaw;
+    if(e.aRaw!=null && ref!=null && e.dir!==0 && e.aRaw!==ref){ const beat=e.aRaw>ref; aClr=(e.dir>0?beat:!beat)?'up':'down'; }
+    return { name, imp:e.imp, aStr:e.aStr, aClr, fStr:e.fStr, pStr:e.pStr, dateLbl:fD.format(e.d), timeLbl:fT.format(e.d) };
+  });
+}
+async function loadEconTab(myGen){
+  const box=document.getElementById('econBody');
+  const tab=ECON_TAB[ECON_TIME]||'thisWeek';
+  const key=ECON_MARKET+':'+tab;
+  const c=ECON_CACHE[key];
+  if(c && (Date.now()-c.ts)<30*60000){ renderEcon(); return; }
+  box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
+  let rows=[], src='', investingOk=false;
+  try{
+    const r=await fetch('/investcal?c='+ECON_MARKET+'&tab='+tab);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(r.ok){ const j=await r.json(); if(j && typeof j.data==='string'){ investingOk=true; rows=parseInvestingCal(j.data); src='Investing.com'; } }
+  }catch(e){}
+  if(!investingOk){
+    try{
+      const tv=await tvRowsForTab(myGen);
+      if(myGen!=null && myGen!==REQ_GEN) return;
+      if(tv){ rows=tv; src='TradingView'; }
+    }catch(e){}
+  }
+  ECON_CACHE[key]={ rows, src, ts:Date.now() };
+  renderEcon();
+}
+async function fetchEconCalendar(myGen, market){
+  const card=document.getElementById('econCard'), ttl=document.getElementById('econTitle');
+  if(!card) return;
+  ECON_MARKET=market||'TR';
+  if(ttl) ttl.textContent = ECON_MARKET==='US' ? 'ABD Ekonomik Takvimi' : 'Türkiye Ekonomik Takvimi';
+  card.classList.remove('hidden');
+  syncEconBtns();
+  loadEconTab(myGen);
+}
+function setEconTime(t){ ECON_TIME=t; syncEconBtns(); loadEconTab(REQ_GEN); }
+function setEconImp(i){ ECON_IMP=i; renderEcon(); }
+function syncEconBtns(){
+  document.querySelectorAll('#econTimeBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.t===ECON_TIME));
+  document.querySelectorAll('#econBtns button').forEach(b=>b.classList.toggle('primary', Number(b.dataset.imp)===ECON_IMP));
+}
+function renderEcon(){
+  const box=document.getElementById('econBody');
+  if(!box) return;
+  syncEconBtns();
+  const c=ECON_CACHE[ECON_MARKET+':'+(ECON_TAB[ECON_TIME]||'thisWeek')];
+  if(!c){ box.innerHTML='<div class="hint">—</div>'; return; }
+  const list=c.rows.filter(e=>e.imp===ECON_IMP);
+  if(!list.length){
+    const timeAd={dun:'dün',bugun:'bugün',yarin:'yarın',buhafta:'bu hafta',gelecekhafta:'gelecek hafta'}[ECON_TIME]||'';
+    const impAd={'-1':'düşük (★)','0':'orta (★★)','1':'yüksek (★★★)'}[String(ECON_IMP)];
+    box.innerHTML='<div class="hint">'+timeAd.charAt(0).toUpperCase()+timeAd.slice(1)+' için '+impAd+' önem düzeyinde veri yok. Farklı bir dönem veya önem düzeyi seçebilirsin.</div>';
+    return;
+  }
+  const rows=list.map(e=>`<tr>
+    <td style="white-space:nowrap">${safeHTML(e.dateLbl)} <span class="thd">${safeHTML(e.timeLbl)}</span></td>
+    <td style="white-space:normal">${safeHTML(e.name||'')}</td>
+    <td${e.aClr?` class="${e.aClr}"`:''}><b>${safeHTML(e.aStr||'—')}</b></td>
+    <td>${safeHTML(e.fStr)}</td>
+    <td>${safeHTML(e.pStr)}</td>
+  </tr>`).join('');
+  const kaynak = c.src==='Investing.com'
+    ? 'İsim, önem yıldızı ve renkler doğrudan <b>Investing.com</b> ekonomik takviminden alınır.'
+    : 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).';
+  box.innerHTML=`<table><thead><tr><th>Tarih (TSİ)</th><th>Veri</th><th>Açıklanan</th><th>Beklenti</th><th>Önceki</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span>/<span class="down">kırmızı</span> açıklanan değer, beklentiye göre olumlu/olumsuz demektir. "—" henüz açıklanmadı. ${kaynak}</div>`;
+}
+
+/* ---------- KAP Bildirimleri (yalnızca BIST) ---------- */
+async function fetchKapFeed(sym, myGen){
+  const card=document.getElementById('kapCard'), box=document.getElementById('kapBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">KAP bildirimleri yükleniyor…</div>';
+  try{
+    let url='https://api.fintables.com/topic-feed/?symbols='+encodeURIComponent(sym)+'&for_everyone=1&only_pro=0';
+    const news=[];
+    for(let p=0; p<3 && url && news.length<10; p++){
+      const r=await fetch(url);
+      if(!r.ok) break;
+      const j=await r.json();
+      (j.results||[]).forEach(it=>{ if(it.type==='news' && it.news) news.push(it.news); });
+      url=j.next||null;
+    }
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(!news.length){ box.innerHTML='<div class="hint">Bu şirket için yakın tarihli KAP bildirimi bulunamadı.</div>'; return; }
+    box.innerHTML=news.slice(0,10).map(n=>{
+      const d=n.published_at?new Date(n.published_at):null;
+      const meta=[n.subject||'', (d&&!isNaN(d))?relTime(d):''].filter(Boolean).join(' · ');
+      const kapLink=n.kap_id?('https://www.kap.org.tr/tr/Bildirim/'+n.kap_id):(n.embed_url||'#');
+      const detay=[n.title, n.note_title, n.note].filter(Boolean).map(safeHTML).join('<br>');
+      return `<div class="news" onclick="toggleNews(this)">
+        <div class="news-t"><span class="chev">▶</span><span>${safeHTML(n.summary||n.subject||'KAP bildirimi')}</span></div>
+        <div class="news-m">${safeHTML(meta)}</div>
+        <div class="news-sum">${detay||safeHTML(n.subject||'')}<br>
+          <a href="${kapLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()">KAP'ta tam bildirimi oku →</a></div>
+      </div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<div class="hint">KAP bildirimleri alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- BIST analist hedef fiyatları ---------- */
+const TVT_COLS=['price_target_average','price_target_high','price_target_low','recommendation_total',
+  'recommendation_buy','recommendation_over','recommendation_hold','recommendation_under','recommendation_sell',
+  'recommendation_mark','close'];
+function tvMarkLabel(m){
+  if(m==null || isNaN(m)) return null;
+  if(m<=1.3) return ['Güçlü Al','g-buy'];
+  if(m<=1.7) return ['Al','g-buy'];
+  if(m<=2.3) return ['Tut','g-hold'];
+  if(m<=2.7) return ['Sat','g-sell'];
+  return ['Güçlü Sat','g-sell'];
+}
+const FT_TYPE={
+  al:['Al','g-buy',1], endeks_ustu:['Endeks Üstü','g-buy',1], guclu_al:['Güçlü Al','g-buy',1],
+  tut:['Tut','g-hold',2], endekse_paralel:['Endekse Paralel','g-hold',2], notr:['Nötr','g-hold',2],
+  sat:['Sat','g-sell',3], endeks_alti:['Endeks Altı','g-sell',3]
+};
+async function fetchTargetsBIST(sym, myGen){
+  const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  try{
+    let ratings=null, cur=null;
+    const [ftR, pR]=await Promise.all([
+      fetch('https://api.fintables.com/analyst-ratings/?code='+encodeURIComponent(sym))
+        .then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('/price?s='+encodeURIComponent(sym+'.IS')+'&range=1d').then(r=>r.json()).catch(()=>null)
+    ]);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const meta=pR&&pR.chart&&pR.chart.result&&pR.chart.result[0]&&pR.chart.result[0].meta;
+    cur=meta?meta.regularMarketPrice:null;
+    if(ftR && Array.isArray(ftR.results)) ratings=ftR.results;
+
+    let html='';
+    if(ratings && ratings.length){
+      const cutoff=Date.now()-365*86400000;
+      const rows=ratings
+        .map(r=>({ firm:(r.brokerage&&(r.brokerage.title||r.brokerage.short_title))||'—',
+                   tgt:(typeof r.price_target==='number')?r.price_target:null,
+                   type:r.type||null, d:new Date(r.published_at) }))
+        .filter(r=> !isNaN(r.d) && r.d.getTime()>=cutoff)
+        .sort((a,b)=>b.d-a.d);
+      const tgts=rows.map(r=>r.tgt).filter(v=>v!=null);
+      const mean=tgts.length?tgts.reduce((a,b)=>a+b,0)/tgts.length:null;
+      const hi=tgts.length?Math.max(...tgts):null, lo=tgts.length?Math.min(...tgts):null;
+      const scores=rows.map(r=>FT_TYPE[r.type]&&FT_TYPE[r.type][2]).filter(Boolean);
+      const rl=scores.length?tvMarkLabel(scores.reduce((a,b)=>a+b,0)/scores.length):null;
+      const up=(cur&&mean)?(mean-cur)/cur*100:null;
+      const upCls=up==null?'neutral':(up>0?'up':'down');
+      html+=`<div class="tgt-grid">
+        <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+          <div class="big">${fmtUSD(mean)}</div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+          ${cur!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+          <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
+          <div class="sm neutral">kurum hedef aralığı</div></div>
+        <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+          <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+          <div class="sm neutral">${rows.length} aracı kurum · son 12 ay</div></div>
+      </div>`;
+      const trRows=rows.slice(0,20).map(r=>{
+        const t=FT_TYPE[r.type]||['—','g-hold'];
+        const ds=r.d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+        return `<tr><td>${safeHTML(r.firm)}</td>
+          <td><span class="grade ${t[1]}">${t[0]}</span></td>
+          <td>${r.tgt!=null?fmtUSD(r.tgt):'—'}</td>
+          <td>${ds}</td></tr>`;
+      }).join('');
+      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Aracı Kurum Hedef Fiyatları — Kurum Bazında</div>
+        <table style="margin-top:8px"><thead><tr><th>Aracı Kurum</th><th>Tavsiye</th><th>Hedef Fiyat</th><th>Tarih</th></tr></thead><tbody>${trRows}</tbody></table>
+        <div class="hint" style="margin-top:10px">Kaynak: Fintables (aracı kurum araştırma raporları) · her kurumun en güncel hedefi.</div>`;
+      box.innerHTML=html;
+      return;
+    }
+
+    let d=null;
+    try{
+      const r=await fetch('https://scanner.tradingview.com/turkey/scan',
+        {method:'POST',body:JSON.stringify({symbols:{tickers:['BIST:'+sym]},columns:TVT_COLS})});
+      if(r.ok){ const j=await r.json(); d=j&&j.data&&j.data[0]&&j.data[0].d; }
+    }catch(e){}
+    if(!d){
+      try{ const r=await fetch('/tvt?s='+encodeURIComponent(sym)); const j=await r.json(); d=j&&j.data&&j.data[0]&&j.data[0].d; }catch(e){}
+    }
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(!d || d[0]==null){
+      box.innerHTML='<div class="hint">Bu hisse için analist hedef fiyatı bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
+      return;
+    }
+    const mean=d[0],hi=d[1],lo=d[2],tot=d[3], mark=d[9], close=d[10];
+    const cur2=cur!=null?cur:close;
+    const up=(cur2&&mean)?(mean-cur2)/cur2*100:null;
+    const upCls=up==null?'neutral':(up>0?'up':'down');
+    const rl=tvMarkLabel(mark);
+    box.innerHTML=`<div class="tgt-grid">
+      <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+        <div class="big">${fmtUSD(mean)}</div>
+        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+        ${cur2!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur2)}</div>`:''}</div>
+      <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+        <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
+        <div class="sm neutral">aracı kurum hedef aralığı</div></div>
+      <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+        <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+        <div class="sm neutral">${tot!=null?tot+' aracı kurum analisti':''}</div></div>
+    </div>
+    <div class="hint" style="margin-top:10px">Kurum bazlı liste şu an alınamadı; TradingView/Refinitiv konsensüsü gösteriliyor.</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- Canlı + dönemsel hisse fiyatı (Yahoo Finance — anahtarsız köprü) ---------- */
+function fmtUSD(n){ return (n==null)?'—':CURSYM+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmtMcap(n){
+  if(n==null) return '—';
+  const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n>=1e12) return CURSYM+two(n/1e12)+' T';
+  if(n>=1e9)  return CURSYM+two(n/1e9)+' B';
+  if(n>=1e6)  return CURSYM+two(n/1e6)+' M';
+  return CURSYM+Math.round(n).toLocaleString('tr-TR');
+}
+async function fetchShares(cik){
+  const pick=u=>{ const m={},f={}; u.forEach(e=>{ if(!(e.end in m)||e.filed>f[e.end]){m[e.end]=Number(e.val);f[e.end]=e.filed;} });
+    const d=Object.keys(m).sort().reverse()[0]; return d?m[d]:null; };
+  const tries=[
+    `/sec/api/xbrl/companyconcept/CIK${cik}/dei/EntityCommonStockSharesOutstanding.json`,
+    `/sec/api/xbrl/companyconcept/CIK${cik}/us-gaap/CommonStockSharesOutstanding.json`,
+  ];
+  for(const url of tries){
+    try{ const r=await fetch(url); if(!r.ok) continue; const j=await r.json();
+      const u=j.units&&j.units.shares; if(u){ const v=pick(u); if(v) return v; } }catch(e){}
+  }
+  return null;
+}
+async function fetchPrice(sym, cik, myGen, opts){
+  const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote');
+  const fd0=FIN&&FIN.filedD0, fd1=FIN&&FIN.filedD1;
+  const ysym=(opts&&opts.ysym)||sym;
+  try{
+    const now=Math.floor(Date.now()/1000)+86400;
+    const earliest = fd1||fd0||'2015-01-01';
+    const p1=Math.floor(new Date(earliest).getTime()/1000) - 10*86400;
+    const [liveR, histR, shares]=await Promise.all([
+      fetch(`/price?s=${encodeURIComponent(ysym)}&range=1d`).then(x=>x.json()).catch(()=>null),
+      fetch(`/price?s=${encodeURIComponent(ysym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
+      (opts&&opts.shares!=null)? Promise.resolve(opts.shares) : (cik? fetchShares(cik) : Promise.resolve(null))
+    ]);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const res = histR&&histR.chart&&histR.chart.result&&histR.chart.result[0];
+    const liveRes = liveR&&liveR.chart&&liveR.chart.result&&liveR.chart.result[0];
+    if(!res && !liveRes){ lp.classList.add('hidden'); return; }
+    const m=(liveRes&&liveRes.meta) || (res&&res.meta) || {};
+    const ts=(res&&res.timestamp)||[], closes=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
+    const closeOn=iso=>{
+      if(!iso) return null;
+      const tgt=new Date(iso).getTime()/1000 + 86400;
+      let best=null;
+      for(let i=0;i<ts.length;i++){ if(ts[i]<=tgt){ if(closes[i]!=null) best=closes[i]; } else break; }
+      return best;
+    };
+    const live=m.regularMarketPrice, prevC=m.chartPreviousClose;
+    if(live!=null){
+      const ch = (prevC? (live-prevC)/prevC*100 : null);
+      const cls = ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
+      const ar  = ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
+      lp.innerHTML=`<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
+        (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
+        `<span class="lp-live">● canlı</span>`;
+      lp.classList.remove('hidden');
+    }else lp.classList.add('hidden');
+    const mcap = (live!=null && shares) ? live*shares : null;
+    const badge=document.getElementById('hdBadge');
+    if(badge){
+      if(mcap!=null){
+        badge.className='hd-badge mcap';
+        badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
+      }else{
+        badge.className='hd-badge'; badge.textContent='SEC EDGAR + Bing News';
+      }
+    }
+    renderValuation(mcap);
+    const pCur=closeOn(fd0), pPrev=closeOn(fd1);
+    const chip=(lbl,date,price,color)=> price==null?'' :
+      `<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;padding:7px 11px;font-size:12px">
+        <span style="color:var(--muted)">${lbl}${date?' · açıklanma '+fmtDate(date):''}:</span>
+        <b style="color:var(--ink);margin-left:5px;font-variant-numeric:tabular-nums">${fmtUSD(price)}</b></div>`;
+    pn.innerHTML = chip('Cari dönem fiyatı', fd0, pCur, 'var(--accent)') + chip('Önceki dönem fiyatı', fd1, pPrev, 'var(--muted)');
+    pn.classList.toggle('hidden', !pn.innerHTML.trim());
+  }catch(e){ lp.classList.add('hidden'); }
+}
+
+/* ---------- İnteraktif Fiyat Grafiği (Yahoo /price, anahtarsız) ---------- */
+let CHART_RANGE='1y', CHART_SYM=null;
+function setChartRange(r){ CHART_RANGE=r; syncChartBtns(); loadChart(); }
+function syncChartBtns(){ document.querySelectorAll('#chartRangeBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.r===CHART_RANGE)); }
+function fetchChart(myGen){
+  const card=document.getElementById('chartCard');
+  if(!card||!FIN) return;
+  CHART_SYM = FIN.market==='BIST' ? FIN.ticker+'.IS' : FIN.ticker;
+  card.classList.remove('hidden'); syncChartBtns(); loadChart(myGen);
+}
+async function loadChart(myGen){
+  const box=document.getElementById('chartBox');
+  if(!box||!CHART_SYM) return;
+  box.innerHTML='<div class="hint">Grafik yükleniyor…</div>';
+  try{
+    const r=await fetch('/price?s='+encodeURIComponent(CHART_SYM)+'&range='+CHART_RANGE);
+    const j=await r.json();
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const res=j&&j.chart&&j.chart.result&&j.chart.result[0];
+    const ts=res&&res.timestamp, q=res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0];
+    if(!ts||!q){ box.innerHTML='<div class="hint">Grafik verisi bulunamadı.</div>'; return; }
+    const pts=[];
+    for(let i=0;i<ts.length;i++){ if(q.close[i]!=null) pts.push([ts[i]*1000, q.close[i]]); }
+    if(pts.length<2){ box.innerHTML='<div class="hint">Yeterli veri yok.</div>'; return; }
+    box.innerHTML=priceChartSVG(pts);
+    const first=pts[0][1], last=pts[pts.length-1][1], ch=(last-first)/first*100, cls=ch>=0?'up':'down';
+    const info=document.getElementById('chartInfo');
+    if(info) info.innerHTML=`Dönem: <b>${fmtUSD(first)}</b> → <b>${fmtUSD(last)}</b> <span class="${cls}">${ch>=0?'▲':'▼'} ${pct(ch)}</span>`;
+    attachChartHover(pts);
+  }catch(e){ box.innerHTML='<div class="hint">Grafik alınamadı: '+e.message+'</div>'; }
+}
+const PC={W:960,H:340,padL:56,padR:14,padT:14,padB:26};
+function priceChartSVG(pts){
+  const {W,H,padL,padR,padT,padB}=PC;
+  const ys=pts.map(p=>p[1]), xs=pts.map(p=>p[0]);
+  const minY=Math.min(...ys),maxY=Math.max(...ys),spanY=(maxY-minY)||1;
+  const minX=xs[0],maxX=xs[xs.length-1],spanX=(maxX-minX)||1;
+  const px=t=> padL+((t-minX)/spanX)*(W-padL-padR);
+  const py=v=> padT+(1-(v-minY)/spanY)*(H-padT-padB);
+  const up=ys[ys.length-1]>=ys[0], col=up?'var(--good)':'var(--bad)';
+  let line=''; pts.forEach((p,i)=>{ line+=(i?'L':'M')+px(p[0]).toFixed(1)+' '+py(p[1]).toFixed(1)+' '; });
+  const area='M'+px(pts[0][0]).toFixed(1)+' '+(H-padB)+' '+line.replace(/^M/,'L')+'L'+px(maxX).toFixed(1)+' '+(H-padB)+' Z';
+  let grid='';
+  for(let g=0;g<=4;g++){ const val=minY+spanY*g/4, Y=py(val).toFixed(1);
+    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${Y}" y2="${Y}" stroke="var(--line)"/><text x="${padL-6}" y="${(+Y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${fmtUSD(val)}</text>`; }
+  let xlab=''; const fD=new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'short',year:'2-digit'});
+  for(let g=0;g<=4;g++){ const t=minX+spanX*g/4, X=px(t).toFixed(1);
+    xlab+=`<text x="${X}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--muted)">${fD.format(new Date(t))}</text>`; }
+  const gid='pcg'+Math.random().toString(36).slice(2,7);
+  return `<svg id="priceSvg" viewBox="0 0 ${W} ${H}" width="100%" style="display:block;touch-action:none">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity="0.28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    ${grid}<path d="${area}" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${col}" stroke-width="1.8"/>${xlab}
+    <line id="pcCross" x1="0" x2="0" y1="${padT}" y2="${H-padB}" stroke="var(--accent)" stroke-dasharray="3 3" opacity="0"/>
+    <circle id="pcDot" r="3.5" fill="var(--accent)" opacity="0"/></svg>
+    <div id="pcTip" style="position:absolute;display:none;background:var(--surface-3);border:1px solid var(--line-2);border-radius:8px;padding:6px 9px;font-size:12px;pointer-events:none;white-space:nowrap;z-index:5"></div>`;
+}
+function attachChartHover(pts){
+  const svg=document.getElementById('priceSvg'); if(!svg) return;
+  const cross=document.getElementById('pcCross'), dot=document.getElementById('pcDot'), tip=document.getElementById('pcTip');
+  const {W,padL,padR,padT,padB,H}=PC;
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  const minY=Math.min(...ys),maxY=Math.max(...ys),spanY=(maxY-minY)||1;
+  const minX=xs[0],maxX=xs[xs.length-1],spanX=(maxX-minX)||1;
+  const px=t=> padL+((t-minX)/spanX)*(W-padL-padR);
+  const py=v=> padT+(1-(v-minY)/spanY)*(H-padT-padB);
+  const fDT=new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+  const move=cx=>{
+    const rect=svg.getBoundingClientRect();
+    const xView=((cx-rect.left)/rect.width)*W;
+    let bi=0,bd=1e18; for(let i=0;i<pts.length;i++){ const d=Math.abs(px(pts[i][0])-xView); if(d<bd){bd=d;bi=i;} }
+    const p=pts[bi], X=px(p[0]), Y=py(p[1]);
+    cross.setAttribute('x1',X); cross.setAttribute('x2',X); cross.setAttribute('opacity','0.7');
+    dot.setAttribute('cx',X); dot.setAttribute('cy',Y); dot.setAttribute('opacity','1');
+    tip.style.display='block';
+    tip.innerHTML=`<b>${fmtUSD(p[1])}</b> · <span style="color:var(--muted)">${fDT.format(new Date(p[0]))}</span>`;
+    const left=(X/W)*rect.width;
+    tip.style.left=Math.max(4, Math.min(rect.width-tip.offsetWidth-4, left+10))+'px'; tip.style.top='8px';
+  };
+  svg.addEventListener('mousemove', e=>move(e.clientX));
+  svg.addEventListener('mouseleave', ()=>{ cross.setAttribute('opacity','0'); dot.setAttribute('opacity','0'); tip.style.display='none'; });
+  svg.addEventListener('touchmove', e=>{ if(e.touches[0]){ move(e.touches[0].clientX); e.preventDefault(); } }, {passive:false});
+}
+
+function renderValuation(mcap){
+  const card=document.getElementById('valCard'), box=document.getElementById('valBody');
+  if(!card||!box) return;
+  if(!FIN || mcap==null){ card.classList.add('hidden'); return; }
+  const D=FIN.balance, D0=FIN.D0;
+  const vv=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+  const bookValue = vv(D.assets,D0) - liabTotal(D,D0);
+  const niSeries=FIN.income&&FIN.income.netIncome||{};
+  const niDates=Object.keys(niSeries).sort().reverse();
+  let netIncome=null, niLabel='';
+  if(FIN.mode==='quarter'){
+    if(niDates.length>=4){ netIncome=niDates.slice(0,4).reduce((a,d)=>a+niSeries[d],0); niLabel='son 4 çeyrek (TTM)'; }
+  }else if(niDates.length){ netIncome=niSeries[niDates[0]]; niLabel='son yıl ('+String(niDates[0]).slice(0,4)+')'; }
+
+  const fk = (netIncome && netIncome>0) ? mcap/netIncome : null;
+  const pddd = (bookValue && bookValue>0) ? mcap/bookValue : null;
+  const x2=v=> v==null?'—':v.toFixed(2)+'x';
+  const fkCls = fk==null?'neutral':(fk<=15?'up':fk<=30?'neutral':'down');
+  const pdCls = pddd==null?'neutral':(pddd<=1.5?'up':pddd<=4?'neutral':'down');
+  const cell=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
+    <div class="val ${cls||''}" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
+    <div class="delta neutral">${sub}</div></div>`;
+  box.innerHTML =
+    cell('Piyasa Değeri (PD)', fmtMcap(mcap), 'anlık fiyat × dolaşımdaki pay') +
+    cell('F/K (Fiyat / Kazanç)', x2(fk), netIncome==null?'net kâr verisi yetersiz':(netIncome<0?'şirket zararda — hesaplanamaz':'Net Kâr: '+fmtMcap(netIncome)+' · '+niLabel), fkCls) +
+    cell('PD/DD (Piyasa Değ. / Defter Değ.)', x2(pddd), bookValue>0?'Defter Değeri: '+fmtMcap(bookValue):'özkaynak negatif — hesaplanamaz', pdCls) +
+    cell('Defter Değeri (DD)', fmtMcap(bookValue), 'özkaynak (en güncel bilanço)');
+  card.classList.remove('hidden');
+}
+
+/* Güncel haberler — Bing News + Türkçe çeviri (tarayıcıdan) */
+const safeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function relTime(d){
+  const diff=(Date.now()-d.getTime())/1000;
+  if(diff<3600) return Math.max(1,Math.round(diff/60))+' dk önce';
+  if(diff<86400) return Math.round(diff/3600)+' saat önce';
+  if(diff<604800) return Math.round(diff/86400)+' gün önce';
+  return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+}
+async function gTranslate(t){
+  const u='https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=tr&dt=t&q='+encodeURIComponent(t);
+  const r=await fetch(u); if(!r.ok) throw new Error('g '+r.status);
+  const j=await r.json();
+  if(Array.isArray(j) && Array.isArray(j[0])){ const out=j[0].map(s=>(s&&s[0])?s[0]:'').join('').trim(); if(out) return out; }
+  throw new Error('g bos');
+}
+async function mmTranslate(t){
+  const q=t.length>480?t.slice(0,480):t;
+  const u='https://api.mymemory.translated.net/get?langpair=en|tr&de=bilanco.analiz.app@gmail.com&q='+encodeURIComponent(q);
+  const r=await fetch(u); if(!r.ok) throw new Error('mm '+r.status);
+  const j=await r.json();
+  const out=j&&j.responseData&&j.responseData.translatedText;
+  if(out && !/MYMEMORY WARNING|QUOTA/i.test(out)) return out.trim();
+  throw new Error('mm bos');
+}
+async function translateOne(text, tries){
+  const t=(text||'').trim();
+  if(!t || t==='—') return text;
+  try{
+    try{ return await gTranslate(t); }
+    catch(e1){
+      try{ return await mmTranslate(t); }
+      catch(e2){
+        const r=await fetch('/tr?q='+encodeURIComponent(t)); const j=await r.json();
+        const out=j&&typeof j.text==='string'?j.text.trim():'';
+        if(out) return out;
+        throw new Error('hepsi bos');
+      }
+    }
+  }catch(e){
+    if((tries||0) < 2){ await new Promise(res=>setTimeout(res, 350*((tries||0)+1))); return translateOne(text,(tries||0)+1); }
+    return text;
+  }
+}
+async function translateTR(arr){
+  const out=new Array(arr.length); let idx=0;
+  const worker=async()=>{ while(idx<arr.length){ const k=idx++; out[k]=await translateOne(arr[k]); } };
+  await Promise.all(Array.from({length:6}, worker));
+  return out;
+}
+const TOP_SOURCES = ['yahoo finance','bloomberg','reuters','cnbc','marketwatch',
+  'wall street journal','wsj','financial times','ft.com',
+  'forbes','fortune','economist','business insider','businessinsider',
+  'investor\'s business','investors.com','morningstar','investing.com',
+  'benzinga','motley fool','fool.com','thestreet','axios','the information'];
+const PREMIUM_SITES = '(site:finance.yahoo.com OR site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR '+
+  'site:wsj.com OR site:ft.com OR site:marketwatch.com OR site:forbes.com OR site:fortune.com OR '+
+  'site:investors.com OR site:businessinsider.com OR site:economist.com OR site:morningstar.com)';
+const BLOCK_HOST = /(^|\.)(msn\.com|barrons\.com|seekingalpha\.com)$/i;
+const BLOCK_SRC  = /\bon msn\b|^\s*msn\s*$|barron|seeking ?alpha/i;
+const TR_LOW_SOURCES=/mynet|haberler\.com|sondakika|ensonhaber|internethaber|takvim|aksam|star\.com/i;
+function parseNewsXML(xml){
+  const doc=new DOMParser().parseFromString(xml||'','application/xml');
+  return [...doc.querySelectorAll('item')].map(it=>{
+    const get=t=>{ const el=it.getElementsByTagName(t)[0]; return el?el.textContent:''; };
+    const title=get('title');
+    let link=get('link'); const m=link.match(/[?&]url=([^&]+)/); if(m){ try{ link=decodeURIComponent(m[1]); }catch(e){} }
+    const pub=get('pubDate');
+    let desc=get('description').replace(/<!\[CDATA\[|\]\]>/g,'').replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim();
+    let src=get('News:Source')||get('Source');
+    let host=''; try{ host=new URL(link).hostname.replace(/^www\./,''); }catch(e){}
+    if(!src) src=host;
+    const d=pub?new Date(pub):null;
+    return {title,link,src,host,desc,d:(d&&!isNaN(d))?d:null};
+  });
+}
+async function fetchNews(sym, myGen){
+  const box=document.getElementById('newsList');
+  if(!box) return;
+  box.innerHTML='<div class="hint">Haberler yükleniyor…</div>';
+  const isBist = FIN && FIN.market==='BIST';
+  try{
+    let items;
+    if(isBist){
+      let coName='';
+      try{
+        const r=await fetch('https://scanner.tradingview.com/turkey/scan',
+          {method:'POST',body:JSON.stringify({symbols:{tickers:['BIST:'+sym]},columns:['description']})});
+        if(r.ok){ const j=await r.json(); coName=(j.data&&j.data[0]&&j.data[0].d&&j.data[0].d[0])||''; }
+      }catch(e){}
+      coName=coName.replace(/\b(A\.?[SŞ]\.?|AO|T\.?A\.?[SŞ]\.?|TURKIYE|TÜRKİYE)\b\.?/gi,' ')
+                   .replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' ');
+      const queries=[sym+' hisse', sym, coName].filter(Boolean);
+      const xmls=await Promise.all(queries.map(q=>
+        fetch('/news?q='+encodeURIComponent(q)+'&m=tr').then(r=>r.text()).catch(()=>'')));
+      if(myGen!=null && myGen!==REQ_GEN) return;
+      const finRx=/hisse|borsa|bist|hedef|bilanç|temettü|kâr|kar[ıi]|yatır[ıi]m|halka arz|piyasa|analiz|teknik|fiyat|endeks|finans|sermaye|şirket/i;
+      const fromCode=parseNewsXML(xmls[1]||'').filter(it=>{
+        const txt=((it.title||'')+' '+(it.desc||''));
+        return new RegExp('\\b'+sym+'\\b','i').test(txt) && finRx.test(txt);
+      });
+      items=[...parseNewsXML(xmls[0]||''), ...parseNewsXML(xmls[2]||''), ...fromCode];
+      const cutoff=Date.now()-90*86400000;
+      items=items.filter(it=> it.d && it.d.getTime()>=cutoff);
+    }else{
+      const [xPrem, xGen]=await Promise.all([
+        fetch('/news?q='+encodeURIComponent(sym+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
+        fetch('/news?q='+encodeURIComponent(sym+' stock')).then(r=>r.text()).catch(()=>'')
+      ]);
+      if(myGen!=null && myGen!==REQ_GEN) return;
+      items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
+    }
+
+    items=items.filter(it=> !BLOCK_HOST.test(it.host||'') && !BLOCK_SRC.test(it.src||''));
+
+    const seen=new Set();
+    items=items.filter(it=>{
+      let key=(it.title||'').slice(0,60).toLowerCase();
+      try{ const u=new URL(it.link); key=u.hostname.replace(/^www\./,'')+u.pathname; }catch(e){}
+      if(seen.has(key)) return false; seen.add(key); return true;
+    });
+
+    if(isBist){
+      const trTier=it=> TR_LOW_SOURCES.test(((it.src||'')+' '+(it.host||'')).toLowerCase()) ? 1 : 0;
+      items.sort((a,b)=>{ const t=trTier(a)-trTier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
+    }else{
+      const tier=it=>{ const s=((it.src||'')+' '+(it.host||'')).toLowerCase(); const i=TOP_SOURCES.findIndex(t=>s.includes(t)); return i<0?999:i; };
+      items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
+    }
+
+    const MIN_ITEMS=12, MAX_ITEMS=16, CAP=3;
+    const included=new Array(items.length).fill(false);
+    const srcCount={};
+    let n=0;
+    items.forEach((it,i)=>{
+      if(n>=MAX_ITEMS) return;
+      const key=(it.src||it.host||'').toLowerCase();
+      const c=srcCount[key]||0;
+      if(c>=CAP) return;
+      srcCount[key]=c+1; included[i]=true; n++;
+    });
+    if(n<MIN_ITEMS){
+      items.forEach((it,i)=>{
+        if(n>=MIN_ITEMS || included[i]) return;
+        included[i]=true; n++;
+      });
+    }
+    items=items.filter((it,i)=>included[i]);
+    if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
+
+    const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
+    const tr = isBist ? allTexts : await translateTR(allTexts);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
+    box.innerHTML=items.map((it,idx)=>{
+      const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
+      const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
+      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${isBist?'Habere git →':'Orijinal habere git (İng.) →'}</a>`;
+      return `<div class="news" onclick="toggleNews(this)">
+        <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
+        <div class="news-m">${safeHTML(meta)}</div>
+        <div class="news-sum">${sum}<br>${links}</div>
+      </div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
+}
+function toggleNews(el){ el.classList.toggle('open'); }
+
+/* ---- Sağlam yükümlülük/özkaynak toplamları ---- */
+const bsVal=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+function equityAllIn(D,d){
+  const incl=bsVal(D.equityIncl,d);
+  if(incl) return incl;
+  return bsVal(D.equity,d)+bsVal(D.minority,d);
+}
+function liabTotal(D,d){
+  if(D.liab && (d in D.liab)) return D.liab[d];
+  const base=bsVal(D.liabEquity,d)||bsVal(D.assets,d);
+  const eq=equityAllIn(D,d);
+  if(base && eq) return base-eq;
+  return bsVal(D.liabCur,d)+bsVal(D.liabNoncur,d);
+}
+
+function buildRowsFromSEC(D,D0,D1){
+  const out=[];
+  const v=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+  const section=(cat,items,totMap,plugLabel,derive)=>{
+    let cs=0,ps=0;
+    items.forEach(([lbl,m])=>{
+      const cv=v(m,D0), pv=v(m,D1);
+      cs+=cv; ps+=pv;
+      if(cv!==0||pv!==0) out.push([lbl,cat,cv,pv]);
+    });
+    const ct = derive? derive(D0): v(totMap,D0);
+    const pt = derive? derive(D1): v(totMap,D1);
+    const plugC=ct-cs, plugP=pt-ps;
+    const thr=Math.max(Math.abs(ct),1)*0.001;
+    if(Math.abs(plugC)>thr||Math.abs(plugP)>thr) out.push([plugLabel,cat,plugC,plugP]);
+  };
+
+  section('asset_current',[
+    ['Nakit ve Nakit Benzerleri',D.cash],
+    ['Kısa Vadeli Yatırımlar',D.stInv],
+    ['Ticari Alacaklar',D.recv],
+    ['Stoklar',D.inv],
+  ],D.assetsCur,'Diğer Dönen Varlıklar');
+
+  section('asset_noncur',[
+    ['Maddi Duran Varlıklar',D.ppe],
+    ['Şerefiye (Goodwill)',D.goodwill],
+    ['Maddi Olmayan Duran Varlıklar',D.intang],
+    ['Uzun Vadeli Yatırımlar',D.ltInv],
+  ],null,'Diğer Duran Varlıklar', d=> (v(D.assets,d)-v(D.assetsCur,d)) );
+
+  section('liab_current',[
+    ['Ticari Borçlar',D.ap],
+    ['Kısa Vadeli Finansal Borçlar',D.stDebt],
+    ['Ertelenmiş Gelirler',D.defRev],
+  ],D.liabCur,'Diğer Kısa Vadeli Yük.');
+
+  section('liab_noncur',[
+    ['Uzun Vadeli Finansal Borçlar',D.ltDebt],
+  ],null,'Diğer Uzun Vadeli Yük.', d=> (liabTotal(D,d)-v(D.liabCur,d)) );
+
+  section('equity',[
+    ['Ödenmiş Sermaye',D.common],
+    ['Dağıtılmamış Kârlar',D.retained],
+  ],null,'Diğer Özkaynak Kalemleri', d=> (v(D.assets,d)-liabTotal(D,d)) );
+
+  return out;
+}
+
+/* ---------- Tablo satır ekleme ---------- */
+function rowHTML(name='', cat='asset_current', cur='', prev=''){
+  const opts = Object.keys(CATS).map(k=>`<option value="${k}" ${k===cat?'selected':''}>${CATS[k]}</option>`).join('');
+  const cell = v => (v===''||v===null||v===undefined) ? '' : fmtAbbr(Number(v));
+  return `<tr>
+    <td><input class="name" value="${name.replace(/"/g,'&quot;')}" placeholder="Kalem adı"></td>
+    <td><select class="cell catsel">${opts}</select></td>
+    <td><input class="cell cur" value="${cell(cur)}" inputmode="text"></td>
+    <td><input class="cell prev" value="${cell(prev)}" inputmode="text"></td>
+    <td class="row-actions"><button class="delrow" onclick="this.closest('tr').remove()" title="Sil">✕</button></td>
+  </tr>`;
+}
+function addRow(group){
+  const cat = group==='asset'?'asset_current':group==='liab'?'liab_current':'equity';
+  document.getElementById('inputBody').insertAdjacentHTML('beforeend', rowHTML('',cat));
+}
+function setPeriodHeaders(curDate, prevDate){
+  const th1=document.getElementById('thCur'), th2=document.getElementById('thPrev');
+  if(th1) th1.innerHTML = 'Cari Dönem' + (curDate?`<br><span class="thd">${curDate}</span>`:'');
+  if(th2) th2.innerHTML = 'Önceki Dönem' + (prevDate?`<br><span class="thd">${prevDate}</span>`:'');
+}
+function hidePriceUI(){
+  const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
+  const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard'), kc=document.getElementById('kapCard');
+  const en=document.getElementById('earnNote');
+  if(lp) lp.classList.add('hidden');
+  if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
+  if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
+  if(tc) tc.classList.add('hidden');
+  if(vc) vc.classList.add('hidden');
+  if(kc) kc.classList.add('hidden');
+  if(en){ en.classList.add('hidden'); en.innerHTML=''; }
+  const ec=document.getElementById('econCard'); if(ec) ec.classList.add('hidden');
+  const cfCard=document.getElementById('cashflowCard'); if(cfCard) cfCard.classList.add('hidden');
+  const chC=document.getElementById('chartCard'); if(chC) chC.classList.add('hidden');
+  stopNyClock();
+}
+function loadSample(){
+  REQ_GEN++; FIN=null; hidePriceUI();
+  const b=document.getElementById('inputBody'); b.innerHTML='';
+  SAMPLE.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+  setPeriodHeaders(null,null);
+  analyze();
+}
+function clearAll(){ REQ_GEN++; FIN=null; hidePriceUI(); document.getElementById('inputBody').innerHTML=''; setPeriodHeaders(null,null); document.getElementById('results').classList.add('hidden'); }
+
+/* ---------- Verileri oku ---------- */
+function readData(){
+  const rows=[...document.querySelectorAll('#inputBody tr')];
+  return rows.map(tr=>({
+    name: tr.querySelector('.name').value.trim()||'(adsız)',
+    cat:  tr.querySelector('.catsel').value,
+    cur:  num(tr.querySelector('.cur').value),
+    prev: num(tr.querySelector('.prev').value)
+  })).filter(r=>r.cur!==0||r.prev!==0);
+}
+const sum=(rows,f,key)=>rows.filter(f).reduce((a,r)=>a+r[key],0);
+
+function colorInputRows(){
+  document.querySelectorAll('#inputBody tr').forEach(tr=>{
+    const curEl=tr.querySelector('.cur'), prevEl=tr.querySelector('.prev'), catEl=tr.querySelector('.catsel');
+    if(!curEl||!prevEl||!catEl) return;
+    curEl.classList.remove('cell-good','cell-bad');
+    const cur=num(curEl.value), prev=num(prevEl.value);
+    if(!prev) return;
+    const dv=cur-prev;
+    if(Math.abs(dv) < Math.abs(prev)*0.0005) return;
+    const favorable = (CAT_GROUP[catEl.value]==='liab') ? dv<0 : dv>0;
+    curEl.classList.add(favorable?'cell-good':'cell-bad');
+  });
+}
+
+/* ---------- Ana analiz ---------- */
+function analyze(){
+  const d=readData();
+  colorInputRows();
+  if(d.length===0){ alert('Lütfen en az bir kalem girin veya "Örnek Veri Yükle"ye basın.'); return; }
+  document.getElementById('results').classList.remove('hidden');
+
+  const isE=r=>CAT_GROUP[r.cat]==='equity';
+  const period=['cur','prev'];
+  const T={};
+  period.forEach(p=>{
+    T[p]={
+      donenV:   sum(d,r=>r.cat==='asset_current',p),
+      duranV:   sum(d,r=>r.cat==='asset_noncur',p),
+      kvYuk:    sum(d,r=>r.cat==='liab_current',p),
+      uvYuk:    sum(d,r=>r.cat==='liab_noncur',p),
+      ozkaynak: sum(d,isE,p),
+      stok:     sum(d,r=>/stok/i.test(r.name)&&r.cat==='asset_current',p),
+      nakit:    sum(d,r=>/(nakit|kasa|banka(?!\s*kred))/i.test(r.name)&&r.cat==='asset_current',p),
+    };
+    T[p].toplamV = T[p].donenV+T[p].duranV;
+    T[p].toplamYuk = T[p].kvYuk+T[p].uvYuk;
+    T[p].pasifTop = T[p].toplamYuk+T[p].ozkaynak;
+    T[p].netSermaye = T[p].donenV-T[p].kvYuk;
+  });
+
+  renderBalCheck(T);
+  renderKPIs(T);
+  renderRatios(T);
+  renderVariance(d);
+  renderVertical(d,T);
+  renderFlags(d,T);
+
+  const incCard=document.getElementById('incomeCard'), trCard=document.getElementById('trendCard');
+  if(FIN){
+    renderIncome(T); renderCashflow(); renderTrends();
+    incCard.classList.remove('hidden'); trCard.classList.remove('hidden');
+  }else{
+    incCard.classList.add('hidden'); trCard.classList.add('hidden');
+    const cfC=document.getElementById('cashflowCard'); if(cfC) cfC.classList.add('hidden');
+  }
+
+  const rt=document.getElementById('reportTitle');
+  if(rt){
+    rt.textContent = FIN
+      ? `${FIN.ticker} · ${FIN.market==='BIST'?'BIST':'ABD'} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${FIN.market==='BIST'?'TL':'USD'}`
+      : 'Elle girilen veri';
+  }
+  const pn=document.getElementById('periodNote');
+  if(pn){
+    if(FIN && FIN.market==='BIST'){
+      const bankTxt = FIN.bankGroup==='UFRS' ? ' <b>Banka/sigorta bilançosu:</b> dönen/duran ayrımı olmadığı için likidite oranları (cari oran vb.) bu şirketlerde sınırlı anlam taşır.' : '';
+      pn.innerHTML = (FIN.mode==='annual'
+        ? `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel tamamlanmış mali yıl. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
+        : `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel açıklanan çeyrek.`) + bankTxt;
+    }else if(FIN){
+      const filedTxt = FIN.filedD0 ? `📅 SEC'e bildirilme: ${fmtDate(FIN.filedD0)}.` : '';
+      const lagTxt = FIN.mode==='annual'
+        ? ` Yıllık rapor (10-K) yılda bir, tamamlanmış mali yıl için yayımlanır — bu en güncel tamamlanmış mali yıldır. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
+        : ` Çeyreklik rapor (10-Q) — en güncel ara dönem.`;
+      pn.innerHTML = (filedTxt + lagTxt).trim();
+    }else{
+      pn.textContent='';
+    }
+  }
+}
+
+/* ---------- Dışa aktarma: PDF (yazdır) & Excel (CSV) ---------- */
+function exportPDF(){ window.print(); }
+
+function csvCell(s){ s=String(s==null?'':s).replace(/ /g,' ').replace(/\s*\n\s*/g,' ').trim(); return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }
+function domTableRows(bodySel){
+  const tb=document.querySelector(bodySel); if(!tb) return [];
+  return [...tb.querySelectorAll('tr')].map(tr=>[...tr.querySelectorAll('th,td')]
+    .filter(c=>!c.classList.contains('row-actions'))
+    .map(c=>c.innerText.replace(/\s*\n\s*/g,' ').trim()));
+}
+function exportCSV(){
+  const d=readData();
+  if(!d.length){ alert('Önce veri girip "Analiz Et"e basın.'); return; }
+  const sep=';', L=[];
+  const push=(...c)=>L.push(c.map(csvCell).join(sep));
+  const section=(title,headers,bodySel)=>{ push(title); push(...headers); domTableRows(bodySel).forEach(r=>push(...r)); push(''); };
+
+  push('Bilanço Analiz Raporu');
+  push('Şirket', FIN?FIN.ticker:'Elle girilen veri');
+  push('Dönem', FIN?(FIN.mode==='annual'?'Yıllık':'Çeyreklik'):'—');
+  if(FIN) push('Tarih', fmtDate(FIN.D0)+(FIN.D1?' / '+fmtDate(FIN.D1):''));
+  push('Para birimi', CUR);
+  push('Oluşturma', new Date().toLocaleString('tr-TR'));
+  push('');
+
+  push('BİLANÇO'); push('Kalem','Kategori','Cari','Önceki');
+  d.forEach(r=> push(r.name, CATS[r.cat], Math.round(r.cur), Math.round(r.prev)));
+  push('');
+
+  section('FİNANSAL ORANLAR', ['Oran','Cari','Önceki','Değişim','Durum'], '#ratioBody');
+  if(FIN){
+    section('GELİR TABLOSU', ['Kalem','Cari','Önceki','Değişim'], '#incomeBody');
+    section('KÂRLILIK ORANLARI', ['Oran','Cari','Önceki','Değişim','Durum'], '#profBody');
+    section('NAKİT AKIŞ TABLOSU', ['Kalem','Cari','Önceki','Değişim'], '#cashflowBody');
+  }
+  section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki','Değişim ($)','Değişim (%)','Yön'], '#varBody');
+
+  const csv='﻿'+L.join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  const name=(FIN?FIN.ticker:'bilanco')+'-analiz-'+new Date().toISOString().slice(0,10)+'.csv';
+  a.href=URL.createObjectURL(blob); a.download=name;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/* ---- Gelir tablosu & kârlılık ---- */
+function renderIncome(T){
+  const I=FIN.income, D0=FIN.D0, D1=FIN.D1;
+  const iv=(k,d)=> (d && I[k] && (d in I[k])) ? I[k][d] : null;
+  const revDates=Object.keys(I.revenue||{}).sort().reverse();
+  const R0=revDates[0]||D0, R1=revDates[1]||D1;
+
+  const rev0=iv('revenue',R0), rev1=iv('revenue',R1);
+  const ni0=iv('netIncome',R0), ni1=iv('netIncome',R1);
+  const nm0=(rev0&&ni0!=null)?ni0/rev0:null, nm1=(rev1&&ni1!=null)?ni1/rev1:null;
+  const roe0=T.cur.ozkaynak?(ni0!=null?ni0/T.cur.ozkaynak:null):null;
+  const roe1=T.prev.ozkaynak?(ni1!=null?ni1/T.prev.ozkaynak:null):null;
+  const kpi=(lbl,c,p,fmtFn,inv)=>{
+    if(c==null){ return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">—</div></div>`; }
+    let delta='';
+    if(p!=null && p!==0){ const ch=(c-p)/Math.abs(p)*100; const good=inv?ch<0:ch>0;
+      const cls=Math.abs(ch)<0.05?'neutral':(good?'up':'down'); const ar=Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
+      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fmtFn(p)})</span></div>`; }
+    return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${fmtFn(c)}</div>${delta}</div>`;
+  };
+  const pp=v=>(v==null?'—':(v*100).toFixed(1)+'%');
+  document.getElementById('profKpis').innerHTML=[
+    kpi('Gelir (Hasılat)', rev0, rev1, fmtAbbr),
+    kpi('Net Kâr', ni0, ni1, fmtAbbr),
+    kpi('Net Kâr Marjı', nm0, nm1, pp),
+    kpi('Özkaynak Kârlılığı (ROE)', roe0, roe1, pp),
+  ].join('');
+
+  const lines=[
+    ['Gelir (Hasılat)','revenue',false],
+    ['Satış Maliyeti','costRev',true],
+    ['Brüt Kâr','grossProfit',false],
+    ['Faaliyet Kârı','opIncome',false],
+    ['Ar-Ge Gideri','rnd',true],
+    ['Net Kâr','netIncome',false],
+  ];
+  document.getElementById('incomeBody').innerHTML=lines.map(([lbl,k,inv])=>{
+    const c=iv(k,R0), p=iv(k,R1);
+    if(c==null&&p==null) return '';
+    let ch='—';
+    if(c!=null&&p!=null&&p!==0){ const d=(c-p)/Math.abs(p)*100; const good=inv?d<0:d>0;
+      const cls=Math.abs(d)<0.05?'neutral':(good?'up':'down'); ch=`<span class="${cls}">${pct(d)}</span>`; }
+    return `<tr><td>${lbl}</td><td><b>${c==null?'—':fmtAbbr(c)}</b></td><td>${p==null?'—':fmtAbbr(p)}</td><td>${ch}</td></tr>`;
+  }).filter(Boolean).join('');
+
+  const gp0=iv('grossProfit',R0), gp1=iv('grossProfit',R1);
+  const op0=iv('opIncome',R0), op1=iv('opIncome',R1);
+  const roa0=T.cur.toplamV?(ni0!=null?ni0/T.cur.toplamV:null):null;
+  const roa1=T.prev.toplamV?(ni1!=null?ni1/T.prev.toplamV:null):null;
+  const defs=[
+    ['Brüt Marj','Brüt Kâr / Gelir', rev0?(gp0!=null?gp0/rev0:null):null, rev1?(gp1!=null?gp1/rev1:null):null, v=>v>=0.4?'good':v>=0.2?'warn':'bad'],
+    ['Faaliyet Marjı','Faaliyet Kârı / Gelir', rev0?(op0!=null?op0/rev0:null):null, rev1?(op1!=null?op1/rev1:null):null, v=>v>=0.15?'good':v>=0.05?'warn':'bad'],
+    ['Net Kâr Marjı','Net Kâr / Gelir', nm0, nm1, v=>v>=0.1?'good':v>=0.03?'warn':'bad'],
+    ['Özkaynak Kârlılığı (ROE)','Net Kâr / Özkaynak', roe0, roe1, v=>v>=0.15?'good':v>=0.08?'warn':'bad'],
+    ['Aktif Kârlılığı (ROA)','Net Kâr / Toplam Varlık', roa0, roa1, v=>v>=0.07?'good':v>=0.03?'warn':'bad'],
+  ];
+  document.getElementById('profBody').innerHTML=defs.map(([nm,fo,c,p,st])=>{
+    const status=c==null?'warn':st(c);
+    const lbl=c==null?'—':(status==='good'?'İyi':status==='warn'?'Orta':'Zayıf');
+    let ch='—';
+    if(c!=null&&p!=null){ const d=(c-p)*100; ch=(d>=0?'▲ +':'▼ ')+d.toFixed(1)+'p'; }
+    return `<tr>
+      <td><span class="ratio-name">${nm}</span><br><span class="ratio-formula">${fo}</span></td>
+      <td><b>${pp(c)}</b></td><td>${pp(p)}</td><td>${ch}</td>
+      <td><span class="pill ${status}">${lbl}</span></td></tr>`;
+  }).join('');
+}
+
+/* ---- Nakit Akış Tablosu & Serbest Nakit Akışı (FCF) ---- */
+function renderCashflow(){
+  const card=document.getElementById('cashflowCard');
+  const kbox=document.getElementById('cfKpis'), body=document.getElementById('cashflowBody');
+  if(!card||!kbox||!body) return;
+  const C=(FIN&&FIN.cashflow)||{}, I=(FIN&&FIN.income)||{};
+  const dates=Object.keys(C.opCF||{}).sort().reverse();
+  if(!dates.length){ card.classList.add('hidden'); return; }
+  const R0=dates[0], R1=dates[1];
+  const v=(m,d)=> (d && m && (d in m)) ? m[d] : null;
+
+  const op0=v(C.opCF,R0),   op1=v(C.opCF,R1);
+  const inv0=v(C.invCF,R0), inv1=v(C.invCF,R1);
+  const fin0=v(C.finCF,R0), fin1=v(C.finCF,R1);
+  const cap0=v(C.capex,R0), cap1=v(C.capex,R1);
+  const dep0=v(C.dep,R0),   dep1=v(C.dep,R1);
+  const fcf0=(op0!=null)? op0-(cap0||0):null, fcf1=(op1!=null)? op1-(cap1||0):null;
+  const rev0=v(I.revenue,R0), rev1=v(I.revenue,R1);
+  const fcfM0=(rev0&&fcf0!=null)? fcf0/rev0:null, fcfM1=(rev1&&fcf1!=null)? fcf1/rev1:null;
+  const pp=x=>(x==null?'—':(x*100).toFixed(1)+'%');
+
+  const kpi=(lbl,c,p,fn,color)=>{
+    if(c==null) return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">—</div></div>`;
+    let delta='';
+    if(p!=null && p!==0){ const ch=(c-p)/Math.abs(p)*100;
+      const cls=(color===false)?'neutral':(Math.abs(ch)<0.05?'neutral':(ch>0?'up':'down'));
+      const ar=Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
+      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fn(p)})</span></div>`; }
+    const valStyle=(fn===fmtAbbr && c<0)?'style="color:var(--bad)"':'';
+    return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val" ${valStyle}>${fn(c)}</div>${delta}</div>`;
+  };
+  kbox.innerHTML=[
+    kpi('Faaliyet Nakit Akışı', op0, op1, fmtAbbr),
+    kpi('Serbest Nakit Akışı (FCF)', fcf0, fcf1, fmtAbbr),
+    kpi('FCF Marjı', fcfM0, fcfM1, pp),
+    kpi('Sermaye Harcaması (Capex)', cap0, cap1, fmtAbbr, false),
+  ].join('');
+
+  const rows=[
+    ['Faaliyetlerden Nakit Akışı', op0, op1, true, false],
+    ['Yatırım Faaliyetlerinden', inv0, inv1, false, false],
+    ['Finansman Faaliyetlerinden', fin0, fin1, false, false],
+    ['(−) Sermaye Harcaması (Capex)', cap0!=null?-cap0:null, cap1!=null?-cap1:null, false, false],
+    ['Serbest Nakit Akışı (FCF)', fcf0, fcf1, true, true],
+    ['Amortisman (D&A)', dep0, dep1, false, false],
+  ];
+  body.innerHTML=rows.map(([lbl,c,p,colored,bold])=>{
+    let ch='—';
+    if(c!=null&&p!=null&&p!==0){ const dd=(c-p)/Math.abs(p)*100;
+      const cls=colored?(Math.abs(dd)<0.05?'neutral':(dd>0?'up':'down')):'neutral';
+      ch=`<span class="${cls}">${pct(dd)}</span>`; }
+    return `<tr ${bold?'style="font-weight:700"':''}><td>${lbl}</td>
+      <td><b>${c==null?'—':fmtAbbr(c)}</b></td><td>${p==null?'—':fmtAbbr(p)}</td><td>${ch}</td></tr>`;
+  }).join('');
+  card.classList.remove('hidden');
+}
+
+/* ---- Çok yıllı trend grafikleri (bağımsız SVG) ---- */
+function fmtShort(n){
+  const s=n<0?'-':'', a=Math.abs(n);
+  if(a>=1e12) return s+(a/1e12).toFixed(1)+'T';
+  if(a>=1e9)  return s+(a/1e9).toFixed(0)+'B';
+  if(a>=1e6)  return s+(a/1e6).toFixed(0)+'M';
+  if(a>=1e3)  return s+(a/1e3).toFixed(0)+'K';
+  return s+Math.round(a);
+}
+function miniBarChart(title, series){
+  const entries=Object.keys(series||{}).map(d=>[d,series[d]]).filter(e=>typeof e[1]==='number');
+  entries.sort((a,b)=> a[0]<b[0]?-1:1);
+  const data=entries.slice(-6);
+  if(data.length<2) return '';
+  const W=330,H=170, padT=22, padB=28;
+  const vals=data.map(d=>d[1]);
+  let max=Math.max(...vals,0), min=Math.min(...vals,0);
+  const span=(max-min)||Math.abs(max)||1;
+  const plotH=H-padT-padB;
+  const n=data.length, gap=8, plotW=W-12, bw=(plotW-gap*(n-1))/n;
+  const yOf=v=> padT + ((max-v)/span)*plotH;
+  const y0=yOf(0);
+  let bars='';
+  data.forEach((d,i)=>{
+    const x=6+i*(bw+gap), v=d[1], yv=yOf(v);
+    const top=Math.min(yv,y0), hgt=Math.max(1,Math.abs(yv-y0));
+    const col=v<0?'var(--bad)':'var(--accent)';
+    const ly=v>=0? top-5 : top+hgt+11;
+    bars+=`<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hgt.toFixed(1)}" rx="3" fill="${col}"><title>${fmtDate(d[0])}: ${fmtAbbr(v)}</title></rect>
+      <text x="${(x+bw/2).toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" font-size="9.5" fill="var(--ink-2)">${fmtShort(v)}</text>
+      <text x="${(x+bw/2).toFixed(1)}" y="${(H-10).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--muted)">${String(d[0]).slice(0,4)}</text>`;
+  });
+  const baseline = min<0 ? `<line x1="6" x2="${W-6}" y1="${y0.toFixed(1)}" y2="${y0.toFixed(1)}" stroke="var(--line-2)"/>` : '';
+  return `<div style="background:var(--surface-2);border:1px solid var(--line);border-radius:13px;padding:12px 14px">
+    <div style="font-size:12.5px;font-weight:700;color:var(--ink-2);margin-bottom:2px">${title}</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${baseline}${bars}</svg></div>`;
+}
+function renderTrends(){
+  const charts=[
+    ['Gelir (Hasılat)', FIN.income.revenue],
+    ['Net Kâr', FIN.income.netIncome],
+    ['Toplam Varlık', FIN.balance.assets],
+    ['Özkaynak', FIN.balance.equity],
+    ['Toplam Yükümlülük', FIN.balance.liab],
+  ];
+  const html=charts.map(([t,s])=>miniBarChart(t,s)).filter(Boolean).join('');
+  document.getElementById('trendCharts').innerHTML = html || '<div class="hint">Trend için yeterli geçmiş veri bulunamadı.</div>';
+}
+
+/* ---- Bilanço dengesi ---- */
+function renderBalCheck(T){
+  const diff=T.cur.toplamV-T.cur.pasifTop;
+  const ok=Math.abs(diff)<Math.max(1,T.cur.toplamV*0.005);
+  const el=document.getElementById('balcheck');
+  el.className='balcheck '+(ok?'ok':'no');
+  el.innerHTML = ok
+    ? `✓ Bilanço dengede: Toplam Varlık (${fmtAbbr(T.cur.toplamV)}) = Yükümlülük + Özkaynak (${fmtAbbr(T.cur.pasifTop)})`
+    : `⚠ Bilanço dengede DEĞİL — Aktif ${fmtAbbr(T.cur.toplamV)} ≠ Pasif ${fmtAbbr(T.cur.pasifTop)} (fark ${fmtAbbr(diff)}). Girdileri kontrol edin.`;
+}
+
+/* ---- KPI kartları ---- */
+function renderKPIs(T){
+  const cards=[
+    ['Toplam Varlık', T.cur.toplamV, T.prev.toplamV, false],
+    ['Toplam Yükümlülük', T.cur.toplamYuk, T.prev.toplamYuk, true],
+    ['Özkaynak', T.cur.ozkaynak, T.prev.ozkaynak, false],
+    ['Net İşletme Sermayesi', T.cur.netSermaye, T.prev.netSermaye, false],
+    ['Dönen Varlık', T.cur.donenV, T.prev.donenV, false],
+    ['Kısa Vade. Yük.', T.cur.kvYuk, T.prev.kvYuk, true],
+  ];
+  document.getElementById('kpis').innerHTML = cards.map(([lbl,cur,prev,inv])=>{
+    const ch = prev!==0 ? (cur-prev)/Math.abs(prev)*100 : (cur!==0?100:0);
+    const goodDir = inv ? ch<0 : ch>0;
+    const cls = Math.abs(ch)<0.05?'neutral':(goodDir?'up':'down');
+    const arrow = Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
+    return `<div class="kpi"><div class="lbl">${lbl}</div>
+      <div class="val">${fmtAbbr(cur)}</div>
+      <div class="delta ${cls}">${arrow} ${pct(ch)} <span class="neutral">(önceki ${fmtAbbr(prev)})</span></div></div>`;
+  }).join('');
+}
+
+/* ---- Oranlar ---- */
+function renderRatios(T){
+  const safe=(a,b)=> b===0?null:a/b;
+  function build(p){
+    const t=T[p];
+    return {
+      cari: safe(t.donenV,t.kvYuk),
+      asit: safe(t.donenV-t.stok,t.kvYuk),
+      nakit: safe(t.nakit,t.kvYuk),
+      borcOz: safe(t.toplamYuk,t.ozkaynak),
+      kaldiraci: safe(t.toplamYuk,t.toplamV),
+      ozkOran: safe(t.ozkaynak,t.toplamV),
+      duranOzk: safe(t.duranV,t.ozkaynak),
+    };
+  }
+  const c=build('cur'), pr=build('prev');
+  const defs=[
+    ['Cari Oran','Dönen V. / KV Yük.', c.cari, pr.cari, 'x', v=> v>=1.5?'good':v>=1?'warn':'bad'],
+    ['Asit-Test (Likidite)','(Dönen V. − Stok) / KV Yük.', c.asit, pr.asit, 'x', v=> v>=1?'good':v>=0.7?'warn':'bad'],
+    ['Nakit Oranı','Nakit / KV Yük.', c.nakit, pr.nakit, 'x', v=> v>=0.2?'good':v>=0.1?'warn':'bad'],
+    ['Borç / Özkaynak','Toplam Yük. / Özkaynak', c.borcOz, pr.borcOz, 'x', v=> v<=1?'good':v<=2?'warn':'bad'],
+    ['Finansal Kaldıraç','Toplam Yük. / Toplam Varlık', c.kaldiraci, pr.kaldiraci, '%', v=> v<=0.5?'good':v<=0.7?'warn':'bad'],
+    ['Özkaynak Oranı','Özkaynak / Toplam Varlık', c.ozkOran, pr.ozkOran, '%', v=> v>=0.4?'good':v>=0.25?'warn':'bad'],
+    ['Duran V. Karşılama','Duran V. / Özkaynak', c.duranOzk, pr.duranOzk, 'x', v=> v<=1?'good':v<=1.5?'warn':'bad'],
+  ];
+  const showV=(v,f)=> v===null?'—':(f==='%'?(v*100).toFixed(1)+'%':v.toFixed(2)+'x');
+  document.getElementById('ratioBody').innerHTML = defs.map(([nm,fo,cv,pv,f,st])=>{
+    const status = cv===null?'warn':st(cv);
+    const lbl = status==='good'?'İyi':status==='warn'?'Orta':'Zayıf';
+    let ch='—';
+    if(cv!==null&&pv!==null){ const dv=cv-pv; ch=(dv>=0?'▲ ':'▼ ')+(f==='%'?(dv*100).toFixed(1)+'p':dv.toFixed(2)); }
+    return `<tr>
+      <td><span class="ratio-name">${nm}</span><br><span class="ratio-formula">${fo}</span></td>
+      <td><b>${showV(cv,f)}</b></td>
+      <td>${showV(pv,f)}</td>
+      <td>${ch}</td>
+      <td><span class="pill ${status}">${lbl}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- Yatay analiz / önemli değişimler ---- */
+function renderVariance(d){
+  const rows=d.map(r=>{
+    const dv=r.cur-r.prev;
+    const dp=r.prev!==0? dv/Math.abs(r.prev)*100 : (r.cur!==0?100:0);
+    return {...r,dv,dp};
+  }).filter(r=>r.dv!==0);
+  rows.sort((a,b)=>Math.abs(b.dv)-Math.abs(a.dv));
+  const top=rows.slice(0,8);
+  document.getElementById('varBody').innerHTML = top.map(r=>{
+    const inv = CAT_GROUP[r.cat]!=='asset';
+    const fav = inv ? r.dv<0 : r.dv>0;
+    const dir = Math.abs(r.dp)<0.05?'neutral':(fav?'up':'down');
+    const tag = r.dv>0?'Artış':'Azalış';
+    return `<tr>
+      <td>${r.name} <span class="ratio-formula">(${CATS[r.cat]})</span></td>
+      <td>${fmtAbbr(r.cur)}</td><td>${fmtAbbr(r.prev)}</td>
+      <td class="${dir}">${r.dv>0?'+':''}${fmtAbbr(r.dv)}</td>
+      <td class="${dir}">${pct(r.dp)}</td>
+      <td><span class="${dir}">${tag}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- Dikey analiz ---- */
+function renderVertical(d,T){
+  const rows=d.map(r=>{
+    const cp = T.cur.toplamV? r.cur/T.cur.toplamV*100:0;
+    const pp = T.prev.toplamV? r.prev/T.prev.toplamV*100:0;
+    return {...r,cp,pp,shift:cp-pp};
+  }).sort((a,b)=>b.cp-a.cp);
+  document.getElementById('vertBody').innerHTML = rows.map(r=>{
+    const w=Math.min(100,Math.abs(r.cp));
+    const col = CAT_GROUP[r.cat]==='asset'?'#1763b8':CAT_GROUP[r.cat]==='liab'?'#c0392b':'#157a4d';
+    const sc=Math.abs(r.shift)<0.05?'neutral':(r.shift>0?'up':'down');
+    return `<tr>
+      <td>${r.name} <span class="ratio-formula">(${CATS[r.cat]})</span></td>
+      <td>${r.cp.toFixed(1)}%</td>
+      <td>${r.pp.toFixed(1)}%</td>
+      <td class="${sc}">${r.shift>=0?'+':''}${r.shift.toFixed(1)}p</td>
+      <td style="width:160px"><div class="bar"><i style="width:${w}%;background:${col}"></i></div></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ---- Otomatik yorum & risk işaretleri ---- */
+function renderFlags(d,T){
+  const F=[];
+  const add=(lvl,ttl,body)=>F.push({lvl,ttl,body});
+  const c=T.cur, p=T.prev;
+  const cari=c.kvYuk?c.donenV/c.kvYuk:null;
+  const asit=c.kvYuk?(c.donenV-c.stok)/c.kvYuk:null;
+  const borcOz=c.ozkaynak?c.toplamYuk/c.ozkaynak:null;
+  const ozkOran=c.toplamV?c.ozkaynak/c.toplamV:null;
+
+  if(cari!==null){
+    if(cari<1) add('bad','Likidite riski yüksek',`Cari oran ${cari.toFixed(2)}x — dönen varlıklar kısa vadeli borçları karşılamıyor. Nakit akışı baskısı olabilir.`);
+    else if(cari<1.5) add('warn','Likidite sınırda',`Cari oran ${cari.toFixed(2)}x. 1,5x üzeri daha güvenli kabul edilir.`);
+    else add('good','Likidite güçlü',`Cari oran ${cari.toFixed(2)}x — kısa vadeli yükümlülükler rahatça karşılanıyor.`);
+  }
+  if(asit!==null && asit<0.7) add('warn','Stoğa bağımlılık',`Asit-test ${asit.toFixed(2)}x. Likidite büyük ölçüde stoklara bağlı; stok devri yavaşsa risk artar.`);
+
+  if(borcOz!==null){
+    if(borcOz>2) add('bad','Yüksek borçluluk',`Borç/Özkaynak ${borcOz.toFixed(2)}x — özkaynağın 2 katından fazla borç. Faiz/kur şoklarına kırılgan.`);
+    else if(borcOz>1) add('warn','Orta düzey kaldıraç',`Borç/Özkaynak ${borcOz.toFixed(2)}x. Borç yükü yakından izlenmeli.`);
+    else add('good','Sağlam sermaye yapısı',`Borç/Özkaynak ${borcOz.toFixed(2)}x — düşük kaldıraç.`);
+  }
+  if(ozkOran!==null && ozkOran<0.25) add('bad','İnce özkaynak tabanı',`Özkaynak oranı %${(ozkOran*100).toFixed(0)} — varlıkların çok büyük kısmı borçla finanse ediliyor.`);
+
+  if(c.netSermaye<0) add('bad','Negatif işletme sermayesi',`Net işletme sermayesi ${fmtAbbr(c.netSermaye)} ${CUR} — kısa vadeli borçlar dönen varlıkları aşıyor.`);
+  else if(p.netSermaye!==0 && c.netSermaye<p.netSermaye*0.7) add('warn','İşletme sermayesi eridi',`Net işletme sermayesi ${fmtAbbr(p.netSermaye)} → ${fmtAbbr(c.netSermaye)} ${CUR}'ye geriledi.`);
+
+  const kvKredi=d.filter(r=>/banka kred|kredi/i.test(r.name)&&r.cat==='liab_current');
+  const kvK=kvKredi.reduce((a,r)=>a+r.cur,0), kvKp=kvKredi.reduce((a,r)=>a+r.prev,0);
+  if(kvKp>0 && kvK>kvKp*1.5) add('warn','Kısa vadeli kredi sıçraması',`Kısa vadeli banka kredileri ${fmtAbbr(kvKp)} → ${fmtAbbr(kvK)} ${CUR} (%${((kvK/kvKp-1)*100).toFixed(0)} artış). Yeniden finansman riski.`);
+
+  const checkBloat=(rx,label)=>{
+    const it=d.filter(r=>rx.test(r.name)&&CAT_GROUP[r.cat]==='asset');
+    const cv=it.reduce((a,r)=>a+r.cur,0), pv=it.reduce((a,r)=>a+r.prev,0);
+    const varG=(c.toplamV-p.toplamV);
+    if(pv>0 && cv>pv*1.3 && (cv-pv) > Math.abs(varG)*0.3)
+      add('warn',`${label} hızlı büyüdü`,`${label} ${fmtAbbr(pv)} → ${fmtAbbr(cv)} ${CUR} (%${((cv/pv-1)*100).toFixed(0)}). Toplam varlık büyümesinin önemli kısmını oluşturuyor — tahsilat/devir hızı izlenmeli.`);
+  };
+  checkBloat(/alacak/i,'Ticari alacaklar');
+  checkBloat(/stok/i,'Stoklar');
+
+  if(p.nakit>0 && c.nakit<p.nakit*0.6) add('warn','Nakit pozisyonu zayıfladı',`Nakit ve benzerleri ${fmtAbbr(p.nakit)} → ${fmtAbbr(c.nakit)} ${CUR}'ye düştü (%${((1-c.nakit/p.nakit)*100).toFixed(0)} azalış).`);
+
+  if(p.ozkaynak>0 && c.ozkaynak>p.ozkaynak*1.05) add('good','Özkaynak güçlendi',`Özkaynak ${fmtAbbr(p.ozkaynak)} → ${fmtAbbr(c.ozkaynak)} ${CUR}'ye yükseldi (kârlılık/sermaye katkısı).`);
+
+  if(F.length===0) add('good','Belirgin risk işareti yok','Girilen verilere göre eşikleri aşan kritik bir sinyal bulunamadı.');
+
+  const ic={bad:'⛔',warn:'⚠️',good:'✅'};
+  F.sort((a,b)=>({bad:0,warn:1,good:2}[a.lvl]-{bad:0,warn:1,good:2}[b.lvl]));
+  document.getElementById('flags').innerHTML = F.map(f=>
+    `<div class="flag ${f.lvl}"><div class="ic">${ic[f.lvl]}</div>
+     <div><div class="ttl">${f.ttl}</div><div class="body">${f.body}</div></div></div>`).join('');
+}
+
+/* başlangıç */
+window.addEventListener('DOMContentLoaded',()=>{
+  loadSample();
+  const body=document.getElementById('inputBody');
+  body.addEventListener('input', colorInputRows);
+  body.addEventListener('change', colorInputRows);
+});

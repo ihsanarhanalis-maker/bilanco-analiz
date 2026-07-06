@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bilanço Analiz Aracı</title>
+<style>
+  :root{
+    --bg:#0a0d1a; --surface:#111726; --surface-2:#161e30; --surface-3:#1e293f;
+    --ink:#eaf0fa; --ink-2:#aebbd0; --muted:#7585a0; --line:#1f2940; --line-2:#2b3855;
+    --accent:#4f9cf9; --accent-2:#6cb0ff; --gold:#d6ad45;
+    --good:#34d39a; --warn:#f3b44e; --bad:#f06a72;
+    --good-bg:rgba(52,211,154,.12); --warn-bg:rgba(243,180,78,.12); --bad-bg:rgba(240,106,114,.12);
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",system-ui,Arial,sans-serif;background:var(--bg);color:var(--ink);
+    font-size:14px;-webkit-font-smoothing:antialiased;background-attachment:fixed;
+    background-image:
+      radial-gradient(1000px 560px at 88% -12%, rgba(124,92,255,.20), transparent 60%),
+      radial-gradient(820px 480px at 2% 2%, rgba(56,150,255,.14), transparent 58%);}
+
+  /* Üst bant */
+  header{background:linear-gradient(120deg,#0c1022 0%,#141a30 55%,#1a1f3d 100%);
+    border-bottom:1px solid var(--line-2)}
+  .hd-inner{max-width:1180px;margin:0 auto;padding:20px 28px;display:flex;align-items:center;gap:16px}
+  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(140deg,#1b2942,#101626);
+    border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+    box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.2px;color:#fff}
+  header p{margin:4px 0 0;color:var(--ink-2);font-size:12.5px}
+  .hd-badge{font-size:11px;color:var(--accent-2);background:rgba(79,156,249,.10);
+    border:1px solid rgba(79,156,249,.3);padding:5px 12px;border-radius:999px;white-space:nowrap;font-weight:600}
+  /* Piyasa değeri rozeti — okunaklı: etiket beyaz, değer yeşil */
+  .hd-badge.mcap{font-size:13px;color:var(--ink);background:rgba(52,211,154,.08);
+    border-color:rgba(52,211,154,.32);padding:6px 14px;display:inline-flex;align-items:baseline;gap:7px}
+  .hd-badge.mcap .mc-lbl{color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  .hd-badge.mcap .mc-eq{color:var(--muted);font-weight:700}
+  .hd-badge.mcap .mc-val{color:var(--good);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
+  .live-price{display:flex;align-items:baseline;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .live-price .lp-sym{color:var(--ink-2);font-size:13px;font-weight:700;letter-spacing:.3px}
+  .live-price .lp-val{color:#fff;font-size:22px;font-weight:800}
+  .live-price .lp-chg{font-size:13px;font-weight:700}
+  .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
+  .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 70px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+    padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow)}
+  .card h2{position:relative;margin:0 0 5px;padding-left:13px;font-size:16.5px;font-weight:700;color:var(--ink)}
+  .card h2::before{content:"";position:absolute;left:0;top:3px;bottom:3px;width:4px;border-radius:3px;
+    background:linear-gradient(var(--accent),#2f6fd0)}
+  .card .sub{color:var(--muted);font-size:12.5px;margin-bottom:15px;line-height:1.5}
+
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  button{cursor:pointer;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);
+    padding:9px 15px;border-radius:9px;font-size:13px;font-weight:600;transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent-2);background:var(--surface-3)}
+  button.primary{background:linear-gradient(135deg,#4f9cf9,#2f6fd0);border-color:transparent;color:#fff;
+    box-shadow:0 4px 14px rgba(47,111,208,.4)}
+  button.primary:hover{filter:brightness(1.08);color:#fff}
+
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:9px 11px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
+  th:first-child,td:first-child{text-align:left}
+  thead th{color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+    background:var(--surface-2);border-bottom:1px solid var(--line-2)}
+  tbody tr:hover td{background:var(--surface-2)}
+  tbody tr.group td{background:var(--surface-3);font-weight:700;color:var(--accent-2)}
+  tbody tr.total td{font-weight:700;border-top:2px solid var(--line-2)}
+
+  input.cell{width:130px;background:var(--bg);border:1px solid var(--line-2);color:var(--ink);
+    padding:7px 9px;border-radius:8px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums}
+  input.cell:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,156,249,.18)}
+  input.name{width:100%;background:transparent;border:none;color:var(--ink);font-size:13px;font-weight:500}
+  input.name:focus{outline:none}
+  select.cell{background:var(--bg);border:1px solid var(--line-2);color:var(--ink);padding:7px;border-radius:8px;font-size:12.5px}
+  select.cell:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,156,249,.18)}
+
+  .hint{color:var(--muted);font-size:12px;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+  .kpi{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
+    border-radius:13px;padding:15px 17px;position:relative;overflow:hidden}
+  .kpi::after{content:"";position:absolute;left:0;right:0;top:0;height:2px;
+    background:linear-gradient(90deg,var(--accent),transparent)}
+  .kpi .lbl{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px}
+  .kpi .val{font-size:23px;font-weight:700;color:var(--ink)}
+  .kpi .delta{font-size:12.5px;margin-top:5px}
+  .up{color:var(--good)} .down{color:var(--bad)} .neutral{color:var(--muted)}
+
+  .pill{display:inline-block;padding:3px 11px;border-radius:999px;font-size:11.5px;font-weight:700;border:1px solid transparent}
+  .pill.good{background:var(--good-bg);color:var(--good);border-color:rgba(52,211,154,.3)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn);border-color:rgba(243,180,78,.3)}
+  .pill.bad{background:var(--bad-bg);color:var(--bad);border-color:rgba(240,106,114,.3)}
+  .ratio-name{font-weight:600;color:var(--ink)}
+  .ratio-formula{color:var(--muted);font-size:11.5px}
+
+  .bar{height:8px;border-radius:5px;background:var(--bg);overflow:hidden;margin-top:6px;border:1px solid var(--line)}
+  .bar > i{display:block;height:100%;border-radius:5px}
+
+  .flag{display:flex;gap:11px;padding:12px 14px;border-radius:11px;margin-bottom:10px;
+    border:1px solid var(--line);background:var(--surface-2);border-left:4px solid var(--line-2)}
+  .flag .ic{font-size:16px;line-height:1.4}
+  .flag.bad{border-left-color:var(--bad);background:var(--bad-bg)}
+  .flag.warn{border-left-color:var(--warn);background:var(--warn-bg)}
+  .flag.good{border-left-color:var(--good);background:var(--good-bg)}
+  .flag .ttl{font-weight:700;margin-bottom:2px;color:var(--ink)}
+  .flag .body{color:var(--ink-2);font-size:12.5px;line-height:1.55}
+
+  .balcheck{padding:12px 15px;border-radius:11px;font-weight:600;font-size:13px;border:1px solid transparent}
+  .balcheck.ok{background:var(--good-bg);color:var(--good);border-color:rgba(52,211,154,.3)}
+  .balcheck.no{background:var(--bad-bg);color:var(--bad);border-color:rgba(240,106,114,.3)}
+
+  /* Haberler */
+  .news{display:block;padding:12px 14px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;
+    background:var(--surface-2);text-decoration:none;transition:border-color .15s,background .15s;cursor:pointer}
+  .news:hover{border-color:var(--accent);background:var(--surface-3)}
+  .news.open{border-color:var(--line-2);background:var(--surface-3)}
+  .news-t{color:var(--ink);font-size:13.5px;font-weight:600;line-height:1.4;margin-bottom:4px;
+    display:flex;gap:8px;align-items:flex-start}
+  .news-t .chev{color:var(--muted);font-size:12px;flex:0 0 auto;transition:transform .15s;margin-top:2px}
+  .news.open .news-t .chev{transform:rotate(90deg);color:var(--accent-2)}
+  .news-m{color:var(--muted);font-size:11.5px}
+  .news-sum{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);
+    color:var(--ink-2);font-size:12.5px;line-height:1.65}
+  .news.open .news-sum{display:block}
+  .news-sum a{display:inline-block;margin-top:8px;font-weight:600;font-size:12px}
+
+  /* Analist hedef fiyatları */
+  .tgt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px}
+  .tgt-box{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
+    border-radius:13px;padding:15px 17px}
+  .tgt-box .lbl{color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px}
+  .tgt-box .big{font-size:25px;font-weight:800;color:var(--ink)}
+  .tgt-box .sm{font-size:12.5px;margin-top:5px}
+  .tgt-range{margin:6px 0 2px}
+  .tgt-track{position:relative;height:10px;border-radius:6px;margin:18px 0 46px;
+    background:linear-gradient(90deg,var(--bad),var(--warn),var(--good))}
+  .tgt-track .mk{position:absolute;top:-6px;width:2px;height:22px;background:var(--ink)}
+  .tgt-track .mk b{position:absolute;left:50%;transform:translateX(-50%);top:22px;white-space:nowrap;
+    font-size:10.5px;font-weight:700;color:var(--ink-2)}
+  .tgt-track .mk.cur{background:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.3)}
+  .tgt-track .mk.cur b{color:#fff}
+  .reco-bar{display:flex;height:22px;border-radius:7px;overflow:hidden;border:1px solid var(--line);margin:8px 0}
+  .reco-bar > span{display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#0a0d1a}
+  .reco-leg{display:flex;flex-wrap:wrap;gap:12px;color:var(--muted);font-size:11.5px;margin-top:6px}
+  .reco-leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .grade{font-weight:700} .grade.g-buy{color:var(--good)} .grade.g-hold{color:var(--warn)} .grade.g-sell{color:var(--bad)}
+
+  .hidden{display:none}
+  .row-actions{width:34px;text-align:center}
+  .delrow{color:var(--muted);cursor:pointer;border:none;background:none;font-size:15px;padding:2px 6px}
+  .delrow:hover{color:var(--bad)}
+  .footer{color:var(--muted);font-size:11.5px;text-align:center;margin-top:30px;line-height:1.7;
+    border-top:1px solid var(--line);padding-top:20px}
+  a{color:var(--accent-2)}
+  .thd{display:inline-block;margin-top:3px;font-size:11.5px;font-weight:700;color:var(--accent-2);
+    letter-spacing:.3px;text-transform:none}
+  td input.cell.cur, td input.cell.prev{width:120px;font-weight:600}
+  /* Bilanço Verisi: cari değer önceki döneme göre iyi=yeşil / kötü=kırmızı */
+  td input.cell.cur.cell-good{color:var(--good)}
+  td input.cell.cur.cell-bad{color:var(--bad)}
+
+  /* --- Mobil (telefon) uyumu --- */
+  @media (max-width:600px){
+    .hd-inner{padding:13px 14px;gap:10px;flex-wrap:wrap}
+    header h1{font-size:18px}
+    header p{font-size:11px}
+    .live-price .lp-val{font-size:18px}
+    .live-price .lp-chg{font-size:12px}
+    .hd-badge.mcap{font-size:12px;padding:5px 11px}
+    .hd-badge.mcap .mc-val{font-size:13px}
+    .wrap{padding:14px 12px 50px}
+    .card{padding:14px 13px;border-radius:13px;margin-bottom:13px}
+    .card h2{font-size:15px}
+    .card .sub{font-size:12px}
+    /* KPI kartları dar ekranda 2'li */
+    .grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+    .kpi{padding:12px 13px}
+    .kpi .val{font-size:19px}
+    /* Tablolar yatay kaydırılabilir olsun (sıkışıp bozulmasın) */
+    .card > table, #cmpResult{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    table{font-size:12px}
+    th,td{padding:7px 8px;white-space:nowrap}
+    th:first-child,td:first-child{white-space:normal}
+    /* Bilanço Verisi giriş hücreleri daralsın */
+    input.cell{width:auto;max-width:100px}
+    td input.cell.cur, td input.cell.prev{width:82px}
+    input.name{font-size:12.5px}
+    /* Bilanço Verisi: mobilde her kalem ALT ALTA kart (yatay kaydırma yok) */
+    #inputTable{min-width:0;overflow:visible}
+    #inputTable, #inputTable tbody{display:block}
+    #inputTable thead{display:none}
+    #inputBody tr{display:grid;grid-template-columns:1fr 1fr;gap:9px 10px;
+      border:1px solid var(--line);border-radius:11px;background:var(--surface-2);
+      padding:11px 12px;margin-bottom:10px}
+    #inputBody td{display:block;border:none;padding:0;text-align:left;white-space:normal}
+    #inputBody td:nth-child(1){grid-column:1 / -1}   /* kalem adı tam genişlik */
+    #inputBody td:nth-child(2){grid-column:1 / -1}   /* kategori tam genişlik */
+    #inputBody td:nth-child(5){grid-column:1 / -1;text-align:right}  /* sil */
+    #inputBody td:nth-child(3)::before{content:"Cari Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+    #inputBody td:nth-child(4)::before{content:"Önceki Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+    #inputBody input.name{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;font-weight:600}
+    #inputBody select.catsel{width:100%}
+    #inputBody td input.cell.cur, #inputBody td input.cell.prev{width:100%;max-width:none;text-align:right}
+    #inputBody .delrow{font-size:14px}
+    /* Butonlar parmakla rahat */
+    .toolbar{gap:8px}
+    button{padding:9px 13px;font-size:12.5px}
+    #ticker, #cmpTickers{width:100% !important}
+  }
+
+  /* Yazdırma / PDF — açık tema, gereksiz öğeler gizli */
+  @media print{
+    @page{ margin:14mm }
+    body{background:#fff !important;color:#111 !important;background-image:none !important;font-size:11px}
+    header{background:#fff !important;border-bottom:1px solid #ccc}
+    header h1,header p{color:#111 !important}
+    .hd-badge{color:#333 !important;background:#eee !important;border-color:#ccc !important}
+    .no-print,.toolbar,.row-actions,.delrow,button{display:none !important}
+    .card{break-inside:avoid;box-shadow:none !important;border:1px solid #ddd !important;background:#fff !important;margin-bottom:10px}
+    .card h2,.kpi .val,.ratio-name,.flag .ttl{color:#111 !important}
+    .card .sub,.muted,.hint,.ratio-formula,.kpi .lbl{color:#555 !important}
+    .kpi{background:#fafafa !important;border-color:#ddd !important}
+    thead th{background:#f0f0f0 !important;color:#333 !important}
+    th,td{border-color:#ddd !important}
+    input.cell,input.name,select.cell{border:none !important;background:transparent !important;color:#111 !important;-webkit-appearance:none;appearance:none;padding:2px 4px}
+    .up{color:#0a7d4d !important} .down{color:#c0392b !important}
+    .news:hover{transform:none}
+    a{color:#1763b8 !important;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="hd-inner">
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3"  y="13" width="4" height="8" rx="1" fill="#9cc3e6"/>
+        <rect x="10" y="8"  width="4" height="13" rx="1" fill="#cfe0f0"/>
+        <rect x="17" y="4"  width="4" height="17" rx="1" fill="#c8a23a"/>
+      </svg>
+    </div>
+    <div>
+      <h1>Bilanço Analiz</h1>
+      <p>ABD + Borsa İstanbul hisseleri · bilanço, oranlar ve güncel haberler</p>
+    </div>
+    <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div id="livePrice" class="live-price hidden"></div>
+      <span id="hdBadge" class="hd-badge">SEC EDGAR + Bing News</span>
+      <div id="nyClock" class="hidden" style="font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:600"></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ŞİRKET ARAMA -->
+  <div class="card no-print">
+    <h2>Hisse Ara</h2>
+    <div class="sub">ABD veya Borsa İstanbul hissesinin kodunu yaz, <b>Ara</b>'ya bas. ABD örneği: NVDA, AAPL, MSFT · BIST örneği: THYAO, ASELS, TUPRS, GARAN. (Kod iki borsada da varsa BIST için sonuna <b>.IS</b> ekle: örn. SASA.IS)</div>
+    <div class="toolbar" style="align-items:center">
+      <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()">
+      <select id="periodType" class="cell" style="width:auto">
+        <option value="annual">Yıllık</option>
+        <option value="quarter">Çeyreklik</option>
+      </select>
+      <button class="primary" onclick="fetchTicker()">Ara →</button>
+      <span id="fetchStatus" class="hint"></span>
+    </div>
+  </div>
+
+  <!-- ŞİRKET KARŞILAŞTIRMA -->
+  <div class="card no-print">
+    <h2>Şirket Karşılaştırma</h2>
+    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (ABD + BIST karışık olabilir), oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b> veya <b>THYAO, PGSUS</b>. Not: ABD-BIST karışımında mutlak tutarlar USD/TL farklıdır; oranlara (marj, ROE, borçluluk) bakın.</div>
+    <div class="toolbar" style="align-items:center">
+      <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
+      <select id="cmpPeriod" class="cell" style="width:auto">
+        <option value="annual">Yıllık</option>
+        <option value="quarter">Çeyreklik</option>
+      </select>
+      <button class="primary" onclick="compareTickers()">Karşılaştır →</button>
+      <span id="cmpStatus" class="hint"></span>
+    </div>
+    <div id="cmpResult" style="overflow-x:auto"></div>
+  </div>
+
+  <!-- VERİ GİRİŞİ -->
+  <div class="card">
+    <h2>Bilanço Verisi</h2>
+    <div class="sub">Otomatik gelen veriyi buradan düzenleyebilir veya elle girebilirsiniz. Tutarlar şirketin <span id="curNote">para biriminde</span>dir.</div>
+    <div id="priceNote" class="hidden" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px"></div>
+    <div id="earnNote" class="hidden" style="margin-bottom:14px"></div>
+    <div class="toolbar">
+      <button class="primary" onclick="analyze()">🔍 Analiz Et</button>
+      <button onclick="loadSample()">📋 Örnek Veri</button>
+      <button onclick="addRow('asset')">+ Varlık</button>
+      <button onclick="addRow('liab')">+ Yükümlülük</button>
+      <button onclick="addRow('equity')">+ Özkaynak</button>
+      <button onclick="clearAll()">🗑 Temizle</button>
+    </div>
+
+    <table id="inputTable">
+      <thead>
+        <tr><th style="width:40%">Kalem</th><th>Kategori</th><th id="thCur">Cari Dönem</th><th id="thPrev">Önceki Dönem</th><th class="row-actions"></th></tr>
+      </thead>
+      <tbody id="inputBody"></tbody>
+    </table>
+  </div>
+
+  <!-- SONUÇLAR -->
+  <div id="results" class="hidden">
+
+    <div class="toolbar no-print" style="justify-content:flex-end;margin-bottom:6px">
+      <button onclick="exportPDF()">📄 PDF / Yazdır</button>
+      <button onclick="exportCSV()">⬇ Excel (CSV)</button>
+    </div>
+    <div id="reportTitle" style="font-size:15px;font-weight:700;color:var(--ink);margin:2px 0 4px"></div>
+    <div id="periodNote" class="hint" style="margin:0 0 14px"></div>
+
+    <div class="card">
+      <h2>Özet</h2>
+      <div id="balcheck" style="margin-bottom:14px"></div>
+      <div class="grid" id="kpis"></div>
+    </div>
+
+    <div class="card hidden" id="chartCard">
+      <h2>Fiyat Grafiği</h2>
+      <div class="toolbar" id="chartRangeBtns" style="margin-bottom:10px">
+        <button data-r="1mo" onclick="setChartRange('1mo')">1A</button>
+        <button data-r="6mo" onclick="setChartRange('6mo')">6A</button>
+        <button data-r="1y"  onclick="setChartRange('1y')">1Y</button>
+        <button data-r="5y"  onclick="setChartRange('5y')">5Y</button>
+        <span id="chartInfo" class="hint" style="margin-left:auto"></span>
+      </div>
+      <div id="chartBox" style="position:relative"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="valCard">
+      <h2>Değerleme Oranları (Canlı)</h2>
+      <div class="sub">Anlık piyasa fiyatına göre hesaplanır. F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak (Defter Değeri). Sektöre göre yorumlanmalıdır.</div>
+      <div class="grid" id="valBody"></div>
+    </div>
+
+    <div class="card" id="incomeCard">
+      <h2>Gelir Tablosu & Kârlılık</h2>
+      <div class="sub">SEC'ten çekilen gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
+      <div class="grid" id="profKpis" style="margin-bottom:16px"></div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim</th></tr></thead>
+        <tbody id="incomeBody"></tbody>
+      </table>
+      <div style="height:14px"></div>
+      <table>
+        <thead><tr><th>Kârlılık Oranı</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
+        <tbody id="profBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card hidden" id="cashflowCard">
+      <h2>Nakit Akış Tablosu & Serbest Nakit Akışı</h2>
+      <div class="sub">SEC'ten çekilen faaliyet/yatırım/finansman nakit akışları. <b>FCF = Faaliyet Nakit Akışı − Sermaye Harcaması (Capex)</b> — şirketin dağıtılabilir gerçek nakdi. Sağlıklı bir şirkette FCF pozitif ve büyüyen olmalıdır.</div>
+      <div class="grid" id="cfKpis" style="margin-bottom:16px"></div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim</th></tr></thead>
+        <tbody id="cashflowBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card" id="trendCard">
+      <h2>Çok Yıllı Trend</h2>
+      <div class="sub">Son dönemlerin gelişimi. Çubuğa gelince değeri görürsünüz.</div>
+      <div class="grid" id="trendCharts" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr))"></div>
+    </div>
+
+    <div class="card">
+      <h2>Güncel Haberler</h2>
+      <div class="sub">Üst düzey kaynaklardan (Bloomberg, CNBC, Reuters, WSJ, MarketWatch, Forbes, Yahoo Finance…) bu şirketle ilgili en az 12 güncel haber — başlık ve özet Türkçe. Başlığa tıklayınca <b>Türkçe özet uygulama içinde</b> açılır; "Orijinal habere git" ile kaynağın İngilizce sayfasına gidersin. (MSN, Barron's, Seeking Alpha gibi sorunlu kaynaklar hiç gösterilmez.)</div>
+      <div id="newsList"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="kapCard">
+      <h2>KAP Bildirimleri</h2>
+      <div class="sub">Şirketin Kamuyu Aydınlatma Platformu'na yaptığı son bildirimler — yeni iş ilişkileri, pay alım satımı, sermaye/temettü kararları, derecelendirme vb. Kısa özet burada; başlığa tıklayıp <b>"KAP'ta tam bildirimi oku"</b> ile resmi bildirime gidebilirsin. (Yalnızca BIST hisselerinde görünür.)</div>
+      <div id="kapBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="econCard">
+      <h2 id="econTitle">Ekonomik Takvim</h2>
+      <div class="sub">Ekonomik veriler (saatler TSİ). Üstten dönemi, yandan önem düzeyini seç — ikisi birlikte filtreler. <b>★★★</b> = piyasayı en çok etkileyenler (enflasyon, faiz kararı, istihdam…). Açıklanan değer beklentiye göre olumluysa <span class="up">yeşil</span>, olumsuzsa <span class="down">kırmızı</span> gösterilir.</div>
+      <div class="toolbar" id="econTimeBtns" style="margin-bottom:8px">
+        <button data-t="dun" onclick="setEconTime('dun')">Dün</button>
+        <button data-t="bugun" onclick="setEconTime('bugun')">Bugün</button>
+        <button data-t="yarin" onclick="setEconTime('yarin')">Yarın</button>
+        <button data-t="buhafta" onclick="setEconTime('buhafta')">Bu Hafta</button>
+        <button data-t="gelecekhafta" onclick="setEconTime('gelecekhafta')">Gelecek Hafta</button>
+      </div>
+      <div class="toolbar" id="econBtns">
+        <button data-imp="-1" onclick="setEconImp(-1)">★ Düşük</button>
+        <button data-imp="0" onclick="setEconImp(0)">★★ Orta</button>
+        <button data-imp="1" onclick="setEconImp(1)">★★★ Yüksek</button>
+      </div>
+      <div id="econBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="targetCard">
+      <h2>Analist Hedef Fiyatları</h2>
+      <div class="sub">Hisseyi izleyen banka ve aracı kurumların konsensüs hedef fiyatı, genel tavsiye ve dağılım. ABD hisselerinde kaynak Finviz (kurum bazlı not geçmişiyle); BIST hisselerinde kaynak TradingView/Refinitiv (Türk ve uluslararası aracı kurum tahminlerinin konsensüsü: ortalama/en yüksek/en düşük hedef + Al-Tut-Sat dağılımı).</div>
+      <div id="targetBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Finansal Oranlar</h2>
+      <div class="sub">Renkler genel kabul görmüş eşik değerlerine göredir; sektöre göre yorumlanmalıdır.</div>
+      <table>
+        <thead><tr><th>Oran</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
+        <tbody id="ratioBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Önemli Değişimler</h2>
+      <div class="sub">Dönemler arası tutarca en büyük 8 değişim. Sıralama mutlak değişime göre.</div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim ($)</th><th>Değişim (%)</th><th>Yön</th></tr></thead>
+        <tbody id="varBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Dikey Analiz</h2>
+      <div class="sub">Her kalemin toplam varlıklara oranı — bilançonun bileşimi ve dönemsel kayması.</div>
+      <table>
+        <thead><tr><th>Kalem</th><th>Cari %</th><th>Önceki %</th><th>Pay Değişimi</th><th></th></tr></thead>
+        <tbody id="vertBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Otomatik Yorum & Risk İşaretleri</h2>
+      <div class="sub">Kurallara dayalı otomatik değerlendirme. Yatırım kararı için profesyonel görüş alınmalıdır.</div>
+      <div id="flags"></div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Bu araç finansal danışmanlık değildir; sonuçlar nitelikli bir analist tarafından gözden geçirilmelidir.<br>
+    Bilanço verisi: SEC EDGAR (ABD) + KAP/İş Yatırım (BIST) · Haberler: Bing News · Hesaplamalar tarayıcınızda yapılır.
+  </div>
+</div>
+
+<script src="cik-map.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
