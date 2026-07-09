@@ -2877,7 +2877,7 @@ function renderCashFlow(){
   card.classList.remove('hidden');
 }
 
-/* ---- Sağlık Karnesi: DuPont · Piotroski F-Score · Altman Z' ---- */
+/* ---- Sağlık Karnesi: DuPont · Piotroski F-Score ---- */
 function renderHealth(T){
   const card=document.getElementById('healthCard'), box=document.getElementById('healthBody');
   if(!card||!box||!FIN) return;
@@ -2888,7 +2888,7 @@ function renderHealth(T){
   if(!B0||!R0){ card.classList.add('hidden'); return; }
   const g=(m,d)=> (d && m && (d in m)) ? m[d] : null;
   const isBank = FIN.bankGroup==='UFRS';
-  // Çeyreklik modda akış kalemleri yıllıklandırılır (×4) — DuPont devir hızı ve Altman için
+  // Çeyreklik modda akış kalemleri yıllıklandırılır (×4) — DuPont devir hızı için
   const ann = FIN.mode==='quarter' ? 4 : 1;
 
   const eq=(d)=>{ const a=g(D.assets,d); return a!=null? a-liabTotal(D,d) : null; };
@@ -2903,13 +2903,21 @@ function renderHealth(T){
   const d0=dupont(B0,R0), d1=(B1&&R1)?dupont(B1,R1):null;
   const pp=x=> x==null?'—':(x*100).toFixed(1)+'%';
   const xx=x=> x==null?'—':x.toFixed(2)+'x';
-  const dpRow=(lbl,c,p,fmt)=>`<tr><td>${lbl}</td><td><b>${fmt(c)}</b></td><td>${p!=null?fmt(p):'—'}</td></tr>`;
+  // dir: 1 = artış olumlu (yeşil), -1 = artış olumsuz (kaldıraçta risk artışı → kırmızı)
+  const dpRow=(lbl,c,p,fmt,dir)=>{
+    let cls='';
+    if(c!=null && p!=null){
+      const diff=c-p, thr=Math.abs(p)*0.0005||1e-9;
+      if(Math.abs(diff)>thr) cls = ((dir||1)>0 ? diff>0 : diff<0) ? 'up' : 'down';
+    }
+    return `<tr><td>${lbl}</td><td class="${cls}"><b>${fmt(c)}</b></td><td>${p!=null?fmt(p):'—'}</td></tr>`;
+  };
   let html=`<div style="font-weight:700;color:var(--ink);margin-bottom:6px">DuPont Analizi — ROE'nin Kaynağı</div>
   <table><thead><tr><th>Bileşen</th><th>Cari</th><th>Önceki</th></tr></thead><tbody>
-    ${dpRow('Net Kâr Marjı (NI/Gelir)', d0.nm, d1&&d1.nm, pp)}
-    ${dpRow('Varlık Devir Hızı (Gelir/Varlık)', d0.at, d1&&d1.at, xx)}
-    ${dpRow('Kaldıraç Çarpanı (Varlık/Özkaynak)', d0.em, d1&&d1.em, xx)}
-    ${dpRow('= Özkaynak Kârlılığı (ROE)', d0.roe, d1&&d1.roe, pp)}
+    ${dpRow('Net Kâr Marjı (NI/Gelir)', d0.nm, d1&&d1.nm, pp, 1)}
+    ${dpRow('Varlık Devir Hızı (Gelir/Varlık)', d0.at, d1&&d1.at, xx, 1)}
+    ${dpRow('Kaldıraç Çarpanı (Varlık/Özkaynak)', d0.em, d1&&d1.em, xx, -1)}
+    ${dpRow('= Özkaynak Kârlılığı (ROE)', d0.roe, d1&&d1.roe, pp, 1)}
   </tbody></table>
   ${FIN.mode==='quarter'?'<div class="hint" style="margin-top:4px">Çeyreklik akış kalemleri yıllıklandırıldı (×4).</div>':''}`;
 
@@ -2938,23 +2946,6 @@ function renderHealth(T){
   html+=checks.map(([lbl,ok])=>`<div style="padding:3px 0;font-size:12.5px;color:var(--ink-2)">
     ${ok===null?'<span class="neutral">—</span>':ok?'<span class="up">✓</span>':'<span class="down">✗</span>'} ${lbl}</div>`).join('');
 
-  /* --- Altman Z'-Score (defter değeri sürümü; banka/sigortaya uygulanmaz) --- */
-  if(!isBank){
-    const TA=g(D.assets,B0), TL=liabTotal(D,B0);
-    const wc=(g(D.assetsCur,B0)!=null&&g(D.liabCur,B0)!=null)?g(D.assetsCur,B0)-g(D.liabCur,B0):null;
-    const re=g(D.retained,B0), ebit=g(I.opIncome,R0), sales=g(I.revenue,R0), be=eq(B0);
-    if(TA && TL && wc!=null && ebit!=null && sales!=null && be!=null){
-      const z=0.717*(wc/TA)+0.847*((re||0)/TA)+3.107*(ebit*ann/TA)+0.420*(be/TL)+0.998*(sales*ann/TA);
-      const zone= z>2.9?['Güvenli Bölge','good'] : z>=1.23?['Gri Bölge','warn'] : ['Riskli Bölge','bad'];
-      html+=`<div style="font-weight:700;color:var(--ink);margin:18px 0 6px">Altman Z'-Score
-        <span class="pill ${zone[1]}" style="margin-left:8px;font-size:14px">${z.toFixed(2)} · ${zone[0]}</span></div>
-      <div class="hint">Z' > 2,9 güvenli · 1,23–2,9 gri · &lt; 1,23 yüksek iflas riski. (Defter değeri sürümü${re==null?'; dağıtılmamış kârlar verisi yok, 0 alındı':''}${FIN.mode==='quarter'?'; çeyreklik akışlar yıllıklandırıldı':''}.)</div>`;
-    }else{
-      html+=`<div class="hint" style="margin-top:14px">Altman Z' için gerekli kalemler eksik.</div>`;
-    }
-  }else{
-    html+=`<div class="hint" style="margin-top:14px">Altman Z-Score ve likidite bazlı kriterler banka/sigorta bilançolarına uygulanmaz.</div>`;
-  }
   box.innerHTML=html;
   card.classList.remove('hidden');
 }
