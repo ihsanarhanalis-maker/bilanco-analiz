@@ -557,7 +557,7 @@ function parseEUSymbol(sym){
 }
 /* TV bilanço/gelir/nakit-akış alanları → fetchSeries ile AYNI {D,I} şekli. Tek dönemlik anlık
    veridir (TV scanner geçmiş dönem serisi vermez) → D1 hep null; buildRowsFromSEC ve genel
-   render işlevleri (Değerleme/DCF/Nakit Akışı/Sağlık Karnesi) bu şekli zaten tek-dönemli olarak
+   render işlevleri (Değerleme/Nakit Akışı/Sağlık Karnesi) bu şekli zaten tek-dönemli olarak
    nazikçe çözer (bkz. kpi() ve Piotroski'nin eksik kritere '—' vermesi). */
 function euReshape(d){
   const [desc,sector,industry,ccy,close,mcap,shares,per,pbr,roe,roa,divY,eps,isin,
@@ -1797,8 +1797,6 @@ async function fetchPrice(sym, cik, myGen, opts){
     }
     // Değerleme oranları (canlı): F/K, PD/DD — en güncel piyasa değeri + SEC verisiyle
     renderValuation(mcap);
-    // Adil Değer (DCF) — pay adedi + canlı fiyat burada elde edilir
-    if(FIN){ FIN.livePrice=(live!=null)?live:null; FIN.shares=shares||null; initDcf(); }
     // Dönemsel fiyatlar (açıklandığı gün) — Bilanço Verisi
     const pCur=closeOn(fd0), pPrev=closeOn(fd1);
     const chip=(lbl,date,price,color)=> price==null?'' :
@@ -2158,7 +2156,7 @@ function hidePriceUI(){
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
   const ec=document.getElementById('econCard'); if(ec) ec.classList.add('hidden');
-  ['chartCard','sectorCard','top10Card','dcfCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
+  ['chartCard','sectorCard','top10Card','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
   const ws=document.getElementById('watchStar'); if(ws) ws.classList.add('hidden');
@@ -2537,106 +2535,6 @@ function renderOwnershipUS(own){
   let note='Kaynak: Finviz. ABD\'de pay sahipleri isim isim açıklanmaz; dağılım kurumsal/içeriden/diğer olarak raporlanır.';
   if(own.shsFloat && own.shsOut) note+=` Fiili dolaşım: ${fmtShort(own.shsFloat)} / ${fmtShort(own.shsOut)} pay (%${(own.shsFloat/own.shsOut*100).toFixed(1)}).`;
   renderOwnerPie(slices, note);
-}
-
-/* ---- Adil Değer Hesaplayıcı (Mini DCF) ----
-   2 aşamalı FCF modeli: 5 yıl büyüme (g) + uç değer (gt), iskonto r.
-   Özkaynak değeri = PV(FCF'ler) + PV(uç değer) − net borç; hisse başına = / pay adedi.
-   Veriler: FCF (nakit akışı kartıyla aynı seri), pay adedi + canlı fiyat (fetchPrice'tan). */
-function dcfFcf0(){
-  const CF=FIN && FIN.income && FIN.income._cash;
-  if(!CF || !Object.keys(CF.fcf||{}).length) return null;
-  const dates=Object.keys(CF.fcf).sort().reverse();
-  if(FIN.market==='BIST' && FIN.mode==='quarter'){
-    // Son 4 ayrık çeyreğin toplamı (eksikse yıllıklandır)
-    const last=dates.slice(0,4).map(d=>CF.fcf[d]);
-    if(!last.length) return null;
-    const sum=last.reduce((a,b)=>a+b,0);
-    return last.length===4 ? sum : sum*(4/last.length);
-  }
-  return CF.fcf[dates[0]];   // yıllık (ABD her zaman; BIST yıllık modda)
-}
-function dcfNetDebt(){
-  const D=FIN&&FIN.balance; if(!D) return 0;
-  const d=FIN.D0, v=(m)=> (d && m && (d in m)) ? m[d] : 0;
-  return v(D.stDebt)+v(D.ltDebt)-v(D.cash);
-}
-function initDcf(){
-  const card=document.getElementById('dcfCard');
-  if(!card || !FIN) return;
-  const fcf0=dcfFcf0();
-  if(fcf0==null || fcf0<=0 || !FIN.shares || !FIN.livePrice){
-    // FCF negatif/yok ya da pay adedi/fiyat yok → model uygulanamaz
-    if(fcf0!=null && fcf0<=0){
-      card.classList.remove('hidden');
-      document.getElementById('dcfSliders').style.display='none';
-      document.getElementById('dcfResult').innerHTML='<div class="hint">Serbest nakit akışı negatif ya da bulunamadı — DCF modeli bu şirkete uygulanamaz.</div>';
-    } else card.classList.add('hidden');
-    return;
-  }
-  document.getElementById('dcfSliders').style.display='grid';
-  // Pazar bazlı makul varsayılanlar (TL nominal oranlar yüksek)
-  const def = FIN.market==='BIST' ? {g:25,r:30,t:15} : {g:8,r:10,t:2.5};
-  document.getElementById('dcfG').value=def.g;
-  document.getElementById('dcfR').value=def.r;
-  document.getElementById('dcfT').value=def.t;
-  card.classList.remove('hidden');
-  renderDcf();
-}
-function dcfCompute(fcf0,g,r,gt){
-  if(gt>=r) return null;
-  let pv=0, f=fcf0;
-  for(let t=1;t<=5;t++){ f=f*(1+g); pv+=f/Math.pow(1+r,t); }
-  const tv=f*(1+gt)/(r-gt)/Math.pow(1+r,5);
-  return pv+tv;
-}
-function renderDcf(){
-  const box=document.getElementById('dcfResult');
-  if(!box || !FIN || !FIN.shares || !FIN.livePrice) return;
-  const fcf0=dcfFcf0(); if(fcf0==null||fcf0<=0) return;
-  const g=+document.getElementById('dcfG').value/100;
-  const r=+document.getElementById('dcfR').value/100;
-  const gt=+document.getElementById('dcfT').value/100;
-  document.getElementById('dcfGv').textContent='%'+(g*100).toFixed(1);
-  document.getElementById('dcfRv').textContent='%'+(r*100).toFixed(1);
-  document.getElementById('dcfTv').textContent='%'+(gt*100).toFixed(1);
-  if(gt>=r){ box.innerHTML='<div class="hint down">Uç büyüme, iskonto oranından küçük olmalı — kaydırıcıları ayarla.</div>'; return; }
-  const netDebt=dcfNetDebt();
-  const perShare=(ev)=> ev==null?null:(ev-netDebt)/FIN.shares;
-  const fv=perShare(dcfCompute(fcf0,g,r,gt));
-  const cur=FIN.livePrice;
-  // Negatif özkaynak değeri: net borç, FCF'lerin bugünkü değerini aşıyor → sayı yerine açıklama
-  if(fv==null || fv<=0){
-    box.innerHTML=`<div class="tgt-grid">
-      <div class="tgt-box"><div class="lbl">Adil Değer / Hisse</div><div class="big">—</div>
-        <div class="sm neutral">Baz FCF: ${fmtAbbr(fcf0)} · Net borç: ${fmtAbbr(netDebt)}</div></div>
-      <div class="tgt-box"><div class="lbl">Cari Fiyat</div><div class="big">${fmtUSD(cur)}</div></div>
-    </div>
-    <div class="hint" style="margin-top:10px">Bu varsayımlarla FCF'lerin bugünkü değeri net borcu karşılamıyor (özkaynak değeri ≤ 0) — kiralama/finansman borcu yüksek şirketlerde sık görülür. Büyüme varsayımını artırıp veya iskontoyu düşürüp tekrar dene; model bu tür bilançolarda sınırlı anlam taşır.</div>`;
-    return;
-  }
-  const diff=(fv-cur)/cur*100;
-  const cls=diff>0?'up':'down';
-  // Duyarlılık: büyüme ±5 puan × iskonto ±3 puan
-  const gs=[g-0.05,g,g+0.05].map(x=>Math.max(0,x));
-  const rs=[r-0.03,r,r+0.03].map(x=>Math.max(0.02,x));
-  const sens=rs.map(rr=>gs.map(gg=>perShare(dcfCompute(fcf0,gg,rr,Math.min(gt,rr-0.005)))));
-  const sensRows=rs.map((rr,i)=>`<tr><td>iskonto %${(rr*100).toFixed(1)}</td>${gs.map((gg,jx)=>{
-    const v=sens[i][jx]; const merkez=(i===1&&jx===1);
-    const ok=(v!=null&&v>0);
-    return `<td${merkez?' style="background:var(--surface-3);font-weight:700"':''} class="${ok?(v>cur?'up':'down'):'neutral'}">${ok?fmtUSD(v):'—'}</td>`;
-  }).join('')}</tr>`).join('');
-  box.innerHTML=`<div class="tgt-grid">
-    <div class="tgt-box"><div class="lbl">Adil Değer / Hisse</div><div class="big">${fmtUSD(fv)}</div>
-      <div class="sm neutral">Baz FCF: ${fmtAbbr(fcf0)} · Net borç: ${fmtAbbr(netDebt)}</div></div>
-    <div class="tgt-box"><div class="lbl">Cari Fiyat</div><div class="big">${fmtUSD(cur)}</div></div>
-    <div class="tgt-box"><div class="lbl">${diff>0?'İskonto (Ucuz)':'Prim (Pahalı)'}</div>
-      <div class="big ${cls}" style="color:var(--${diff>0?'good':'bad'})">${diff>0?'▲':'▼'} ${pct(Math.abs(diff)*(diff>0?1:-1)).replace('-','')}</div>
-      <div class="sm neutral">adil değere göre</div></div>
-  </div>
-  <div style="font-weight:700;color:var(--ink);margin:14px 0 6px">Duyarlılık — Adil Değer/Hisse</div>
-  <table><thead><tr><th></th>${gs.map(gg=>`<th>büyüme %${(gg*100).toFixed(1)}</th>`).join('')}</tr></thead><tbody>${sensRows}</tbody></table>
-  <div class="hint" style="margin-top:6px"><span class="up">Yeşil</span> = cari fiyatın üstünde (iskontolu), <span class="down">kırmızı</span> = altında. Ortadaki hücre seçili varsayımlar.</div>`;
 }
 
 /* ---- İçeriden Alım-Satım — SEC Form 4 (yalnızca ABD) ----

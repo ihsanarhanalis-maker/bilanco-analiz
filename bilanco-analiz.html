@@ -339,20 +339,6 @@
       <div class="grid" id="valBody"></div>
     </div>
 
-    <div class="card hidden" id="dcfCard">
-      <h2>Adil Değer Hesaplayıcı (Mini DCF)</h2>
-      <div class="sub">Serbest nakit akışından indirgenmiş nakit akışı modeli: 5 yıllık büyüme + uç değer. Kaydırıcılarla kendi varsayımlarını dene — <b>adil değer anında güncellenir</b>. Basitleştirilmiş modeldir (net borç düşülür); yatırım tavsiyesi değildir.</div>
-      <div id="dcfSliders" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:14px">
-        <div><label class="hint">FCF Büyümesi (yıl 1-5): <b id="dcfGv" style="color:var(--ink)"></b></label><br>
-          <input type="range" id="dcfG" min="0" max="40" step="0.5" style="width:100%" oninput="renderDcf()"></div>
-        <div><label class="hint">İskonto Oranı: <b id="dcfRv" style="color:var(--ink)"></b></label><br>
-          <input type="range" id="dcfR" min="5" max="50" step="0.5" style="width:100%" oninput="renderDcf()"></div>
-        <div><label class="hint">Uç (Terminal) Büyüme: <b id="dcfTv" style="color:var(--ink)"></b></label><br>
-          <input type="range" id="dcfT" min="0" max="25" step="0.5" style="width:100%" oninput="renderDcf()"></div>
-      </div>
-      <div id="dcfResult"><div class="hint">—</div></div>
-    </div>
-
     <div class="card hidden" id="chartCard">
       <h2>Fiyat Grafiği</h2>
       <div class="sub">Kapanış fiyatları (Yahoo Finance). <span id="chartInfo"></span></div>
