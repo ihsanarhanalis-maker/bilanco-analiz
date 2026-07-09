@@ -44,16 +44,6 @@
   .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
   .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 
-  /* Piyasa şeridi (Bloomberg WEI tarzı) */
-  .mkt-strip{background:#0c1122;border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap;
-    -webkit-overflow-scrolling:touch;scrollbar-width:none}
-  .mkt-strip::-webkit-scrollbar{display:none}
-  .mkt-strip-in{max-width:1180px;margin:0 auto;padding:7px 28px;display:flex;gap:22px}
-  .mkt-item{font-size:12px;font-variant-numeric:tabular-nums;display:inline-flex;gap:6px;align-items:baseline;flex:0 0 auto}
-  .mkt-item .mn{color:var(--muted);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}
-  .mkt-item .mv{color:var(--ink);font-weight:700}
-  .mkt-item .mc{font-weight:700;font-size:11px}
-
   .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 70px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
     padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow)}
@@ -262,9 +252,6 @@
     </div>
   </div>
 </header>
-
-<!-- PİYASA ŞERİDİ — endeksler, döviz, emtia (60 sn'de bir yenilenir) -->
-<div class="mkt-strip no-print"><div class="mkt-strip-in" id="mktStrip"><span class="hint">Piyasa verileri yükleniyor…</span></div></div>
 
 <div class="wrap">
 

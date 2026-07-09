@@ -2390,37 +2390,6 @@ function renderIncome(T){
   }).join('');
 }
 
-/* ---- Piyasa Şeridi (Bloomberg WEI tarzı) ----
-   Endeks/döviz/emtia anlık özeti — Yahoo /price köprüsünden, 60 sn'de bir yenilenir. */
-const STRIP_SYMS=[
-  ['BIST 100','XU100.IS',2], ['USD/TRY','TRY=X',2], ['EUR/TRY','EURTRY=X',2],
-  ['Altın $','GC=F',0], ['Brent','BZ=F',1], ['S&P 500','^GSPC',0], ['Nasdaq','^IXIC',0],
-  ['BTC','BTC-USD',0], ['ABD 10Y','^TNX',2]
-];
-let STRIP_TIMER=null;
-async function fetchMarketStrip(){
-  const el=document.getElementById('mktStrip');
-  if(!el) return;
-  const rs=await Promise.all(STRIP_SYMS.map(([n,s])=>
-    fetch('/price?s='+encodeURIComponent(s)+'&range=1d').then(r=>r.json()).catch(()=>null)));
-  const html=STRIP_SYMS.map(([name,sym,dec],i)=>{
-    const m=rs[i]&&rs[i].chart&&rs[i].chart.result&&rs[i].chart.result[0]&&rs[i].chart.result[0].meta;
-    if(!m||m.regularMarketPrice==null) return '';
-    const v=m.regularMarketPrice, p=m.chartPreviousClose;
-    const ch=p?(v-p)/p*100:null;
-    const cls=ch==null?'neutral':(ch>0.001?'up':ch<-0.001?'down':'neutral');
-    const ar=ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
-    return `<span class="mkt-item"><span class="mn">${name}</span>
-      <span class="mv">${v.toLocaleString('tr-TR',{minimumFractionDigits:dec,maximumFractionDigits:dec})}${sym==='^TNX'?'%':''}</span>
-      ${ch!=null?`<span class="mc ${cls}">${ar}${Math.abs(ch).toFixed(2)}%</span>`:''}</span>`;
-  }).join('');
-  if(html) el.innerHTML=html;
-}
-function startMarketStrip(){
-  fetchMarketStrip();
-  if(STRIP_TIMER) clearInterval(STRIP_TIMER);
-  STRIP_TIMER=setInterval(fetchMarketStrip, 60000);
-}
 
 /* ---- Teknik Görünüm & Risk (her iki pazar — TradingView; ABD'ye Finviz kısa pozisyonu eklenir) ---- */
 let TECH_SHORT=null;   // ABD: fetchTargets doldurur {floatPct, ratio}
@@ -3325,7 +3294,6 @@ function renderFlags(d,T){
 
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
-  startMarketStrip();   // üst piyasa şeridi (60 sn'de bir yenilenir)
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
   // Bilanço Verisi'nde değer/kategori değişince cari hücreleri anında yeniden renklendir
