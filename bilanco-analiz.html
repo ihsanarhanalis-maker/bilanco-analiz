@@ -44,6 +44,16 @@
   .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
   .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 
+  /* Piyasa şeridi (Bloomberg WEI tarzı) */
+  .mkt-strip{background:#0c1122;border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .mkt-strip::-webkit-scrollbar{display:none}
+  .mkt-strip-in{max-width:1180px;margin:0 auto;padding:7px 28px;display:flex;gap:22px}
+  .mkt-item{font-size:12px;font-variant-numeric:tabular-nums;display:inline-flex;gap:6px;align-items:baseline;flex:0 0 auto}
+  .mkt-item .mn{color:var(--muted);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.4px}
+  .mkt-item .mv{color:var(--ink);font-weight:700}
+  .mkt-item .mc{font-weight:700;font-size:11px}
+
   .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 70px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
     padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow)}
@@ -253,12 +263,15 @@
   </div>
 </header>
 
+<!-- PİYASA ŞERİDİ — endeksler, döviz, emtia (60 sn'de bir yenilenir) -->
+<div class="mkt-strip no-print"><div class="mkt-strip-in" id="mktStrip"><span class="hint">Piyasa verileri yükleniyor…</span></div></div>
+
 <div class="wrap">
 
   <!-- ŞİRKET ARAMA -->
   <div class="card no-print">
     <h2>Hisse Ara</h2>
-    <div class="sub">ABD veya Borsa İstanbul hissesinin kodunu yaz, <b>Ara</b>'ya bas. ABD örneği: NVDA, AAPL, MSFT · BIST örneği: THYAO, ASELS, TUPRS, GARAN. (Kod iki borsada da varsa BIST için sonuna <b>.IS</b> ekle: örn. SASA.IS)</div>
+    <div class="sub">ABD, Borsa İstanbul veya Avrupa hissesinin kodunu yaz, <b>Ara</b>'ya bas. ABD: NVDA, AAPL, MSFT · BIST: THYAO, ASELS, GARAN (iki borsada da varsa sonuna <b>.IS</b> ekle) · <b>Avrupa: kodun sonuna borsa eki ekle</b> — SIE<b>.DE</b> (Almanya/Xetra), VOD<b>.L</b> (Londra), MC<b>.PA</b> (Paris/Euronext), ENEL<b>.MI</b> (Milano), SAN<b>.MC</b> (Madrid), NESN<b>.SW</b> (İsviçre), VOLV-B<b>.ST</b> (İsveç), ASML<b>.AS</b> (Amsterdam) gibi.</div>
     <div class="toolbar" style="align-items:center">
       <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()">
       <select id="periodType" class="cell" style="width:auto">
@@ -266,14 +279,22 @@
         <option value="quarter">Çeyreklik</option>
       </select>
       <button class="primary" onclick="fetchTicker()">Ara →</button>
+      <button id="watchStar" class="hidden" onclick="toggleWatch()" title="İzleme listesine ekle/çıkar">☆ Listeme Ekle</button>
       <span id="fetchStatus" class="hint"></span>
     </div>
+  </div>
+
+  <!-- İZLEME LİSTESİ -->
+  <div class="card no-print hidden" id="watchCard">
+    <h2>İzleme Listem</h2>
+    <div class="sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
+    <div id="watchBody"><div class="hint">—</div></div>
   </div>
 
   <!-- ŞİRKET KARŞILAŞTIRMA -->
   <div class="card no-print">
     <h2>Şirket Karşılaştırma</h2>
-    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (ABD + BIST karışık olabilir), oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b> veya <b>THYAO, PGSUS</b>. Not: ABD-BIST karışımında mutlak tutarlar USD/TL farklıdır; oranlara (marj, ROE, borçluluk) bakın.</div>
+    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (ABD + BIST + Avrupa karışık olabilir), oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b> veya <b>THYAO, PGSUS</b> veya <b>SIE.DE, SAP.DE, ASML.AS</b>. Not: farklı pazar karışımında mutlak tutarlar farklı para birimindedir; oranlara (marj, ROE, borçluluk) bakın.</div>
     <div class="toolbar" style="align-items:center">
       <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
       <select id="cmpPeriod" class="cell" style="width:auto">
@@ -325,22 +346,48 @@
       <div class="grid" id="kpis"></div>
     </div>
 
-    <div class="card hidden" id="chartCard">
-      <h2>Fiyat Grafiği</h2>
-      <div class="toolbar" id="chartRangeBtns" style="margin-bottom:10px">
-        <button data-r="1mo" onclick="setChartRange('1mo')">1A</button>
-        <button data-r="6mo" onclick="setChartRange('6mo')">6A</button>
-        <button data-r="1y"  onclick="setChartRange('1y')">1Y</button>
-        <button data-r="5y"  onclick="setChartRange('5y')">5Y</button>
-        <span id="chartInfo" class="hint" style="margin-left:auto"></span>
-      </div>
-      <div id="chartBox" style="position:relative"><div class="hint">—</div></div>
-    </div>
-
     <div class="card hidden" id="valCard">
       <h2>Değerleme Oranları (Canlı)</h2>
       <div class="sub">Anlık piyasa fiyatına göre hesaplanır. F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak (Defter Değeri). Sektöre göre yorumlanmalıdır.</div>
       <div class="grid" id="valBody"></div>
+    </div>
+
+    <div class="card hidden" id="dcfCard">
+      <h2>Adil Değer Hesaplayıcı (Mini DCF)</h2>
+      <div class="sub">Serbest nakit akışından indirgenmiş nakit akışı modeli: 5 yıllık büyüme + uç değer. Kaydırıcılarla kendi varsayımlarını dene — <b>adil değer anında güncellenir</b>. Basitleştirilmiş modeldir (net borç düşülür); yatırım tavsiyesi değildir.</div>
+      <div id="dcfSliders" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:14px">
+        <div><label class="hint">FCF Büyümesi (yıl 1-5): <b id="dcfGv" style="color:var(--ink)"></b></label><br>
+          <input type="range" id="dcfG" min="0" max="40" step="0.5" style="width:100%" oninput="renderDcf()"></div>
+        <div><label class="hint">İskonto Oranı: <b id="dcfRv" style="color:var(--ink)"></b></label><br>
+          <input type="range" id="dcfR" min="5" max="50" step="0.5" style="width:100%" oninput="renderDcf()"></div>
+        <div><label class="hint">Uç (Terminal) Büyüme: <b id="dcfTv" style="color:var(--ink)"></b></label><br>
+          <input type="range" id="dcfT" min="0" max="25" step="0.5" style="width:100%" oninput="renderDcf()"></div>
+      </div>
+      <div id="dcfResult"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="chartCard">
+      <h2>Fiyat Grafiği</h2>
+      <div class="sub">Kapanış fiyatları (Yahoo Finance). <span id="chartInfo"></span></div>
+      <div class="toolbar" id="chartBtns">
+        <button data-r="1mo" onclick="setChartRange('1mo')">1 Ay</button>
+        <button data-r="6mo" onclick="setChartRange('6mo')">6 Ay</button>
+        <button data-r="1y" class="primary" onclick="setChartRange('1y')">1 Yıl</button>
+        <button data-r="5y" onclick="setChartRange('5y')">5 Yıl</button>
+      </div>
+      <div id="chartBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="ownerCard">
+      <h2>Ortaklık Yapısı</h2>
+      <div class="sub" id="ownerSub">Şirketin payları kimde — halka açıklık oranı ve büyük ortaklar, pasta dilimiyle.</div>
+      <div id="ownerBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="techCard">
+      <h2>Teknik Görünüm & Risk</h2>
+      <div class="sub">Momentum, trend ve risk göstergeleri (Bloomberg GP/BETA ekranlarının karşılığı): RSI, 50/200 günlük ortalamalara mesafe, 52 hafta konumu, beta, volatilite ve dönemsel getiriler. Kaynak: TradingView<span id="techShortSrc"></span>.</div>
+      <div id="techBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card" id="incomeCard">
@@ -358,14 +405,10 @@
       </table>
     </div>
 
-    <div class="card hidden" id="cashflowCard">
-      <h2>Nakit Akış Tablosu & Serbest Nakit Akışı</h2>
-      <div class="sub">SEC'ten çekilen faaliyet/yatırım/finansman nakit akışları. <b>FCF = Faaliyet Nakit Akışı − Sermaye Harcaması (Capex)</b> — şirketin dağıtılabilir gerçek nakdi. Sağlıklı bir şirkette FCF pozitif ve büyüyen olmalıdır.</div>
-      <div class="grid" id="cfKpis" style="margin-bottom:16px"></div>
-      <table>
-        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim</th></tr></thead>
-        <tbody id="cashflowBody"></tbody>
-      </table>
+    <div class="card hidden" id="cashCard">
+      <h2>Nakit Akışı & Serbest Nakit Akış (FCF)</h2>
+      <div class="sub">Kâr kâğıt üzerinde kalabilir — nakit yalan söylemez. FCF = Faaliyet Nakiti − Yatırım Harcamaları (capex): şirketin temettü/geri alım/borç ödemeye ayırabileceği gerçek nakit. <span id="cashNote" class="hint"></span></div>
+      <div class="grid" id="cashKpis"></div>
     </div>
 
     <div class="card" id="trendCard">
@@ -410,6 +453,24 @@
       <div id="targetBody"><div class="hint">—</div></div>
     </div>
 
+    <div class="card hidden" id="sectorCard">
+      <h2>Sektör Karşılaştırması</h2>
+      <div class="sub" id="sectorSub">Aynı sektördeki en büyük şirketlerle yan yana — F/K, PD/DD, ROE, net marj ve sektör medyanı. (Kaynak: TradingView)</div>
+      <div id="sectorBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="top10Card">
+      <h2>Borsanın Devleri</h2>
+      <div class="sub" id="top10Sub">Bu hissenin işlem gördüğü borsada piyasa değerine göre en büyük 10 şirket. (Kaynak: TradingView)</div>
+      <div id="top10Body"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="insiderCard">
+      <h2>İçeriden Alım-Satım (Form 4)</h2>
+      <div class="sub">Şirket yöneticileri ve büyük ortakların kendi hisselerindeki işlemleri — SEC'e zorunlu Form 4 bildirimlerinden. Yöneticilerin <span class="up">alımı</span> genelde güven işareti sayılır. (Yalnızca ABD hisselerinde; BIST'te benzer bildirimler KAP Bildirimleri kartında gelir.)</div>
+      <div id="insiderBody"><div class="hint">—</div></div>
+    </div>
+
     <div class="card">
       <h2>Finansal Oranlar</h2>
       <div class="sub">Renkler genel kabul görmüş eşik değerlerine göredir; sektöre göre yorumlanmalıdır.</div>
@@ -417,6 +478,12 @@
         <thead><tr><th>Oran</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
         <tbody id="ratioBody"></tbody>
       </table>
+    </div>
+
+    <div class="card hidden" id="healthCard">
+      <h2>Sağlık Karnesi — DuPont · Piotroski · Altman</h2>
+      <div class="sub">Profesyonel üçlü: <b>DuPont</b> ROE'yi 3 bileşene ayırır (kârlılık × verimlilik × kaldıraç); <b>Piotroski F-Score</b> 9 kriterle finansal kaliteyi puanlar (7+ güçlü); <b>Altman Z'-Score</b> iflas riskini ölçer (2,9+ güvenli, 1,23 altı riskli).</div>
+      <div id="healthBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card">

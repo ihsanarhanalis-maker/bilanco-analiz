@@ -69,6 +69,22 @@ function httpGetHtmlFollow(url, headers, maxRedirects, cb){
     pr.on('end', () => cb(null, pr.statusCode, html));
   }).on('error', e => cb(e));
 }
+/* Etiketi div/a farketmeksizin bulur (Finviz zaman içinde <a>Label</a> → <div>Label</div> yaptı) */
+function extractStat2(html, label){
+  const idx = html.indexOf('>' + label + '<');
+  if (idx < 0) return null;
+  const m = html.slice(idx, idx + 500).match(/<b>(?:<span[^>]*>)?([^<]+)/);
+  return m ? m[1].trim() : null;
+}
+/* "14.78B" / "62.10%" gibi Finviz değerlerini sayıya çevirir */
+function finvizNum(s){
+  if (!s) return null;
+  const m = String(s).match(/-?[\d.]+/);
+  if (!m) return null;
+  let v = parseFloat(m[0]);
+  if (/B/i.test(s)) v *= 1e9; else if (/M/i.test(s)) v *= 1e6; else if (/K/i.test(s)) v *= 1e3;
+  return v;
+}
 function finvizTargets(sym, res){
   const url = 'https://finviz.com/quote.ashx?t=' + encodeURIComponent(sym);
   httpGetHtmlFollow(url, { 'User-Agent': BUA, 'Accept': 'text/html' }, 4, (err, status, html) => {
@@ -78,8 +94,20 @@ function finvizTargets(sym, res){
     const targetPrice = targetPriceRaw ? parseFloat(targetPriceRaw) : null;
     const recom = recomRaw ? parseFloat(recomRaw) : null;
     const ratings = extractRatingEvents(html).slice(0, 30);
+    // Ortaklık yapısı: içeriden %, kurumsal %, dolaşımdaki pay / toplam pay
+    const own = {
+      insider: finvizNum(extractStat2(html, 'Insider Own')),
+      inst: finvizNum(extractStat2(html, 'Inst Own')),
+      shsOut: finvizNum(extractStat2(html, 'Shs Outstand')),
+      shsFloat: finvizNum(extractStat2(html, 'Shs Float'))
+    };
+    // Kısa pozisyon (ayı bahisleri): dolaşımın %'si + kapatma gün sayısı
+    const shortData = {
+      floatPct: finvizNum(extractStat2(html, 'Short Float')),
+      ratio: finvizNum(extractStat2(html, 'Short Ratio'))
+    };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify({ ok: true, targetPrice, recom, ratings }));
+    res.end(JSON.stringify({ ok: true, targetPrice, recom, ratings, own, shortData }));
   });
 }
 
@@ -131,8 +159,98 @@ async function translateToTR(text) {
   return t; // hiçbiri olmazsa orijinal metin
 }
 
+/* Avrupa çok-yıllı gerçek finansal veri — GLEIF (ISIN→LEI) + filings.xbrl.org (LEI→ESEF/IFRS
+   XBRL). ABD'deki SEC EDGAR'ın Avrupa karşılığı: 2021'den beri AB/İngiltere'de halka açık
+   şirketler yıllık raporlarını IFRS XBRL (ESEF) formatında düzenleyici otoritelere sunmak
+   zorunda; filings.xbrl.org bunları toplayan ücretsiz/anahtarsız bir index.
+   ÖNEMLİ KISIT: Almanya ve İsviçre bu index'te YOK (0 kayıt, doğrulandı) — o borsalarda
+   TradingView'in tek dönemlik özeti tek seçenek olarak kalıyor.
+   Şirket eşleme: ISIN BİRİNCİL yol (GLEIF filter[isin] tek/deterministik sonuç verir —
+   şirket adına göre arama YAPMAYIZ çünkü test edilen örneklerde (AB Volvo → yanlışlıkla
+   "Volvo Cars" bulundu, Orlen → 38 alt-şirket arasından seçim gerekti) ciddi yanlış-eşleşme
+   riski çıktı; ISIN benzersiz olduğu için bu risk sıfırlanıyor). Ad araması yalnız ISIN
+   sonuç vermezse (örn. Nokia — GLEIF'in ISIN eşleme verisi tam değil) VE tek/net bir sonuç
+   varsa (ülke eşleşmesi + ISSUED durum) yedek olarak kullanılır. */
+function gleifLookup(path){ return httpsGetText('https://api.gleif.org'+path, { 'User-Agent': BUA, 'Accept': 'application/json' }); }
+async function resolveLei(isin, name, country){
+  if (isin) {
+    try {
+      const r = await gleifLookup('/api/v1/lei-records?filter%5Bisin%5D=' + encodeURIComponent(isin));
+      if (r.status === 200) {
+        const j = JSON.parse(r.body);
+        if (j.data && j.data.length === 1) return j.data[0].attributes.lei;
+      }
+    } catch (e) {}
+  }
+  if (name) {
+    try {
+      const r = await gleifLookup('/api/v1/lei-records?filter%5Bentity.legalName%5D=' + encodeURIComponent(name) + '&page%5Bsize%5D=10');
+      if (r.status === 200) {
+        const j = JSON.parse(r.body);
+        const cands = (j.data || []).filter(d => {
+          const e = d.attributes.entity;
+          return e && e.legalAddress && e.legalAddress.country === country && d.attributes.registration.status === 'ISSUED';
+        });
+        if (cands.length === 1) return cands[0].attributes.lei;
+      }
+    } catch (e) {}
+  }
+  return null;
+}
+async function fetchFilingsList(lei){
+  const r = await httpsGetText('https://filings.xbrl.org/api/entities/' + encodeURIComponent(lei) + '/filings', { 'User-Agent': BUA, 'Accept': 'application/json' });
+  if (r.status !== 200) return [];
+  const j = JSON.parse(r.body);
+  return (j.data || []).map(f => f.attributes).filter(a => a.json_url)
+    .sort((a, b) => (b.period_end || '').localeCompare(a.period_end || ''));
+}
+/* Ham filing JSON'ı MB'lardan KB'lara indirir: yalnız sayısal ifrs-full kavramları,
+   segment/bileşen kırılımı (extra boyut) OLMAYANLAR, metin-açıklama etiketleri hariç. */
+function reduceIfrsFacts(rawJson){
+  const out = [];
+  const seen = new Set();
+  for (const f of Object.values(rawJson.facts || {})) {
+    const dims = f.dimensions || {};
+    const c = dims.concept;
+    if (!c || !c.startsWith('ifrs-full:')) continue;
+    if (/^ifrs-full:(Description|Disclosure|AddressOf|CountryOf|Domicile|NameOf|DateOf|Explanatory)/.test(c)) continue;
+    if (Object.keys(dims).length > 4) continue;
+    const num = typeof f.value === 'number' ? f.value : parseFloat(f.value);
+    if (isNaN(num)) continue;
+    const key = c + '|' + dims.period;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push([c.slice('ifrs-full:'.length), dims.period, num]);
+  }
+  return out;
+}
+async function ifrsHandler(isin, name, country, res){
+  const send = obj => { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
+  try {
+    const lei = await resolveLei(isin, name, country);
+    if (!lei) return send({ ok: false, reason: 'lei_not_found' });
+    const filings = await fetchFilingsList(lei);
+    if (!filings.length) return send({ ok: false, reason: 'no_filings', lei });
+    const best = filings[0];
+    const fr = await httpsGetText('https://filings.xbrl.org' + best.json_url, { 'User-Agent': BUA, 'Accept': 'application/json' });
+    if (fr.status !== 200) return send({ ok: false, reason: 'facts_fetch_failed', lei });
+    const rawJson = JSON.parse(fr.body);
+    const facts = reduceIfrsFacts(rawJson);
+    send({ ok: true, lei, periodEnd: best.period_end, country: best.country, facts });
+  } catch (e) {
+    send({ ok: false, reason: 'exception', error: e.message });
+  }
+}
+
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  // --- Avrupa çok-yıllı IFRS/ESEF köprüsü (GLEIF + filings.xbrl.org, anahtarsız) ---
+  if (urlPath === '/ifrs') {
+    const q = new URLSearchParams(req.url.split('?')[1] || '');
+    ifrsHandler(q.get('isin') || '', q.get('name') || '', (q.get('country') || '').toUpperCase(), res);
+    return;
+  }
 
   // --- Haber köprüsü (Bing News RSS — linkler gerçek yayıncıya gider) ---
   //     m=tr parametresi BIST hisseleri için Türkçe haber pazarını seçer.
@@ -174,6 +292,39 @@ http.createServer((req, res) => {
         res.end(body);
       });
     }).on('error', e => { res.writeHead(502); res.end(JSON.stringify({ error: e.message })); });
+    return;
+  }
+
+  // --- Yahoo yıllık finansallar köprüsü (fundamentals-timeseries, anahtarsız/crumb'sız) ---
+  //     Almanya/İsviçre gibi filings.xbrl.org kapsamı olmayan Avrupa borsaları için çok-yıllı
+  //     bilanço/gelir/nakit-akış yedeği. Yahoo CORS göndermez → proxy şart (aynı /price gibi).
+  if (urlPath === '/yfin') {
+    const yq = new URLSearchParams(req.url.split('?')[1] || '');
+    const sym = encodeURIComponent(yq.get('s') || '');
+    // p=q → çeyreklik seri (quarterly*); varsayılan yıllık (annual*). Not: yarıyıllık raporlayan
+    // Avrupa şirketlerinde (Nestle, LVMH…) "quarterly" 6 aylık dönemler döndürür — Yahoo şirketin
+    // gerçekte yayınladığı en sık dönemi verir.
+    const pfx = yq.get('p') === 'q' ? 'quarterly' : 'annual';
+    const types = ['TotalRevenue','CostOfRevenue','GrossProfit','OperatingIncome','NetIncome',
+      'TotalAssets','CurrentAssets','CashAndCashEquivalents','Inventory','AccountsReceivable',
+      'NetPPE','Goodwill','OtherIntangibleAssets','TotalLiabilitiesNetMinorityInterest',
+      'CurrentLiabilities','AccountsPayable','CurrentDebt','CurrentDebtAndCapitalLeaseObligation',
+      'LongTermDebt','LongTermDebtAndCapitalLeaseObligation','StockholdersEquity','MinorityInterest',
+      'OperatingCashFlow','InvestingCashFlow','FinancingCashFlow','CapitalExpenditure',
+      'ResearchAndDevelopment'].map(t => pfx + t).join(',');
+    // yıllıkta ~6 yıl (Yahoo en çok 4 döndürüyor); çeyreklikte ~3 yıl yeter
+    const p1 = Math.floor(Date.now() / 1000) - (pfx === 'quarterly' ? 3 : 6) * 365 * 86400;
+    const p2 = Math.floor(Date.now() / 1000) + 86400;
+    const yUrl = 'https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/' + sym +
+      '?symbol=' + sym + '&type=' + types + '&period1=' + p1 + '&period2=' + p2;
+    https.get(yUrl, { headers: { 'User-Agent': BUA } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"timeseries":{"result":[]}}'); });
     return;
   }
 
@@ -222,7 +373,9 @@ http.createServer((req, res) => {
     const q = new URLSearchParams(req.url.split('?')[1] || '');
     const from = encodeURIComponent(q.get('from') || new Date(Date.now() - 86400000).toISOString());
     const to = encodeURIComponent(q.get('to') || new Date(Date.now() + 30 * 86400000).toISOString());
-    const country = (q.get('countries') === 'US') ? 'US' : 'TR';
+    // ABD/TR + 15 Avrupa borsa ülkesi (beyaz liste — keyfi girdi upstream'e geçmesin)
+    const OKC = ['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL'];
+    const country = OKC.includes(q.get('countries')) ? q.get('countries') : 'TR';
     const eUrl = 'https://economic-calendar.tradingview.com/events?from=' + from + '&to=' + to + '&countries=' + country;
     https.get(eUrl, { headers: { 'User-Agent': BUA, 'Origin': 'https://tr.tradingview.com', 'Accept': 'application/json' } }, pr => {
       let body = '';
@@ -263,6 +416,21 @@ http.createServer((req, res) => {
     return;
   }
 
+  // --- BIST ortaklık yapısı köprüsü (İş Yatırım OrtaklikYapisi — ortak adı + %oran) ---
+  if (urlPath === '/bistown') {
+    const h = new URLSearchParams(req.url.split('?')[1] || '').get('hisse') || '';
+    const oUrl = 'https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/OrtaklikYapisi?hisse=' + encodeURIComponent(h);
+    https.get(oUrl, { headers: { 'User-Agent': BUA, 'Accept': 'application/json' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"value":[]}'); });
+    return;
+  }
+
   // --- Analist hedef fiyatları köprüsü (Finviz, anahtarsız — Yahoo crumb'a bağımlı değil) ---
   if (urlPath === '/targets') {
     const sym = new URLSearchParams(req.url.split('?')[1] || '').get('s') || '';
@@ -281,6 +449,25 @@ http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify({ text: q }));
     });
+    return;
+  }
+
+  // --- SEC Arşiv köprüsü (www.sec.gov/Archives — Form 4 içeriden işlem bildirimleri) ---
+  //     data.sec.gov JSON API'leri sunar; belge arşivi (form4.xml vb.) www.sec.gov'dadır.
+  if (urlPath.startsWith('/secw/')) {
+    const wUrl = 'https://www.sec.gov' + req.url.slice(5); // '/secw' -> ''
+    https.get(wUrl, { headers: { 'User-Agent': UA, 'Accept-Encoding': 'identity' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, {
+          'Content-Type': pr.headers['content-type'] || 'application/xml; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-store'
+        });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end(''); });
     return;
   }
 

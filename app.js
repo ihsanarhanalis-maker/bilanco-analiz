@@ -29,6 +29,8 @@ const SAMPLE = [
   ["Geçmiş Yıl Kârları","equity",900000,700000],
   ["Dönem Net Kârı","equity",600000,870000]
 ];
+/* Denge kontrolü (cari): Aktif 9.200.000 = KV 3.670.000 + UV 2.030.000 + Özkaynak 3.500.000
+   Denge kontrolü (önceki): Aktif 8.220.000 = KV 2.390.000 + UV 2.260.000 + Özkaynak 3.570.000 */
 
 let CUR = 'TL';     // şirketin raporlama para birimi
 let CURSYM = '$';   // fiyat/değer gösterimlerinde kullanılan sembol (ABD: $, BIST: ₺)
@@ -103,28 +105,45 @@ const CONCEPTS_INCOME = {
   rnd:        ['ResearchAndDevelopmentExpense'],
   interest:   ['InterestExpense','InterestExpenseDebt','InterestExpenseNonoperating'],
 };
-/* Nakit akış tablosu (süre/akış kavramları — gelir gibi pickDuration ile işlenir) */
-const CONCEPTS_CASHFLOW = {
+/* Nakit akış kavramları — ABD'de HER ZAMAN yıllık (10-K) çekilir: 10-Q'daki nakit akışları
+   yılbaşından-bugüne kümülatif olduğundan çeyrek süzgeci onları kaçırır. */
+const CONCEPTS_CASH = {
   opCF:  ['NetCashProvidedByUsedInOperatingActivities','NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'],
   invCF: ['NetCashProvidedByUsedInInvestingActivities','NetCashProvidedByUsedInInvestingActivitiesContinuingOperations'],
   finCF: ['NetCashProvidedByUsedInFinancingActivities','NetCashProvidedByUsedInFinancingActivitiesContinuingOperations'],
-  capex: ['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets','PaymentsForCapitalImprovements'],
-  dep:   ['DepreciationDepletionAndAmortization','DepreciationAmortizationAndAccretionNet','DepreciationAndAmortization'],
+  capex: ['PaymentsToAcquirePropertyPlantAndEquipment','PaymentsToAcquireProductiveAssets'],
 };
 
-/* Bir us-gaap kavramının ham USD kayıtlarını çeker (aday etiketleri sırayla dener).
+/* Bir us-gaap (veya taxonomy verilirse ifrs-full — Almanya/İsviçre'de SEC'e 20-F ile kayıtlı
+   birkaç çok-uluslu şirket için, bkz. DE_CH_SEC_XREF) kavramının ham kayıtlarını çeker.
    Sonuç: doğru formdaki ham kayıt dizisi [{start?,end,val,filed,form}, …]. */
-async function fetchConceptRaw(cik, tags, formPrefix){
+async function fetchConceptRaw(cik, tags, formPrefix, taxonomy){
   for(const tag of tags){
     let j;
     try{
-      const r=await fetch(`/sec/api/xbrl/companyconcept/CIK${cik}/us-gaap/${tag}.json`);
+      const r=await fetch(`/sec/api/xbrl/companyconcept/CIK${cik}/${taxonomy||'us-gaap'}/${tag}.json`);
       if(!r.ok) continue;
       j=await r.json();
     }catch(e){ continue; }
-    const usd = j.units && (j.units.USD || j.units['USD']);
-    if(!usd) continue;
-    const arr = usd.filter(e=> e.form && e.form.indexOf(formPrefix)===0);
+    // ABD (us-gaap) yolunda davranış AYNEN korunur (yalnız USD). ifrs-full yolunda şirket birden
+    // fazla para biriminde raporlamış olabilir (ör. UBS eski yıllarda CHF, günümüzde yalnız USD
+    // tag'liyor) — İLK bulunan birimi değil, formPrefix'e uyan kayıtları olan VE en güncel tarihe
+    // sahip birimi seçmek gerekir (aksi halde sessizce yıllar önce terk edilmiş bir seriye düşülür).
+    let arr;
+    if(taxonomy==='ifrs-full'){
+      if(!j.units){ continue; }
+      let bestArr=null, bestMaxDate='';
+      for(const u in j.units){
+        const filtered=j.units[u].filter(e=> e.form && e.form.indexOf(formPrefix)===0);
+        if(!filtered.length) continue;
+        const maxDate=filtered.reduce((m,e)=> e.end>m?e.end:m, '');
+        if(maxDate>bestMaxDate){ bestMaxDate=maxDate; bestArr=filtered; }
+      }
+      arr=bestArr||[];
+    }else{
+      const usd=j.units && j.units.USD;
+      arr = usd ? usd.filter(e=> e.form && e.form.indexOf(formPrefix)===0) : [];
+    }
     if(arr.length) return arr;
   }
   return [];
@@ -156,24 +175,32 @@ async function fetchConcept(cik, tags, formPrefix){
   return pickInstant(await fetchConceptRaw(cik, tags, formPrefix));
 }
 
-/* Bir şirketin tüm bilanço (anlık) + gelir + nakit akış (süre) serilerini çeker.
-   SEC saniye limitini aşmamak için 5'erli gruplar halinde. → { D, I, C, filed } */
-async function fetchSeries(cik, mode, formPrefix){
-  const grab = async (defs)=>{
+/* Bir şirketin tüm bilanço (anlık) + gelir (süre) serilerini çeker.
+   SEC saniye limitini aşmamak için 5'erli gruplar halinde. → { D, I }
+   opts: {taxonomy, balanceDefs, incomeDefs, cashDefs, cashForm} — hepsi opsiyonel, verilmezse
+   ABD (us-gaap) varsayılanları AYNEN kullanılır (bkz. DE_CH_SEC_XREF — Almanya/İsviçre'de SEC'e
+   20-F ile kayıtlı birkaç şirket için ifrs-full + '20-F' geçilir). */
+async function fetchSeries(cik, mode, formPrefix, opts){
+  opts=opts||{};
+  const tax=opts.taxonomy;
+  const grab = async (defs, fp)=>{
     const keys=Object.keys(defs), raw={};
     for(let i=0;i<keys.length;i+=5){
       const chunk=keys.slice(i,i+5);
-      const r=await Promise.all(chunk.map(k=>fetchConceptRaw(cik,defs[k],formPrefix)));
+      const r=await Promise.all(chunk.map(k=>fetchConceptRaw(cik,defs[k],fp||formPrefix,tax)));
       chunk.forEach((k,j)=>raw[k]=r[j]);
     }
     return {keys,raw};
   };
-  const b=await grab(CONCEPTS_BALANCE);
-  const ic=await grab(CONCEPTS_INCOME);
-  const cf=await grab(CONCEPTS_CASHFLOW);
+  const b=await grab(opts.balanceDefs||CONCEPTS_BALANCE);
+  const ic=await grab(opts.incomeDefs||CONCEPTS_INCOME);
+  const cf=await grab(opts.cashDefs||CONCEPTS_CASH, opts.cashForm||'10-K');   // nakit akışı her zaman yıllık (bkz. CONCEPTS_CASH notu)
   const D={}; b.keys.forEach(k=>D[k]=pickInstant(b.raw[k]));
   const I={}; ic.keys.forEach(k=>I[k]=pickDuration(ic.raw[k],mode));
-  const C={}; cf.keys.forEach(k=>C[k]=pickDuration(cf.raw[k],mode));
+  const CF={}; cf.keys.forEach(k=>CF[k]=pickDuration(cf.raw[k],'annual'));
+  // FCF = Faaliyet Nakiti − Capex (her ikisi de olan tarihlerde)
+  CF.fcf={}; Object.keys(CF.opCF).forEach(d=>{ if(d in CF.capex) CF.fcf[d]=CF.opCF[d]-CF.capex[d]; });
+  I._cash=CF;
   // Brüt kâr yoksa gelir − satış maliyetinden türet
   if(!Object.keys(I.grossProfit).length && Object.keys(I.revenue).length && Object.keys(I.costRev).length){
     const g={}; Object.keys(I.revenue).forEach(d=>{ if(d in I.costRev) g[d]=I.revenue[d]-I.costRev[d]; }); I.grossProfit=g;
@@ -182,7 +209,7 @@ async function fetchSeries(cik, mode, formPrefix){
   // açıklandığında. (En güncel 10-K karşılaştırmalı yılları da içerir; en erkeni alırız.)
   const filed={};
   (b.raw.assets||[]).forEach(e=>{ if(!(e.end in filed)||e.filed<filed[e.end]) filed[e.end]=e.filed; });
-  return { D, I, C, filed };
+  return { D, I, filed };
 }
 
 /* Tek bir hissenin karşılaştırma metriklerini hesaplar (DOM'a dokunmaz).
@@ -193,7 +220,25 @@ async function fetchMetrics(sym, mode){
   const forceBist=/\.IS$/.test(sym);
   const bSym=forceBist?sym.replace(/\.IS$/,''):sym;
   let D,I;
-  if(!forceBist && map[sym]){
+  const euInfoM=parseEUSymbol(sym);
+  if(euInfoM){
+    // Avrupa: Yahoo çok-yıllı seri → yoksa TV tek-dönem özeti (tekli analizle aynı zincirin kısası)
+    let s=null;
+    try{ s=await fetchYahooFundSeries(euInfoM.base+'.'+euInfoM.suffix, mode); }catch(e){}
+    if(!s){
+      try{
+        const tvTicker=euInfoM.tv+':'+euInfoM.base.replace(/-/g,'_');
+        const r=await fetch('https://scanner.tradingview.com/'+euInfoM.scan+'/scan',
+          {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})});
+        const j=r.ok?await r.json():null;
+        const row=j&&j.data&&j.data.find(x=>x.d&&x.d[4]!=null);
+        if(!row) return { sym, ok:false, err:'bulunamadı' };
+        const R=euReshape(row.d);
+        s={ D:R.D, I:R.I };
+      }catch(e){ return { sym, ok:false, err:'bağlantı' }; }
+    }
+    ({D,I}=s);
+  }else if(!forceBist && map[sym]){
     const cik=String(map[sym]).padStart(10,'0');
     const formPrefix = mode==='annual' ? '10-K' : '10-Q';
     try{ ({D,I}=await fetchSeries(cik,mode,formPrefix)); }
@@ -284,6 +329,9 @@ function renderComparison(list){
 }
 
 /* ================== BIST (Borsa İstanbul) veri katmanı ================== */
+/* Kaynak: İş Yatırım'ın halka açık KAP mali tablo servisi (sunucudaki /bist köprüsü).
+   Sanayi/holding şirketleri XI_29 şemasını, bankalar UFRS şemasını kullanır.
+   itemCode'lar sabittir (ör. 1BL = TOPLAM VARLIKLAR, 1Z = banka AKTİF TOPLAMI); değerler TL. */
 const BIST_PERIOD_END = {3:'-03-31', 6:'-06-30', 9:'-09-30', 12:'-12-31'};
 async function bistCall(sym, group, pairs){
   let qs='companyCode='+encodeURIComponent(sym)+'&financialGroup='+encodeURIComponent(group);
@@ -293,6 +341,7 @@ async function bistCall(sym, group, pairs){
   const j=await r.json();
   return (j&&j.value&&j.value.length)?{pairs,items:j.value}:null;
 }
+/* Bir çağrının sonuçlarını byCode haritasına işler: itemCode -> { 'YYYY-AA-GG': değer } */
 function bistMerge(byCode, call){
   if(!call) return;
   call.items.forEach(it=>{
@@ -309,6 +358,8 @@ function bistMerge(byCode, call){
 const bc=(byCode,code)=> byCode[code]||{};
 function bcAdd(a,b,sign){ const out={...(a||{})}; Object.keys(b||{}).forEach(d=>{ out[d]=(out[d]||0)+(sign||1)*b[d]; }); return out; }
 function bcAbs(a){ const out={}; Object.keys(a||{}).forEach(d=>out[d]=Math.abs(a[d])); return out; }
+/* Çeyreklik gelir kalemleri KAP'ta KÜMÜLATİFTİR (3/6/9/12 ay) — ABD verisiyle aynı
+   davranış için ayrık çeyreğe çevrilir: q(p) = küm(p) − küm(p−3); Q1 olduğu gibi. */
 function bistDiscreteQuarters(cum){
   const out={};
   Object.keys(cum||{}).forEach(d=>{
@@ -319,6 +370,8 @@ function bistDiscreteQuarters(cum){
   });
   return out;
 }
+/* BIST şirketinin serilerini ABD fetchSeries ile AYNI ŞEKİLDE ({D,I}) döndürür →
+   analiz/trend/oran/karşılaştırma kodu hiçbir değişiklik istemeden çalışır. */
 async function fetchBistSeries(sym, mode){
   const thisY=new Date().getFullYear();
   let calls;
@@ -330,6 +383,7 @@ async function fetchBistSeries(sym, mode){
             [[thisY-1,3],[thisY-1,6],[thisY-1,9],[thisY-1,12]],
             [[thisY-2,3],[thisY-2,6],[thisY-2,9],[thisY-2,12]] ];
   }
+  // Şema tespiti: önce sanayi/holding (XI_29), veri boşsa banka (UFRS)
   const hasData=c=> c && c.items.some(it=> [1,2,3,4].some(i=> it['value'+i]!=null && it['value'+i]!==''));
   let group='XI_29';
   let first=await bistCall(sym, group, calls[0]);
@@ -338,6 +392,7 @@ async function fetchBistSeries(sym, mode){
   const byCode={};
   bistMerge(byCode, first);
   for(let i=1;i<calls.length;i++) bistMerge(byCode, await bistCall(sym, group, calls[i]));
+  // Kod → Türkçe açıklama haritası (banka/sigorta satır etiketleri ve açıklamaya-göre-arama için)
   const descOf={};
   first.items.forEach(it=>{ descOf[it.itemCode]=(it.itemDescTr||'').trim(); });
   const findByDesc=rx=>{ const c=Object.keys(descOf).find(k=> rx.test(descOf[k]) && Object.keys(bc(byCode,k)).length); return c?bc(byCode,c):{}; };
@@ -357,19 +412,26 @@ async function fetchBistSeries(sym, mode){
     I.grossProfit=bc(byCode,'3D'); I.opIncome=bc(byCode,'3DF');
     I.netIncome=Object.keys(bc(byCode,'3Z')).length?bc(byCode,'3Z'):bc(byCode,'3L');
     I.rnd=bcAbs(bc(byCode,'3DC')); I.interest=bcAbs(bc(byCode,'3HC'));
+    // Nakit akışı (KAP şemasında hazır): 4C faaliyet, 4CAK yatırım, 4CBE finansman,
+    // 4CAI sabit sermaye yatırımları (capex), 4CB serbest nakit akım
+    I._cash={ opCF:bc(byCode,'4C'), invCF:bc(byCode,'4CAK'), finCF:bc(byCode,'4CBE'),
+              capex:bcAbs(bc(byCode,'4CAI')), fcf:bc(byCode,'4CB') };
   }else{
+    // Banka (UFRS): dönen/duran ayrımı yoktur; ana toplamlar + banka kalemleri
     D.assets=bc(byCode,'1Z'); D.assetsCur={};
     D.cash=bc(byCode,'1A'); D.stInv={}; D.recv={}; D.inv={};
     D.ppe={}; D.goodwill={}; D.intang={}; D.ltInv={};
     D.liabCur={}; D.liabNoncur={};
     D.equity=bc(byCode,'2O'); D.equityIncl=bc(byCode,'2O'); D.minority={};
-    D.liab=bcAdd(bc(byCode,'2Z'), bc(byCode,'2O'), -1);
+    D.liab=bcAdd(bc(byCode,'2Z'), bc(byCode,'2O'), -1);   // Pasif Toplamı − Özkaynak
     D.liabEquity=bc(byCode,'2Z');
     D.ap={}; D.stDebt={}; D.defRev={}; D.ltDebt={};
     D.common=bc(byCode,'2OA'); D.retained=bc(byCode,'2OU');
+    // Sigorta şirketlerinde ödenmiş sermaye 2OA'da olmayabilir → açıklamadan bul
     if(!Object.keys(D.common).length) D.common=findByDesc(/Ödenmiş Sermaye/i);
     if(!Object.keys(D.retained).length) D.retained=findByDesc(/Geçmiş Y[ıi]llar Kar/i);
     D.bankKrediler=bc(byCode,'1AF'); D.bankMevduat=bc(byCode,'2A'); D.bankBankalar=bc(byCode,'1AC');
+    // Satır etiketleri gerçek şemadan (banka: "MEVDUAT", sigorta: "Finansal Borçlar" vb.)
     const clean=s=>(s||'').replace(/^[IVXLC0-9]+[\.\)]\s*/i,'').replace(/^[A-ZÇĞİÖŞÜ0-9]{1,2}-\s*/,'').trim();
     D.bankLabels={
       nakit:  clean(descOf['1A'])  || 'Nakit Değerler ve Merkez Bankası',
@@ -381,10 +443,18 @@ async function fetchBistSeries(sym, mode){
     I.grossProfit=bc(byCode,'3C'); I.opIncome=bc(byCode,'3CH');
     I.netIncome=Object.keys(bc(byCode,'3ZA')).length?bc(byCode,'3ZA'):bc(byCode,'3Z');
     I.rnd={}; I.interest={};
+    I._cash={ opCF:{}, invCF:{}, finCF:{}, capex:{}, fcf:{} };   // banka nakit akış şeması farklı
   }
-  if(mode==='quarter'){ Object.keys(I).forEach(k=> I[k]=bistDiscreteQuarters(I[k])); }
+  if(mode==='quarter'){
+    Object.keys(I).forEach(k=>{
+      if(k==='_cash'){ Object.keys(I._cash).forEach(c=> I._cash[c]=bistDiscreteQuarters(I._cash[c])); }
+      else I[k]=bistDiscreteQuarters(I[k]);
+    });
+  }
   return { D, I, group };
 }
+/* Banka bilançosu satırları (dönen/duran şeması bankaya uymaz → özel kurulum).
+   "Diğer" satırları fark (plug) olduğundan bilanço her zaman dengelenir. */
 function buildRowsBank(D,D0,D1){
   const v=(m,d)=> (d&&m&&(d in m))?m[d]:0;
   const L=D.bankLabels||{};
@@ -407,6 +477,7 @@ function buildRowsBank(D,D0,D1){
     v(D.equity,D1)-v(D.common,D1)-v(D.retained,D1));
   return rows;
 }
+/* BIST hissesi için ana arama akışı (ABD fetchTicker ile aynı adımlar). */
 async function fetchTickerBIST(sym, mode, myGen){
   try{
     const s=await fetchBistSeries(sym, mode);
@@ -418,9 +489,9 @@ async function fetchTickerBIST(sym, mode, myGen){
     const dates=Object.keys(D.assets).sort().reverse();
     const D0=dates[0], D1=dates[1]||null;
     CUR='TL'; CURSYM='₺';
-    const shares=(D.common&&D.common[D0])||null;
+    const shares=(D.common&&D.common[D0])||null;   // Ödenmiş sermaye (nominal 1 TL) ≈ pay adedi
     FIN={ ticker:sym, mode, cur:'TRY', market:'BIST', bankGroup:group, D0, D1, balance:D, income:I,
-          cashflow:null, filedD0:null, filedD1:null, sharesBist:shares };
+          filedD0:null, filedD1:null, sharesBist:shares };
     const rows = group==='UFRS' ? buildRowsBank(D,D0,D1) : buildRowsFromSEC(D,D0,D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
@@ -430,12 +501,320 @@ async function fetchTickerBIST(sym, mode, myGen){
     analyze();
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
-    fetchChart(myGen);
-    fetchTargetsBIST(sym, myGen);
-    fetchKapFeed(sym, myGen);
-    fetchEconCalendar(myGen, 'TR');
+    fetchTargetsBIST(sym, myGen);   // kurum bazlı hedef fiyatlar (Fintables; yedek TV konsensüsü)
+    fetchKapFeed(sym, myGen);       // KAP bildirimleri (kısa özet + resmi KAP linki)
+    fetchEconCalendar(myGen, 'TR'); // Türkiye ekonomik takvimi (★/★★/★★★ filtreli)
     fetchNextEarnings(sym, 'BIST', myGen);
-    stopNyClock();
+    fetchPriceChart(sym, sym+'.IS', myGen);
+    fetchSectorComparison(sym, 'BIST', myGen);
+    fetchExchangeTop10(sym, 'BIST', myGen);
+    fetchOwnershipBIST(sym, myGen);   // ortaklık yapısı pastası (KAP verisi)
+    TECH_SHORT=null;                  // kısa pozisyon verisi yalnız ABD'de var
+    fetchTechPanel(sym, 'BIST', myGen);
+    const ic=document.getElementById('insiderCard'); if(ic) ic.classList.add('hidden');  // Form 4 yalnız ABD
+    updateWatchStar();
+    stopNyClock();                  // NY saati yalnızca ABD hisselerinde
+  }catch(e){
+    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+  }
+}
+
+/* ================== Avrupa borsaları ================== */
+/* Kaynak: TradingView scanner (fiyat: Yahoo, aynı /price köprüsü). Ticker EKİ Yahoo Finance'in
+   kendi kısaltmalarıyla BİREBİR aynı (VOD.L, SIE.DE gibi) — hem kullanıcıya tanıdık hem de
+   ysym'i doğrudan verir (ekstra çözümleme gerekmez). Her borsa doğrulandı (curl testi):
+   is_primary=true + exchange filtresiyle YALNIZCA o ülkenin birincil kotasyonlu şirketleri
+   döner (çapraz kotasyonlu yabancı devler karışmaz). */
+/* city/tz/open/close: borsanın bulunduğu şehrin canlı saati + seans durumu için (bkz. startExchangeClock).
+   open/close = yerel saatte seans başlangıcı/bitişi, gün içi dakika cinsinden (09:00=540). Resmi tatiller
+   hesaba katılmaz (ABD saati ile aynı kısıt) — o yüzden "borsa açık" değil "seans içi" denir. */
+/* iso: GLEIF'in legalAddress.country alanıyla eşleşen ISO-3166 kodu (borsa eki ile HER ZAMAN
+   aynı değil — İngiltere borsa eki "L" ama ülke kodu "GB"; fetchIfrsSeries'te ad-araması
+   yedeğinde ülke doğrulaması için kullanılır). */
+const EU_EXCHANGES={
+  L:  {tv:'LSE',      scan:'uk',          country:'İngiltere',  ccy:'GBP', sym:'£',    city:'Londra',    tz:'Europe/London',     open:480, close:990,  flag:'🇬🇧', iso:'GB'},
+  DE: {tv:'XETR',     scan:'germany',     country:'Almanya',    ccy:'EUR', sym:'€',    city:'Frankfurt', tz:'Europe/Berlin',     open:540, close:1050, flag:'🇩🇪', iso:'DE'},
+  PA: {tv:'EURONEXT', scan:'france',      country:'Fransa',     ccy:'EUR', sym:'€',    city:'Paris',     tz:'Europe/Paris',      open:540, close:1050, flag:'🇫🇷', iso:'FR'},
+  AS: {tv:'EURONEXT', scan:'netherlands', country:'Hollanda',   ccy:'EUR', sym:'€',    city:'Amsterdam', tz:'Europe/Amsterdam',  open:540, close:1050, flag:'🇳🇱', iso:'NL'},
+  BR: {tv:'EURONEXT', scan:'belgium',     country:'Belçika',    ccy:'EUR', sym:'€',    city:'Brüksel',   tz:'Europe/Brussels',   open:540, close:1050, flag:'🇧🇪', iso:'BE'},
+  LS: {tv:'EURONEXT', scan:'portugal',    country:'Portekiz',   ccy:'EUR', sym:'€',    city:'Lizbon',    tz:'Europe/Lisbon',     open:540, close:1050, flag:'🇵🇹', iso:'PT'},
+  MI: {tv:'MIL',      scan:'italy',       country:'İtalya',     ccy:'EUR', sym:'€',    city:'Milano',    tz:'Europe/Rome',       open:540, close:1050, flag:'🇮🇹', iso:'IT'},
+  MC: {tv:'BME',      scan:'spain',       country:'İspanya',    ccy:'EUR', sym:'€',    city:'Madrid',    tz:'Europe/Madrid',     open:540, close:1050, flag:'🇪🇸', iso:'ES'},
+  SW: {tv:'SIX',      scan:'switzerland', country:'İsviçre',    ccy:'CHF', sym:'CHF ', city:'Zürih',     tz:'Europe/Zurich',     open:540, close:1050, flag:'🇨🇭', iso:'CH'},
+  ST: {tv:'OMXSTO',   scan:'sweden',      country:'İsveç',      ccy:'SEK', sym:'kr ',  city:'Stockholm', tz:'Europe/Stockholm',  open:540, close:1050, flag:'🇸🇪', iso:'SE'},
+  CO: {tv:'OMXCOP',   scan:'denmark',     country:'Danimarka',  ccy:'DKK', sym:'kr ',  city:'Kopenhag',  tz:'Europe/Copenhagen', open:540, close:1020, flag:'🇩🇰', iso:'DK'},
+  OL: {tv:'OSL',      scan:'norway',      country:'Norveç',     ccy:'NOK', sym:'kr ',  city:'Oslo',      tz:'Europe/Oslo',       open:540, close:990,  flag:'🇳🇴', iso:'NO'},
+  HE: {tv:'OMXHEX',   scan:'finland',     country:'Finlandiya', ccy:'EUR', sym:'€',    city:'Helsinki',  tz:'Europe/Helsinki',   open:600, close:1110, flag:'🇫🇮', iso:'FI'},
+  VI: {tv:'VIE',      scan:'austria',     country:'Avusturya',  ccy:'EUR', sym:'€',    city:'Viyana',    tz:'Europe/Vienna',     open:540, close:1055, flag:'🇦🇹', iso:'AT'},
+  WA: {tv:'GPW',      scan:'poland',      country:'Polonya',    ccy:'PLN', sym:'zł ',  city:'Varşova',   tz:'Europe/Warsaw',     open:540, close:1020, flag:'🇵🇱', iso:'PL'},
+};
+/* "SIE.DE" → {base:'SIE', suffix:'DE', ...EU_EXCHANGES.DE}; eşleşmezse null */
+function parseEUSymbol(sym){
+  const m=/^([A-Z0-9]+(?:[.\-][A-Z0-9]+)?)\.([A-Z]{1,2})$/.exec(sym);
+  if(!m) return null;
+  const info=EU_EXCHANGES[m[2]];
+  return info ? { base:m[1], suffix:m[2], ...info } : null;
+}
+/* TV bilanço/gelir/nakit-akış alanları → fetchSeries ile AYNI {D,I} şekli. Tek dönemlik anlık
+   veridir (TV scanner geçmiş dönem serisi vermez) → D1 hep null; buildRowsFromSEC ve genel
+   render işlevleri (Değerleme/DCF/Nakit Akışı/Sağlık Karnesi) bu şekli zaten tek-dönemli olarak
+   nazikçe çözer (bkz. kpi() ve Piotroski'nin eksik kritere '—' vermesi). */
+function euReshape(d){
+  const [desc,sector,industry,ccy,close,mcap,shares,per,pbr,roe,roa,divY,eps,isin,
+    revenue,netIncome,grossProfit,opIncome,assets,curAssets,cash,goodwill,
+    ltDebt,stDebt,liab,curLiab,equity,opCF,invCF,finCF,capexRaw,rnd,floatShares,floatPct]=d;
+  const K='snap';   // tek dönemlik anahtar (gerçek takvim tarihi TV'de yok)
+  const one=v=> v==null?{}:{[K]:v};
+  const D={ assets:one(assets), assetsCur:one(curAssets), cash:one(cash),
+    stInv:{}, recv:{}, inv:{}, ppe:{}, goodwill:one(goodwill), intang:{}, ltInv:{},
+    liab:one(liab), liabCur:one(curLiab), liabNoncur:{}, liabEquity:{},
+    ap:{}, stDebt:one(stDebt), defRev:{}, ltDebt:one(ltDebt),
+    equity:one(equity), equityIncl:{}, minority:{}, common:{}, retained:{} };
+  const capex=capexRaw==null?null:Math.abs(capexRaw);
+  const fcf=(opCF!=null&&capex!=null)?opCF-capex:null;
+  const I={ revenue:one(revenue), costRev:one((revenue!=null&&grossProfit!=null)?revenue-grossProfit:null),
+    grossProfit:one(grossProfit), opIncome:one(opIncome), netIncome:one(netIncome),
+    rnd:one(rnd==null?null:Math.abs(rnd)), interest:{},
+    _cash:{ opCF:one(opCF), invCF:one(invCF), finCF:one(finCF), capex:one(capex), fcf:one(fcf) } };
+  return { D, I, D0:K, desc, sector, industry, ccy, close, mcap, shares, per, pbr, roe, roa, divY, eps, isin, floatShares, floatPct };
+}
+const EU_COLS=['description','sector','industry','fundamental_currency_code','close','market_cap_basic',
+  'total_shares_outstanding_fundamental','price_earnings_ttm','price_book_fq','return_on_equity','return_on_assets',
+  'dividend_yield_recent','earnings_per_share_basic_ttm','isin',
+  'total_revenue_fy','net_income_fy','gross_profit_fy','oper_income_fy','total_assets_fq','total_current_assets_fq',
+  'cash_n_equivalents_fq','goodwill_fq','long_term_debt_fq','short_term_debt_fq','total_liabilities_fq',
+  'total_current_liabilities_fq','total_equity_fq',
+  'cash_f_operating_activities_ttm','cash_f_investing_activities_ttm','cash_f_financing_activities_ttm',
+  'capital_expenditures_ttm','research_and_dev_fq',
+  'float_shares_outstanding','float_shares_percent_current'];
+
+/* ================== Avrupa ÇOK YILLIK gerçek finansal veri (IFRS/ESEF) ==================
+   ABD'de SEC EDGAR'ın yaptığının aynısı: GLEIF (ISIN→LEI) + filings.xbrl.org (LEI→IFRS XBRL,
+   server.js /ifrs köprüsü). TV'nin tek-dönemlik özetinden farklı olarak GERÇEK çok-yıllı
+   karşılaştırmalı veri verir (bkz. bilanco-analiz-app.md hafıza notu — Almanya/İsviçre'de
+   kapsam yok, o borsalarda yukarıdaki TV özeti tek kaynak olarak kalır). */
+const IFRS_BAL={
+  assets:['Assets'],
+  assetsCur:['CurrentAssets','CurrentAssetsOtherThanAssetsOrDisposalGroupsClassifiedAsHeldForSaleOrAsHeldForDistributionToOwners'],
+  cash:['CashAndCashEquivalents'], stInv:['CurrentInvestments'],
+  recv:['TradeAndOtherCurrentReceivables','CurrentTradeReceivables'], inv:['Inventories'],
+  ppe:['PropertyPlantAndEquipment'], goodwill:['Goodwill'], intang:['IntangibleAssetsOtherThanGoodwill'],
+  ltInv:['NoncurrentInvestments'],
+  liab:['Liabilities'],
+  liabCur:['CurrentLiabilities','CurrentLiabilitiesOtherThanLiabilitiesIncludedInDisposalGroupsClassifiedAsHeldForSale'],
+  liabNoncur:['NoncurrentLiabilities'], liabEquity:['EquityAndLiabilities'],
+  ap:['TradeAndOtherCurrentPayables'],
+  stDebt:['CurrentBorrowingsAndCurrentPortionOfNoncurrentBorrowings','CurrentBorrowings'],
+  defRev:['CurrentDeferredIncome'],
+  ltDebt:['NoncurrentBorrowings','LongtermBorrowings'],
+  equity:['EquityAttributableToOwnersOfParent','Equity'], minority:['NoncontrollingInterests'],
+};
+const IFRS_INC={
+  revenue:['Revenue','RevenueFromContractsWithCustomers','RevenueFromSaleOfGoods'], costRev:['CostOfSales'], grossProfit:['GrossProfit'],
+  opIncome:['ProfitLossFromOperatingActivities'], netIncome:['ProfitLoss'],
+  rnd:['ResearchAndDevelopmentExpense'], interest:['FinanceCosts'],
+};
+const IFRS_CF={
+  opCF:['CashFlowsFromUsedInOperatingActivities'], invCF:['CashFlowsFromUsedInInvestingActivities'],
+  finCF:['CashFlowsFromUsedInFinancingActivities'], capex:['PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'],
+};
+function ifrsDateKey(period){ return (period.includes('/')?period.split('/')[1]:period).slice(0,10); }
+function ifrsPick(bucket, candidates){ for(const c of candidates){ if(bucket[c]!=null) return bucket[c]; } return null; }
+/* server'dan gelen [kavram, dönem, değer] üçlülerini D0'dan geriye sıralı çok-dönemli {D,I}'ye çevirir. */
+function ifrsBuildSeries(facts){
+  const buckets={};
+  for(const [c,p,v] of facts){ const k=ifrsDateKey(p); (buckets[k]=buckets[k]||{})[c]=v; }
+  const dates=Object.keys(buckets).filter(k=> buckets[k].Assets!=null || buckets[k].Revenue!=null).sort().reverse();
+  if(!dates.length) return null;
+  const D={assets:{},assetsCur:{},cash:{},stInv:{},recv:{},inv:{},ppe:{},goodwill:{},intang:{},ltInv:{},
+    liab:{},liabCur:{},liabNoncur:{},liabEquity:{},ap:{},stDebt:{},defRev:{},ltDebt:{},
+    equity:{},equityIncl:{},minority:{},common:{},retained:{}};
+  const I={revenue:{},costRev:{},grossProfit:{},opIncome:{},netIncome:{},rnd:{},interest:{},
+    _cash:{opCF:{},invCF:{},finCF:{},capex:{},fcf:{}}};
+  const put=(obj,k,v)=>{ if(v!=null) obj[k]=v; };
+  for(const k of dates){
+    const b=buckets[k];
+    for(const f in IFRS_BAL) put(D[f],k,ifrsPick(b,IFRS_BAL[f]));
+    for(const f in IFRS_INC) put(I[f],k,ifrsPick(b,IFRS_INC[f]));
+    const opCF=ifrsPick(b,IFRS_CF.opCF), invCF=ifrsPick(b,IFRS_CF.invCF),
+          finCF=ifrsPick(b,IFRS_CF.finCF), capexRaw=ifrsPick(b,IFRS_CF.capex);
+    const capex=capexRaw==null?null:Math.abs(capexRaw);
+    put(I._cash.opCF,k,opCF); put(I._cash.invCF,k,invCF); put(I._cash.finCF,k,finCF); put(I._cash.capex,k,capex);
+    put(I._cash.fcf,k,(opCF!=null&&capex!=null)?opCF-capex:null);
+    if(I.costRev[k]==null && I.revenue[k]!=null && I.grossProfit[k]!=null) I.costRev[k]=I.revenue[k]-I.grossProfit[k];
+  }
+  return { D, I, dates };
+}
+/* server.js /ifrs: ISIN→GLEIF LEI (deterministik, birincil) → ad araması (yedek, yalnız tek/net
+   eşleşmede) → filings.xbrl.org en güncel filing → indirgenmiş IFRS facts. Başarısızsa null
+   döner (çağıran taraf TV'nin tek-dönemlik özetinde kalır — sessiz, güvenli düşüş). */
+async function fetchIfrsSeries(isin, companyName, iso){
+  try{
+    const q=new URLSearchParams({ isin: isin||'', name: companyName||'', country: iso||'' });
+    const r=await fetch('/ifrs?'+q.toString());
+    if(!r.ok) return null;
+    const j=await r.json();
+    if(!j.ok || !j.facts || !j.facts.length) return null;
+    const built=ifrsBuildSeries(j.facts);
+    if(!built) return null;
+    return { ...built, lei:j.lei };
+  }catch(e){ return null; }
+}
+/* Almanya (Xetra) ve İsviçre (SIX) filings.xbrl.org'da YOK (0 kayıt, doğrulandı) — ama birkaç
+   büyük çok-uluslu şirket ADR/çift-kotasyon nedeniyle SEC'e DOĞRUDAN 20-F ile kayıtlı ve
+   ifrs-full XBRL sunuyor (aynı SEC altyapısını ABD'de kullandığımız gibi — yalnız taxonomy
+   'ifrs-full', tag'ler IFRS_BAL/IFRS_INC/IFRS_CF). Elle doğrulanmış, KÜÇÜK bir liste — tahmin
+   YOK, her satır data.sec.gov'da 2026 tarihli aktif 20-F ile teyit edildi. Genişletilebilir. */
+const DE_CH_SEC_XREF={
+  'DE:SAP':{cik:'0001000184', name:'SAP SE'},
+  'DE:DBK':{cik:'0001159508', name:'Deutsche Bank AG'},
+  'DE:FME':{cik:'0001333141', name:'Fresenius Medical Care AG'},
+  'SW:UBSG':{cik:'0001610520', name:'UBS Group AG'},
+  'SW:NOVN':{cik:'0001114448', name:'Novartis AG'},
+};
+async function fetchSecIfrsSeries(cik){
+  try{
+    const {D,I}=await fetchSeries(cik,'annual','20-F',{ taxonomy:'ifrs-full', balanceDefs:IFRS_BAL, incomeDefs:IFRS_INC, cashDefs:IFRS_CF, cashForm:'20-F' });
+    const dates=Object.keys(D.assets||{}).sort().reverse();
+    if(!dates.length) return null;
+    return { D, I, dates };
+  }catch(e){ return null; }
+}
+/* GENEL çok-yıllı yedek: Yahoo fundamentals-timeseries (server.js /yfin köprüsü, anahtarsız).
+   filings.xbrl.org VE SEC 20-F yolları boş kalırsa (özellikle Almanya/İsviçre'nin xref dışı
+   ~620 şirketi) son 4 yıla kadar yıllık bilanço/gelir/nakit-akış verir. Alan adları Yahoo'nun
+   kendi şeması; borçta şirkete göre iki varyanttan biri dolu olur (yedek zinciri). */
+const YF_BAL={
+  assets:['TotalAssets'], assetsCur:['CurrentAssets'], cash:['CashAndCashEquivalents'],
+  recv:['AccountsReceivable'], inv:['Inventory'], ppe:['NetPPE'],
+  goodwill:['Goodwill'], intang:['OtherIntangibleAssets'],
+  liab:['TotalLiabilitiesNetMinorityInterest'], liabCur:['CurrentLiabilities'],
+  ap:['AccountsPayable'],
+  stDebt:['CurrentDebt','CurrentDebtAndCapitalLeaseObligation'],
+  ltDebt:['LongTermDebt','LongTermDebtAndCapitalLeaseObligation'],
+  equity:['StockholdersEquity'], minority:['MinorityInterest'],
+};
+const YF_INC={
+  revenue:['TotalRevenue'], costRev:['CostOfRevenue'], grossProfit:['GrossProfit'],
+  opIncome:['OperatingIncome'], netIncome:['NetIncome'], rnd:['ResearchAndDevelopment'],
+};
+const YF_CF={
+  opCF:['OperatingCashFlow'], invCF:['InvestingCashFlow'],
+  finCF:['FinancingCashFlow'], capex:['CapitalExpenditure'],
+};
+async function fetchYahooFundSeries(ysym, mode){
+  try{
+    const pfx = mode==='quarter' ? 'quarterly' : 'annual';
+    const r=await fetch('/yfin?s='+encodeURIComponent(ysym)+(mode==='quarter'?'&p=q':''));
+    if(!r.ok) return null;
+    const j=await r.json();
+    const results=j&&j.timeseries&&j.timeseries.result;
+    if(!results||!results.length) return null;
+    // tip → { 'YYYY-MM-DD': değer } haritaları
+    const byType={};
+    results.forEach(res=>{
+      const t=res.meta&&res.meta.type&&res.meta.type[0];
+      if(!t||!res[t]) return;
+      const m={};
+      res[t].forEach(e=>{ if(e&&e.asOfDate&&e.reportedValue&&e.reportedValue.raw!=null) m[e.asOfDate]=e.reportedValue.raw; });
+      if(Object.keys(m).length) byType[t]=m;
+    });
+    const pick=(cands)=>{ for(const c of cands){ if(byType[pfx+c]) return byType[pfx+c]; } return {}; };
+    const D={assets:{},assetsCur:{},cash:{},stInv:{},recv:{},inv:{},ppe:{},goodwill:{},intang:{},ltInv:{},
+      liab:{},liabCur:{},liabNoncur:{},liabEquity:{},ap:{},stDebt:{},defRev:{},ltDebt:{},
+      equity:{},equityIncl:{},minority:{},common:{},retained:{}};
+    for(const f in YF_BAL) D[f]=Object.assign({},pick(YF_BAL[f]));
+    const I={revenue:{},costRev:{},grossProfit:{},opIncome:{},netIncome:{},rnd:{},interest:{},
+      _cash:{opCF:{},invCF:{},finCF:{},capex:{},fcf:{}}};
+    for(const f in YF_INC) I[f]=Object.assign({},pick(YF_INC[f]));
+    I._cash.opCF=Object.assign({},pick(YF_CF.opCF));
+    I._cash.invCF=Object.assign({},pick(YF_CF.invCF));
+    I._cash.finCF=Object.assign({},pick(YF_CF.finCF));
+    const capexRaw=pick(YF_CF.capex);
+    for(const d in capexRaw) I._cash.capex[d]=Math.abs(capexRaw[d]);
+    for(const d in I._cash.opCF){ if(d in I._cash.capex) I._cash.fcf[d]=I._cash.opCF[d]-I._cash.capex[d]; }
+    const dates=Object.keys(D.assets).sort().reverse();
+    if(!dates.length) return null;
+    return { D, I, dates };
+  }catch(e){ return null; }
+}
+async function fetchTickerEU(euInfo, mode, myGen){
+  const tvTicker=euInfo.tv+':'+euInfo.base.replace(/-/g,'_');
+  const ysym=euInfo.base+'.'+euInfo.suffix;
+  const sym=euInfo.base;
+  try{
+    const r=await fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})});
+    const j=r.ok?await r.json():null;
+    if(myGen!==REQ_GEN) return;
+    const row=j&&j.data&&j.data.find(x=>x.d&&x.d[4]!=null);   // close (index 4) doluysa hisse gerçek
+    if(!row){ setStatus('✕ "'+sym+'.'+euInfo.suffix+'" '+euInfo.country+' borsasında bulunamadı.','bad'); return; }
+    const R=euReshape(row.d);
+    if(!Object.keys(R.D.assets).length && !Object.keys(R.I.revenue).length){
+      setStatus('✕ '+sym+' için finansal veri bulunamadı.','bad'); return;
+    }
+    CUR=R.ccy||euInfo.ccy; CURSYM=euInfo.sym;
+    // TV'nin tek-dönemlik özeti varsayılan; IFRS/ESEF çok-yıllı veri bulunursa onunla DEĞİŞTİRİLİR
+    // (ISIN→LEI deterministik eşleşirse VE filings.xbrl.org'da o şirket varsa — bkz. fetchIfrsSeries).
+    let D=R.D, I=R.I, D0=R.D0, D1=null, filedD0=null, filedD1=null, srcNote='TradingView (tek dönem özeti)';
+    let ifrs=null;
+    if(mode==='quarter'){
+      // Çeyreklik: ESEF ve SEC 20-F YALNIZ yıllık verir → doğrudan Yahoo çeyreklik serisi.
+      // Not: yarıyıllık raporlayan şirketlerde (Nestle, LVMH…) Yahoo 6 aylık dönemler döndürür —
+      // şirketin gerçekte yayınladığı en sık dönem budur, daha sığı kamuya açık değil.
+      ifrs=await fetchYahooFundSeries(ysym,'quarter');
+      if(myGen!==REQ_GEN) return;
+      if(ifrs) ifrs.viaYahoo=true;
+    }else{
+      ifrs=await fetchIfrsSeries(R.isin, R.desc, euInfo.iso);
+      if(myGen!==REQ_GEN) return;
+      // Almanya/İsviçre'de filings.xbrl.org kapsamı yok — elle doğrulanmış SEC 20-F eşlemesi varsa dene.
+      if(!ifrs){
+        const xref=DE_CH_SEC_XREF[euInfo.suffix+':'+sym];
+        if(xref){
+          ifrs=await fetchSecIfrsSeries(xref.cik);
+          if(myGen!==REQ_GEN) return;
+          if(ifrs) ifrs.viaSec=true;
+        }
+      }
+      // Son basamak: Yahoo fundamentals-timeseries (genel yedek — özellikle DE/CH xref-dışı şirketler).
+      if(!ifrs){
+        ifrs=await fetchYahooFundSeries(ysym);
+        if(myGen!==REQ_GEN) return;
+        if(ifrs) ifrs.viaYahoo=true;
+      }
+    }
+    if(ifrs){
+      D=ifrs.D; I=ifrs.I; D0=ifrs.dates[0]; D1=ifrs.dates[1]||null; filedD0=D0; filedD1=D1;
+      srcNote=ifrs.viaSec ? 'IFRS çok yıllı (SEC EDGAR 20-F)'
+             : ifrs.viaYahoo ? (mode==='quarter'?'çeyreklik (Yahoo Finance)':'çok yıllı (Yahoo Finance)')
+             : 'IFRS/ESEF çok yıllı (filings.xbrl.org)';
+    }
+    FIN={ ticker:sym, mode, cur:CUR, market:'EU', euInfo, D0, D1, balance:D, income:I,
+          filedD0, filedD1, companyName:R.desc||sym, sector:R.sector, industry:R.industry,
+          sharesEU:R.shares, ifrsSource:!!ifrs };
+    const rows=buildRowsFromSEC(D, D0, D1);
+    const b=document.getElementById('inputBody'); b.innerHTML='';
+    rows.forEach(rr=>b.insertAdjacentHTML('beforeend', rowHTML(rr[0],rr[1],rr[2],rr[3])));
+    document.getElementById('curNote').textContent=CUR+' cinsinden';
+    if(D1) setPeriodHeaders(fmtDate(D0), fmtDate(D1)); else setPeriodHeaders(ifrs?fmtDate(D0):'Güncel Dönem', null);
+    setStatus(`✓ ${sym}.${euInfo.suffix} — ${euInfo.country} — ${D1?(mode==='quarter'?'çeyreklik':'yıllık'):'en güncel dönem'} — ${CUR} — ${srcNote}`,'good');
+    analyze();
+    fetchNews(sym, myGen);
+    fetchPrice(sym, null, myGen, { ysym, shares:R.shares });
+    fetchTargetsEU(sym, euInfo, myGen);
+    fetchNextEarnings(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
+    fetchPriceChart(sym, ysym, myGen);
+    fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
+    fetchExchangeTop10(sym, 'EU', myGen, { scan:euInfo.scan, country:euInfo.country, tv:euInfo.tv });
+    TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
+    fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
+    updateWatchStar();
+    startEuExchangeClock(euInfo);   // sağ üstte borsanın bulunduğu şehrin canlı saati + seans durumu
+    renderOwnershipEU(R.floatPct, R.floatShares, R.shares);   // halka açıklık pastası (TV free float)
+    fetchEconCalendar(myGen, euInfo.iso, euInfo.country);     // borsa ülkesinin ekonomik takvimi (TV)
+    // KAP/İçeriden işlem: Avrupa'da anahtarsız kaynak yok (KAP=TR, Form 4=ABD) — kart gizlenir
+    ['kapCard','insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -451,6 +830,15 @@ async function fetchTicker(){
   const mode=document.getElementById('periodType').value;        // 'annual' | 'quarter'
   const formPrefix = mode==='annual' ? '10-K' : '10-Q';
   const map=window.CIK_MAP||{};
+  // Pazar tespiti — sırayla: Avrupa borsa eki (SIE.DE, VOD.L…) → ".IS" ile BIST zorlama →
+  // ABD listesinde yoksa BIST dene.
+  const euInfo=parseEUSymbol(sym);
+  if(euInfo){
+    setStatus('⏳ '+euInfo.base+'.'+euInfo.suffix+' '+euInfo.country+' borsasından çekiliyor…','muted');
+    const myGen=++REQ_GEN;
+    fetchTickerEU(euInfo, mode, myGen);
+    return;
+  }
   const forceBist=/\.IS$/.test(sym);
   if(forceBist) sym=sym.replace(/\.IS$/,'');
   if(forceBist || !map[sym]){
@@ -461,20 +849,25 @@ async function fetchTicker(){
   }
   const cik=String(map[sym]).padStart(10,'0');
   setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
-  const myGen=++REQ_GEN;
+  const myGen=++REQ_GEN;   // bu arama için nesil numarası — sonuçlar yazılırken kontrol edilir
 
   try{
-    const { D, I, C, filed } = await fetchSeries(cik, mode, formPrefix);
-    if(myGen!==REQ_GEN) return;
+    const { D, I, filed } = await fetchSeries(cik, mode, formPrefix);
+    if(myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
 
     if(!Object.keys(D.assets).length){ setStatus('✕ '+sym+' için bilanço verisi bulunamadı (form: '+formPrefix+').','bad'); return; }
+    // Referans dönem tarihleri: toplam aktiften en güncel iki dönem sonu
     const dates=Object.keys(D.assets).sort().reverse();
     const D0=dates[0], D1=dates[1]||null;
     if(!D1){ setStatus('⚠ '+sym+' için yalnızca tek dönem bulundu; değişim analizi sınırlı olacak.','muted'); }
 
     CUR='USD'; CURSYM='$';
-    FIN = { ticker:sym, mode, cur:'USD', market:'US', D0, D1, balance:D, income:I, cashflow:C,
+    // Çok yıllı analiz/grafik/karşılaştırma için sakla
+    FIN = { ticker:sym, mode, cur:'USD', market:'US', D0, D1, balance:D, income:I,
             filedD0:(filed&&filed[D0])||null,
+            // Not: mali yıl sonu çeyreği (Q4) ayrı bir 10-Q'da raporlanmaz, sadece 10-K'da yer alır.
+            // Bu durumda "ilk açıklanma" araması cari dönemin dosyalama tarihini bulur (filedD1===filedD0) —
+            // bu yanlış/yanıltıcı olur (aynı fiyat iki kez gösterilir). Böyle durumlarda bilinmiyor sayılır.
             filedD1:(filed&&D1&&filed[D1]&&filed[D1]!==filed[D0])?filed[D1]:null };
 
     const rows=buildRowsFromSEC(D,D0,D1);
@@ -486,24 +879,31 @@ async function fetchTicker(){
     analyze();
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
-    fetchChart(myGen);
     fetchTargets(sym, myGen);
     fetchNextEarnings(sym, 'US', myGen);
-    startNyClock();
-    fetchEconCalendar(myGen, 'US');
-    const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');
+    startNyClock();   // sağ üstte saniyelik canlı New York saati
+    fetchEconCalendar(myGen, 'US');   // ABD ekonomik takvimi (★/★★/★★★ filtreli)
+    fetchPriceChart(sym, sym, myGen);
+    fetchSectorComparison(sym, 'US', myGen);
+    fetchExchangeTop10(sym, 'US', myGen);
+    fetchInsiders(cik, myGen);   // Form 4 içeriden işlemler (yalnızca ABD)
+    TECH_SHORT=null;             // önceki hissenin kısa pozisyonu görünmesin
+    fetchTechPanel(sym, 'US', myGen);
+    updateWatchStar();
+    const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
 }
 
-/* ---------- Analist hedef fiyatları (Finviz — anahtarsız köprü) ---------- */
+/* ---------- Analist hedef fiyatları (Finviz — anahtarsız köprü; Yahoo Render'da IP engeli yediği için değiştirildi) ---------- */
 function gradeClass(g){
   const s=(g||'').toLowerCase();
   if(/buy|outperform|overweight|positive|accumulate|add|strong/.test(s)) return 'g-buy';
   if(/sell|underperform|underweight|reduce|negative/.test(s)) return 'g-sell';
   return 'g-hold';
 }
+/* Yalnızca en büyük ABD/global banka & aracı kurumlar (Finviz firma adında geçen parça, küçük harf) */
 const BIG_FIRMS = [
   'jp morgan','jpmorgan','j.p. morgan','morgan stanley','goldman','bank of america','b of a','bofa','merrill',
   'citigroup','citi','wells fargo','barclays','ubs','deutsche bank','rbc','bmo','jefferies','evercore',
@@ -512,6 +912,7 @@ const BIG_FIRMS = [
   'scotia','susquehanna','nomura','macquarie','loop capital','william blair','canaccord','citizens'
 ];
 const actionTR = { Upgrade:'Yükseltti ▲', Downgrade:'Düşürdü ▼', Reiterated:'Yineledi', Initiated:'Başlattı' };
+/* Finviz "Recom" skoru 1 (Güçlü Al) — 5 (Güçlü Sat) arası ortalama analist puanı */
 function recomLabel(v){
   if(v==null || isNaN(v)) return null;
   if(v<=1.5) return ['Güçlü Al','g-buy'];
@@ -530,14 +931,17 @@ async function fetchTargets(sym, myGen){
       fetch('/targets?s='+encodeURIComponent(sym)).then(x=>x.json()).catch(()=>null),
       fetch('/price?s='+encodeURIComponent(sym)+'&range=1d').then(x=>x.json()).catch(()=>null)
     ]);
-    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     if(!tR || !tR.ok){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
+    renderOwnershipUS(tR.own);   // ortaklık yapısı pastası (aynı Finviz sayfasından, ek istek yok)
+    if(tR.shortData){ TECH_SHORT=tR.shortData; renderTechShort(); }   // teknik panele kısa pozisyon satırı
     const meta = pR && pR.chart && pR.chart.result && pR.chart.result[0] && pR.chart.result[0].meta;
     const cur = meta ? meta.regularMarketPrice : null;
     const mean = tR.targetPrice;
     const ratings = tR.ratings || [];
 
     let html='';
+    // 1) Konsensüs + tavsiye kartları
     if(mean!=null || tR.recom!=null){
       const up = (cur && mean) ? (mean-cur)/cur*100 : null;
       const upCls = up==null?'neutral':(up>0?'up':'down');
@@ -555,6 +959,7 @@ async function fetchTargets(sym, myGen){
           <div class="sm neutral">yakın zamandaki değişiklik</div></div>
       </div>`;
     }
+    // 2) Firma bazlı son notlar — yalnızca büyük ABD bankaları & aracı kurumlar
     const hist=ratings.filter(x=> BIG_FIRMS.some(f=> (x.firm||'').toLowerCase().includes(f)));
     if(hist.length){
       const rows=hist.slice(0,12).map(x=>{
@@ -577,47 +982,60 @@ async function fetchTargets(sym, myGen){
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
 }
 
-/* ---------- New York canlı saati (yalnızca ABD hissesi görüntülenirken) ---------- */
-let NY_TIMER=null;
-function startNyClock(){
+/* ---------- Borsa şehri canlı saati (ABD: New York; Avrupa: ilgili 15 şehirden biri) ----------
+   Saniyede bir güncellenir; cfg.open–cfg.close (dakika) hafta içi = seans saatleri (resmi tatiller
+   hesaba katılmaz, o yüzden "borsa açık" değil "seans içi" denir). */
+let EXCH_TIMER=null;
+function startExchangeClock(cfg){
   const el=document.getElementById('nyClock');
   if(!el) return;
-  const fTime=new Intl.DateTimeFormat('tr-TR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-  const fDay =new Intl.DateTimeFormat('tr-TR',{timeZone:'America/New_York',weekday:'long'});
-  const fNum =new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+  const fTime=new Intl.DateTimeFormat('tr-TR',{timeZone:cfg.tz,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const fDay =new Intl.DateTimeFormat('tr-TR',{timeZone:cfg.tz,weekday:'long'});
+  const fNum =new Intl.DateTimeFormat('en-US',{timeZone:cfg.tz,weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
   const tick=()=>{
     const now=new Date();
-    const p=fNum.formatToParts(now), g=t=>{const x=p.find(z=>z.type===t);return x?x.value:'';};
+    const p=fNum.formatToParts(now), g=t=>p.find(x=>x.type===t)?.value||'';
     const wd=g('weekday'), mins=parseInt(g('hour'),10)*60+parseInt(g('minute'),10);
-    const inSession=!['Sat','Sun'].includes(wd) && mins>=570 && mins<960;
-    el.innerHTML='🗽 New York: <span style="color:#fff">'+fTime.format(now)+'</span> · '+fDay.format(now)+
+    const inSession=!['Sat','Sun'].includes(wd) && mins>=cfg.open && mins<cfg.close;
+    el.innerHTML=cfg.flag+' '+cfg.city+': <span style="color:#fff">'+fTime.format(now)+'</span> · '+fDay.format(now)+
       (inSession?' · <span style="color:var(--good)">● seans içi</span>'
                 :' · <span style="color:var(--muted)">○ seans dışı</span>');
   };
   tick();
-  if(NY_TIMER) clearInterval(NY_TIMER);
-  NY_TIMER=setInterval(tick,1000);
+  if(EXCH_TIMER) clearInterval(EXCH_TIMER);
+  EXCH_TIMER=setInterval(tick,1000);
   el.classList.remove('hidden');
 }
 function stopNyClock(){
   const el=document.getElementById('nyClock');
-  if(NY_TIMER){ clearInterval(NY_TIMER); NY_TIMER=null; }
+  if(EXCH_TIMER){ clearInterval(EXCH_TIMER); EXCH_TIMER=null; }
   if(el){ el.classList.add('hidden'); el.innerHTML=''; }
 }
+function startNyClock(){
+  startExchangeClock({flag:'🗽',city:'New York',tz:'America/New_York',open:570,close:960});   // 09:30–16:00
+}
+function startEuExchangeClock(euInfo){
+  startExchangeClock({flag:euInfo.flag,city:euInfo.city,tz:euInfo.tz,open:euInfo.open,close:euInfo.close});
+}
 
-/* ---------- Sonraki bilanço tarihi (her iki pazar) ---------- */
-async function fetchNextEarnings(sym, market, myGen){
+/* ---------- Sonraki bilanço tarihi (üç pazar) ----------
+   Kaynak: TradingView scanner `earnings_release_next_date` (beklenen açıklanma tarihi,
+   Unix saniye). BIST için turkey/scan + BIST:SYM; ABD için america/scan — borsa öneki
+   bilinmediğinden NASDAQ/NYSE/AMEX üçü birden sorulur; Avrupa'da borsa zaten kesin bilindiği
+   için euOpt={tv,scan} doğrudan kullanılır. Tarayıcıdan çağrılır (Content-Type başlıksız
+   POST = preflight'sız; TV Origin yansıtır). */
+async function fetchNextEarnings(sym, market, myGen, euOpt){
   const el=document.getElementById('earnNote');
   if(!el) return;
   el.classList.add('hidden'); el.innerHTML='';
   try{
-    const scan = market==='BIST' ? 'turkey' : 'america';
-    const tickers = market==='BIST' ? ['BIST:'+sym] : ['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
+    const scan = euOpt ? euOpt.scan : (market==='BIST' ? 'turkey' : 'america');
+    const tickers = euOpt ? [euOpt.tv] : (market==='BIST' ? ['BIST:'+sym] : ['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym]);
     const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
       {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['earnings_release_next_date']})});
     if(!r.ok) return;
     const j=await r.json();
-    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const row=(j.data||[]).find(x=>x.d && x.d[0]!=null);
     const ts=row && row.d[0];
     if(!ts) return;
@@ -632,9 +1050,191 @@ async function fetchNextEarnings(sym, market, myGen){
   }catch(e){}
 }
 
-/* ---------- Ekonomik Takvim (BIST → Türkiye, ABD → ABD) ---------- */
+/* ---------- Fiyat Grafiği (Yahoo kapanışları, SVG çizgi; 1 Ay/6 Ay/1 Yıl/5 Yıl) ---------- */
+let CHART_SYM='', CHART_YSYM='', CHART_RANGE='1y';
+const CHART_CACHE={};
+function setChartRange(r){ CHART_RANGE=r; drawPriceChart(REQ_GEN); }
+function fetchPriceChart(sym, ysym, myGen){
+  CHART_SYM=sym; CHART_YSYM=ysym;
+  const card=document.getElementById('chartCard');
+  if(!card) return;
+  card.classList.remove('hidden');
+  drawPriceChart(myGen);
+}
+async function drawPriceChart(myGen){
+  const body=document.getElementById('chartBody'), info=document.getElementById('chartInfo');
+  if(!body) return;
+  document.querySelectorAll('#chartBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.r===CHART_RANGE));
+  const key=CHART_YSYM+':'+CHART_RANGE;
+  let d=CHART_CACHE[key];
+  if(!d || Date.now()-d.ts>10*60000){
+    body.innerHTML='<div class="hint">Grafik yükleniyor…</div>';
+    try{
+      const j=await fetch('/price?s='+encodeURIComponent(CHART_YSYM)+'&range='+CHART_RANGE).then(r=>r.json());
+      if(myGen!=null && myGen!==REQ_GEN) return;
+      const res=j&&j.chart&&j.chart.result&&j.chart.result[0];
+      const ts=(res&&res.timestamp)||[], cl=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
+      const pts=[]; ts.forEach((t,i)=>{ if(cl[i]!=null) pts.push([t*1000, cl[i]]); });
+      d={pts, ts:Date.now()}; CHART_CACHE[key]=d;
+    }catch(e){ body.innerHTML='<div class="hint">Grafik alınamadı.</div>'; return; }
+  }
+  const pts=d.pts;
+  if(!pts || pts.length<2){ body.innerHTML='<div class="hint">Bu aralık için fiyat verisi yok.</div>'; return; }
+  const W=720,H=260,padL=8,padR=64,padT=14,padB=26;
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  const x0=xs[0], x1=xs[xs.length-1], yMin=Math.min(...ys), yMax=Math.max(...ys);
+  const X=t=> padL+(t-x0)/((x1-x0)||1)*(W-padL-padR);
+  const Y=v=> padT+(yMax-v)/((yMax-yMin)||1)*(H-padT-padB);
+  const path=pts.map((p,i)=>(i?'L':'M')+X(p[0]).toFixed(1)+' '+Y(p[1]).toFixed(1)).join('');
+  const first=ys[0], last=ys[ys.length-1], chg=(last-first)/first*100;
+  const col= chg>=0?'var(--good)':'var(--bad)';
+  const area=path+`L${X(x1).toFixed(1)} ${H-padB} L${X(x0).toFixed(1)} ${H-padB} Z`;
+  const fD=new Intl.DateTimeFormat('tr-TR', CHART_RANGE==='5y'?{month:'short',year:'numeric'}:{day:'2-digit',month:'short'});
+  let xt='';
+  for(let i=0;i<4;i++){ const t=x0+(x1-x0)*i/3;
+    xt+=`<text x="${X(t).toFixed(1)}" y="${H-8}" font-size="10" fill="var(--muted)" text-anchor="${i===0?'start':i===3?'end':'middle'}">${fD.format(new Date(t))}</text>`; }
+  // Bilanço açıklanma günleri (SEC filed tarihleri — BIST'te yok) altın kesikli çizgiyle
+  let marks='';
+  [FIN&&FIN.filedD0, FIN&&FIN.filedD1].forEach(fd=>{
+    if(!fd) return;
+    const t=new Date(fd).getTime();
+    if(t>=x0 && t<=x1) marks+=`<line x1="${X(t).toFixed(1)}" x2="${X(t).toFixed(1)}" y1="${padT}" y2="${H-padB}" stroke="var(--gold)" stroke-dasharray="3 3" opacity=".7"><title>Bilanço açıklanma: ${fmtDate(fd)}</title></line>`;
+  });
+  const lbl=(v,y,c,w)=>`<text x="${W-padR+6}" y="${y.toFixed(1)}" font-size="10.5" fill="${c||'var(--muted)'}" font-weight="${w||400}">${fmtUSD(v)}</text>`;
+  info.innerHTML=`<b style="color:${col}">${chg>=0?'▲':'▼'} ${pct(chg)}</b> <span class="neutral">seçili aralıkta</span> · En düşük ${fmtUSD(yMin)} · en yüksek ${fmtUSD(yMax)}${marks?' · <span style="color:var(--gold)">┆ bilanço açıklanma günü</span>':''}`;
+  body.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
+    <defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${col}" stop-opacity=".22"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
+    <path d="${area}" fill="url(#pcg)"/>
+    ${marks}
+    <path d="${path}" fill="none" stroke="${col}" stroke-width="2"/>
+    ${lbl(yMax, Y(yMax)+4)}${lbl(yMin, Y(yMin)+4)}${lbl(last, Y(last)+4, col, 700)}
+    ${xt}</svg>`;
+}
+
+/* ---------- Sektör Karşılaştırması (TradingView scanner: aynı sektörün devleri + medyan) ---------- */
+async function fetchSectorPeers(sym, market, myGen){
+  const card=document.getElementById('sectorCard'), box=document.getElementById('sectorBody'), sub=document.getElementById('sectorSub');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Sektör verisi yükleniyor…</div>';
+  try{
+    const scan= market==='BIST'?'turkey':'america';
+    const tickers= market==='BIST'?['BIST:'+sym]:['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
+    const COLS=['name','description','sector','close','market_cap_basic','price_earnings_ttm','price_book_fq','return_on_equity','net_margin'];
+    const me=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:COLS})}).then(r=>r.json());
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const meRow=(me.data||[]).find(x=>x.d && x.d[0]);
+    if(!meRow || !meRow.d[2]){ box.innerHTML='<div class="hint">Bu hisse için sektör bilgisi bulunamadı.</div>'; return; }
+    const sector=meRow.d[2];
+    const peers=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
+      {method:'POST',body:JSON.stringify({filter:[{left:'sector',operation:'equal',right:sector}],columns:COLS,
+        sort:{sortBy:'market_cap_basic',sortOrder:'desc'},range:[0,30]})}).then(r=>r.json());
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const idx={mc:4,pe:5,pb:6,roe:7,nm:8};
+    const rows=(peers.data||[]).map(x=>({t:x.s.split(':')[1], d:x.d})).filter(x=>x.d && x.d[idx.mc]!=null);
+    const med=a=>{ const v=a.filter(x=>x!=null&&isFinite(x)).sort((p,q)=>p-q); if(!v.length) return null; const m=Math.floor(v.length/2); return v.length%2?v[m]:(v[m-1]+v[m])/2; };
+    const medians={ pe:med(rows.map(r=>r.d[idx.pe])), pb:med(rows.map(r=>r.d[idx.pb])), roe:med(rows.map(r=>r.d[idx.roe])), nm:med(rows.map(r=>r.d[idx.nm])) };
+    const fmtN=(v,suf,dec)=> (v==null||!isFinite(v))?'—':v.toFixed(dec==null?1:dec)+(suf||'');
+    const top=rows.slice(0,6);
+    const meT=(meRow.s||'').split(':')[1]||sym;
+    if(!top.some(r=>r.t===meT)) top.unshift({t:meT, d:meRow.d, me:true});
+    else top.forEach(r=>{ if(r.t===meT) r.me=true; });
+    const rowHtml=r=>`<tr${r.me?' style="background:var(--surface-3)"':''}>
+      <td><b>${safeHTML(r.t)}</b>${r.me?' <span class="thd">bu hisse</span>':''}</td>
+      <td>${fmtMcap(r.d[idx.mc])}</td>
+      <td>${fmtN(r.d[idx.pe],'x')}</td><td>${fmtN(r.d[idx.pb],'x',2)}</td>
+      <td>${fmtN(r.d[idx.roe],'%')}</td><td>${fmtN(r.d[idx.nm],'%')}</td></tr>`;
+    const myPe=meRow.d[idx.pe];
+    let prim='';
+    if(myPe!=null && isFinite(myPe) && medians.pe){
+      const df=(myPe-medians.pe)/medians.pe*100;
+      prim=` · F/K sektör medyanına göre <b class="${df>0?'down':'up'}">%${Math.abs(df).toFixed(0)} ${df>0?'primli':'iskontolu'}</b>`;
+    }
+    sub.innerHTML=`Sektör: <b>${safeHTML(sector)}</b> · ${rows.length} şirket${prim}. Kaynak: TradingView.`;
+    box.innerHTML=`<table><thead><tr><th>Şirket</th><th>Piyasa Değ.</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th></tr></thead><tbody>
+      ${top.map(rowHtml).join('')}
+      <tr class="total"><td>Sektör Medyanı</td><td>—</td><td>${fmtN(medians.pe,'x')}</td><td>${fmtN(medians.pb,'x',2)}</td><td>${fmtN(medians.roe,'%')}</td><td>${fmtN(medians.nm,'%')}</td></tr>
+    </tbody></table>`;
+  }catch(e){ box.innerHTML='<div class="hint">Sektör verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---------- İzleme Listesi (localStorage; canlı fiyatlar TV scanner'dan toplu) ---------- */
+function getWatch(){ try{ return JSON.parse(localStorage.getItem('bilanco_watchlist')||'[]'); }catch(e){ return []; } }
+function setWatch(w){ try{ localStorage.setItem('bilanco_watchlist', JSON.stringify(w)); }catch(e){} }
+function updateWatchStar(){
+  const b=document.getElementById('watchStar');
+  if(!b) return;
+  if(!FIN || !FIN.ticker){ b.classList.add('hidden'); return; }
+  const inList=getWatch().some(x=>x.sym===FIN.ticker && x.market===FIN.market);
+  b.textContent= inList?'★ Listemden Çıkar':'☆ Listeme Ekle';
+  b.classList.remove('hidden');
+}
+function toggleWatch(){
+  if(!FIN || !FIN.ticker) return;
+  const w=getWatch();
+  const i=w.findIndex(x=>x.sym===FIN.ticker && x.market===FIN.market);
+  if(i>=0) w.splice(i,1); else w.push({sym:FIN.ticker, market:FIN.market});
+  setWatch(w); updateWatchStar(); renderWatchlist();
+}
+function removeWatch(sym,market){
+  setWatch(getWatch().filter(x=>!(x.sym===sym && x.market===market)));
+  updateWatchStar(); renderWatchlist();
+}
+function openWatch(sym){
+  document.getElementById('ticker').value=sym;
+  window.scrollTo({top:0,behavior:'smooth'});
+  fetchTicker();
+}
+async function renderWatchlist(){
+  const card=document.getElementById('watchCard'), box=document.getElementById('watchBody');
+  if(!card) return;
+  const w=getWatch();
+  if(!w.length){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Fiyatlar yükleniyor…</div>';
+  try{
+    const q={};
+    for(const scanMk of ['turkey','america']){
+      const items=w.filter(x=> (scanMk==='turkey')===(x.market==='BIST'));
+      if(!items.length) continue;
+      const tickers=[];
+      items.forEach(x=>{ if(scanMk==='turkey') tickers.push('BIST:'+x.sym);
+                         else ['NASDAQ','NYSE','AMEX'].forEach(ex=>tickers.push(ex+':'+x.sym)); });
+      const j=await fetch('https://scanner.tradingview.com/'+scanMk+'/scan',
+        {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['name','close','change','price_earnings_ttm']})})
+        .then(r=>r.json()).catch(()=>null);
+      ((j&&j.data)||[]).forEach(row=>{
+        const t=row.s.split(':')[1];
+        if(row.d && row.d[1]!=null && !q[t]) q[t]={close:row.d[1], chg:row.d[2], pe:row.d[3], bist:scanMk==='turkey'};
+      });
+    }
+    const rows=w.map(x=>{
+      const d=q[x.sym]||{};
+      const cls=d.chg==null?'neutral':(d.chg>0?'up':d.chg<0?'down':'neutral');
+      const cur= x.market==='BIST'?'₺':'$';
+      return `<tr style="cursor:pointer" onclick="openWatch('${x.sym}')" title="Analizi aç">
+        <td><b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':'ABD'}</span></td>
+        <td>${d.close!=null? cur+Number(d.close).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
+        <td class="${cls}">${d.chg!=null? (d.chg>0?'▲ ':d.chg<0?'▼ ':'')+pct(d.chg) : '—'}</td>
+        <td>${(d.pe!=null && isFinite(d.pe))? d.pe.toFixed(1)+'x' : '—'}</td>
+        <td class="row-actions"><button class="delrow" onclick="event.stopPropagation();removeWatch('${x.sym}','${x.market}')" title="Listeden çıkar">✕</button></td>
+      </tr>`;
+    }).join('');
+    box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Fiyat</th><th>Günlük</th><th>F/K</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }catch(e){ box.innerHTML='<div class="hint">İzleme listesi fiyatları alınamadı.</div>'; }
+}
+
+/* ---------- Ekonomik Takvim (BIST → Türkiye, ABD → ABD) ----------
+   BİRİNCİL KAYNAK: Investing.com tam takvimi (sunucu /investcal köprüsü) — Investing'in KENDİ
+   Türkçe isimleri + KENDİ önem yıldızları (bull1/2/3) + KENDİ olumlu/olumsuz renkleri. Yani
+   "gerçek ve doğru": isim/önem/renk kaynaktan gelir, uygulama tahmini YOK. Dönem butonları
+   Investing sekmelerine (yesterday/today/tomorrow/thisWeek/nextWeek) 1:1 karşılık gelir.
+   YEDEK: Investing (CF engeli vb) veri vermezse TradingView /econ + küratörlü ECON_MAP devreye
+   girer (isim/önem tahminle; kart boş kalmasın diye). Renderda hangi kaynak kullanıldığı yazar. */
 let ECON_IMP=1, ECON_TIME='buhafta', ECON_MARKET='TR';
-const ECON_CACHE={};
+const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
 const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
 const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
 const TR_GUN=['Paz','Pzt','Sal','Çar','Per','Cum','Cmt'];
@@ -651,13 +1251,18 @@ function econInTime(e, t){
   return true;
 }
 const MON_TR={Jan:'Oca',Feb:'Şub',Mar:'Mar',Apr:'Nis',May:'May',Jun:'Haz',Jul:'Tem',Aug:'Ağu',Sep:'Eyl',Oct:'Eki',Nov:'Kas',Dec:'Ara'};
+/* Dönem etiketini Türkçeye çevir: "Jun" → "Haz", "Q1" → "1Ç", "Jun/26" → "Haz/26" */
 function econPeriodTR(p){
   if(!p) return '';
   let s=p.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g, m=>MON_TR[m]);
   s=s.replace(/\bQ([1-4])\b/g, '$1Ç');
   return s;
 }
+/* Küratörlü isim + önem haritası: [İngilizce başlık regex'i, Türkçe ad, önem(1/0/-1)].
+   İLK eşleşen kazanır → spesifik kalıplar önce. Hem TR hem ABD göstergelerini kapsar.
+   Önem: 1=★★★ piyasa hareket ettiren, 0=★★ orta, -1=★ düşük. */
 const ECON_MAP=[
+  // --- Petrol/enerji stokları (10 ayrı EIA/API serisi — hepsi farklı, spesifik önce) ---
   [/api crude/i, 'API Ham Petrol Stokları', -1],
   [/eia crude oil imports/i, 'EIA Ham Petrol İthalatı', -1],
   [/eia crude oil stocks|eia crude oil stock/i, 'EIA Ham Petrol Stokları', -1],
@@ -670,6 +1275,7 @@ const ECON_MAP=[
   [/eia natural gas/i, 'EIA Doğal Gaz Stokları', -1],
   [/eia refinery/i, 'EIA Rafineri İşlem Değişimi', -1],
   [/crude oil|\beia\b/i, 'Enerji Stokları', -1],
+  // ★★★ — enflasyon / faiz / istihdam / büyüme (temel ad; sıklık/çekirdek EKİ ayrı eklenir)
   [/core (cpi|inflation)/i, 'Çekirdek Enflasyon', 1],
   [/core pce/i, 'Çekirdek PCE Fiyat Endeksi', 1],
   [/\bpce price/i, 'PCE Fiyat Endeksi', 1],
@@ -686,6 +1292,7 @@ const ECON_MAP=[
   [/unemployment rate/i, 'İşsizlik Oranı', 1],
   [/gdp growth|gross domestic|\bgdp\b/i, 'GSYİH Büyüme', 1],
   [/retail sales/i, 'Perakende Satışlar', 1],
+  // ISM alt endeksleri (spesifik önce, PMI en sonra)
   [/ism manufacturing new orders/i, 'ISM İmalat Yeni Siparişler', 0],
   [/ism manufacturing prices/i, 'ISM İmalat Fiyatlar', 0],
   [/ism manufacturing employment/i, 'ISM İmalat İstihdam', 0],
@@ -695,6 +1302,7 @@ const ECON_MAP=[
   [/ism (services|non.?manufacturing) employment/i, 'ISM Hizmet İstihdam', 0],
   [/ism (services|non.?manufacturing) prices/i, 'ISM Hizmet Fiyatlar', 0],
   [/ism (services|non.?manufacturing)/i, 'ISM Hizmet PMI', 1],
+  // ★★ — üfe / dış ticaret / güven / sanayi / konut / başvurular
   [/core ppi/i, 'Çekirdek ÜFE', 0],
   [/ppi|producer price/i, 'ÜFE', 0],
   [/balance of trade|trade balance|foreign trade/i, 'Dış Ticaret Dengesi', 0],
@@ -721,6 +1329,7 @@ const ECON_MAP=[
   [/factory orders/i, 'Fabrika Siparişleri', 0],
   [/exports/i, 'İhracat', 0],
   [/imports/i, 'İthalat', 0],
+  // ★ — düşük etkili
   [/foreign exchange reserves|fx reserves/i, 'Döviz Rezervleri', -1],
   [/tourism revenues|tourist arrivals/i, 'Turizm', -1],
   [/car (registrations|sales)|auto sales|auto production/i, 'Otomotiv Satışları', -1],
@@ -730,6 +1339,8 @@ const ECON_MAP=[
   [/redbook/i, 'Redbook Perakende', -1],
   [/holiday|day of|memorial|independence/i, 'Resmi Tatil', -1],
 ];
+/* Nitelik ekleri — aynı temel ada düşen alt-serileri AYIRT EDER (Çekirdek, Aylık/Yıllık,
+   Oto Hariç, Öncü/Nihai vb). İngilizce başlıktan okunur; temel ad zaten içeriyorsa eklenmez. */
 function econQualifiers(title, base){
   const t=(title||'').toLowerCase(), b=(base||'').toLowerCase(), q=[];
   if(/\bcore\b/.test(t) && !/çekirdek/.test(b)) q.push('Çekirdek');
@@ -759,6 +1370,7 @@ function econClassify(title){
     if(/inflation|cpi|pce|interest rate|rate decision|non.?farm|unemployment rate|gdp|retail sales|ism/.test(t)) imp=1;
     else if(/ppi|producer|trade|current account|industrial|confidence|durable|jobless|pmi|housing|permits|payroll/.test(t)) imp=0;
   }
+  // İkincil dışlama varyantları (Oto Hariç / Kontrol Grubu) ★★★ ise ★★'ye indir (çekirdek hariç)
   if(imp===1 && /\bex[ -]|control group/i.test(title) && !/\bcore\b/i.test(title)) imp=0;
   return { tr:base, imp, mapped };
 }
@@ -768,26 +1380,29 @@ function econVal(v,e){
   if(e.unit==='$') return '$'+v+(e.scale||'');
   return v+(e.scale||'')+(e.unit||'');
 }
+/* Investing "data" HTML'ini tek tip satırlara çözer (isim/önem/renk KAYNAKTAN). */
 function parseInvestingCal(htmlData){
+  // gövdesiz <tr>'ler için <table> ile sarmala (yoksa DOMParser atar)
   const doc=new DOMParser().parseFromString('<table><tbody>'+(htmlData||'')+'</tbody></table>','text/html');
   return [...doc.querySelectorAll('tr[id^="eventRowId_"]')].map(tr=>{
     const a=tr.querySelector('td.event a'), evc=tr.querySelector('td.event');
     const name=((a?a.textContent:evc?evc.textContent:'')||'').replace(/\s+/g,' ').trim();
     if(!name) return null;
-    const skEl=tr.querySelector('td.sentiment'); const sk=skEl?skEl.getAttribute('data-img_key')||'':'';
-    const imp = sk==='bull3'?1 : sk==='bull2'?0 : -1;
+    const sk=tr.querySelector('td.sentiment')?.getAttribute('data-img_key')||'';
+    const imp = sk==='bull3'?1 : sk==='bull2'?0 : -1;         // Investing yıldızı → ★★★/★★/★
     const ac=tr.querySelector('td[id^="eventActual_"]');
     const aStr=ac?ac.textContent.trim():'';
-    const aClr = ac && /greenFont/.test(ac.className)?'up' : (ac && /redFont/.test(ac.className)?'down':'');
-    const fEl=tr.querySelector('td[id^="eventForecast_"]'); const fStr=(fEl?fEl.textContent:'').trim();
-    const pEl=tr.querySelector('td[id^="eventPrevious_"]'); const pStr=(pEl?pEl.textContent:'').trim();
+    const aClr = ac && /greenFont/.test(ac.className)?'up' : (ac && /redFont/.test(ac.className)?'down':'');  // Investing rengi
+    const fStr=(tr.querySelector('td[id^="eventForecast_"]')?.textContent||'').trim();
+    const pStr=(tr.querySelector('td[id^="eventPrevious_"]')?.textContent||'').trim();
     const dt=tr.getAttribute('data-event-datetime')||'';
-    let dateLbl='', tEl=tr.querySelector('td.time,td.first'), timeLbl=(tEl?tEl.textContent:'').trim();
+    let dateLbl='', timeLbl=(tr.querySelector('td.time,td.first')?.textContent||'').trim();
     const m=dt.match(/(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2})/);
     if(m){ const g=new Date(+m[1],+m[2]-1,+m[3]); dateLbl=m[3]+' '+TR_AY[+m[2]-1]+' '+TR_GUN[g.getDay()]; if(!timeLbl||/gün/i.test(timeLbl)) timeLbl=m[4]+':'+m[5]; }
     return { name, imp, aStr, aClr, fStr:fStr||'—', pStr:pStr||'—', dateLbl, timeLbl };
   }).filter(Boolean);
 }
+/* YEDEK: TradingView /econ → seçili dönemin (tab) satırları (isim/önem küratörlü haritadan). */
 async function tvRowsForTab(myGen){
   const from=new Date(Date.now()-3*86400000).toISOString();
   const to=new Date(Date.now()+16*86400000).toISOString();
@@ -798,7 +1413,7 @@ async function tvRowsForTab(myGen){
     return { title:e.title||'', imp:cls.imp, mappedTr:cls.tr, period:econPeriodTR(e.period||''),
       d:new Date(e.date), aRaw:e.actualRaw, fRaw:e.forecastRaw, pRaw:e.previousRaw,
       aStr:econVal(e.actual,e), fStr:econVal(e.forecast,e), pStr:econVal(e.previous,e), dir:econDir(e.title) };
-  }).filter(e=>!isNaN(e.d) && econInTime(e,ECON_TIME)).sort((a,b)=>a.d-b.d);
+  }).filter(e=>!isNaN(e.d) && econInTime(e,ECON_TIME)).sort((a,b)=>a.d-b.d);   // sadece bu döneme ait
   const need=[...new Set(evs.filter(e=>!e.mappedTr).map(e=>e.title))];
   if(need.length){
     const tr=await translateTR(need);
@@ -825,11 +1440,18 @@ async function loadEconTab(myGen){
   if(c && (Date.now()-c.ts)<30*60000){ renderEcon(); return; }
   box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
   let rows=[], src='', investingOk=false;
-  try{
-    const r=await fetch('/investcal?c='+ECON_MARKET+'&tab='+tab);
-    if(myGen!=null && myGen!==REQ_GEN) return;
-    if(r.ok){ const j=await r.json(); if(j && typeof j.data==='string'){ investingOk=true; rows=parseInvestingCal(j.data); src='Investing.com'; } }
-  }catch(e){}
+  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — yalnız ABD/TR (ülke kodları
+  //    yalnız bu ikisi için biliniyor; Avrupa ülkeleri doğrudan TV yedeğine gider).
+  //    Geçerli JSON (data alanı string) → Investing ÇALIŞTI say (0 satır = o gün veri yok, normal).
+  //    Yalnızca istek GERÇEKTEN başarısızsa (403/502/JSON değil) yedeğe düş.
+  if(ECON_MARKET==='US'||ECON_MARKET==='TR'){
+    try{
+      const r=await fetch('/investcal?c='+ECON_MARKET+'&tab='+tab);
+      if(myGen!=null && myGen!==REQ_GEN) return;
+      if(r.ok){ const j=await r.json(); if(j && typeof j.data==='string'){ investingOk=true; rows=parseInvestingCal(j.data); src='Investing.com'; } }
+    }catch(e){}
+  }
+  // 2) YEDEK: Investing gerçekten erişilemediyse TradingView
   if(!investingOk){
     try{
       const tv=await tvRowsForTab(myGen);
@@ -840,17 +1462,18 @@ async function loadEconTab(myGen){
   ECON_CACHE[key]={ rows, src, ts:Date.now() };
   renderEcon();
 }
-async function fetchEconCalendar(myGen, market){
+async function fetchEconCalendar(myGen, market, countryName){
   const card=document.getElementById('econCard'), ttl=document.getElementById('econTitle');
   if(!card) return;
-  ECON_MARKET=market||'TR';
-  if(ttl) ttl.textContent = ECON_MARKET==='US' ? 'ABD Ekonomik Takvimi' : 'Türkiye Ekonomik Takvimi';
+  ECON_MARKET=market||'TR';   // 'TR' | 'US' | Avrupa ISO kodu ('DE','GB','FR'…)
+  if(ttl) ttl.textContent = countryName ? countryName+' Ekonomik Takvimi'
+                          : (ECON_MARKET==='US' ? 'ABD Ekonomik Takvimi' : 'Türkiye Ekonomik Takvimi');
   card.classList.remove('hidden');
   syncEconBtns();
   loadEconTab(myGen);
 }
-function setEconTime(t){ ECON_TIME=t; syncEconBtns(); loadEconTab(REQ_GEN); }
-function setEconImp(i){ ECON_IMP=i; renderEcon(); }
+function setEconTime(t){ ECON_TIME=t; syncEconBtns(); loadEconTab(REQ_GEN); }   // sekme değişince yeniden çek
+function setEconImp(i){ ECON_IMP=i; renderEcon(); }                              // önem sadece filtreler
 function syncEconBtns(){
   document.querySelectorAll('#econTimeBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.t===ECON_TIME));
   document.querySelectorAll('#econBtns button').forEach(b=>b.classList.toggle('primary', Number(b.dataset.imp)===ECON_IMP));
@@ -877,12 +1500,18 @@ function renderEcon(){
   </tr>`).join('');
   const kaynak = c.src==='Investing.com'
     ? 'İsim, önem yıldızı ve renkler doğrudan <b>Investing.com</b> ekonomik takviminden alınır.'
-    : 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).';
+    : (ECON_MARKET==='US'||ECON_MARKET==='TR')
+      ? 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).'
+      : 'Kaynak: <b>TradingView</b> ekonomik takvimi (isimler Türkçeleştirilir, önem yaklaşıktır).';
   box.innerHTML=`<table><thead><tr><th>Tarih (TSİ)</th><th>Veri</th><th>Açıklanan</th><th>Beklenti</th><th>Önceki</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span>/<span class="down">kırmızı</span> açıklanan değer, beklentiye göre olumlu/olumsuz demektir. "—" henüz açıklanmadı. ${kaynak}</div>`;
 }
 
-/* ---------- KAP Bildirimleri (yalnızca BIST) ---------- */
+/* ---------- KAP Bildirimleri (yalnızca BIST) ----------
+   Kaynak: Fintables topic-feed API'si (CORS *, tarayıcıdan çağrılır — CF gerçek tarayıcıyı
+   geçirir). Akıştaki type==='news' öğeleri KAP bildirimleridir; kap_id ile resmi KAP
+   bildirim sayfasına (kap.org.tr/tr/Bildirim/{id}) link kurulur. KAP'ın kendi API'si
+   bot korumalı olduğundan doğrudan kullanılamıyor. */
 async function fetchKapFeed(sym, myGen){
   const card=document.getElementById('kapCard'), box=document.getElementById('kapBody');
   if(!card) return;
@@ -891,14 +1520,14 @@ async function fetchKapFeed(sym, myGen){
   try{
     let url='https://api.fintables.com/topic-feed/?symbols='+encodeURIComponent(sym)+'&for_everyone=1&only_pro=0';
     const news=[];
-    for(let p=0; p<3 && url && news.length<10; p++){
-      const r=await fetch(url);
+    for(let p=0; p<3 && url && news.length<10; p++){   // akışta bültenler de var → yeterli
+      const r=await fetch(url);                         // bildirim toplanana dek en çok 3 sayfa
       if(!r.ok) break;
       const j=await r.json();
       (j.results||[]).forEach(it=>{ if(it.type==='news' && it.news) news.push(it.news); });
       url=j.next||null;
     }
-    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     if(!news.length){ box.innerHTML='<div class="hint">Bu şirket için yakın tarihli KAP bildirimi bulunamadı.</div>'; return; }
     box.innerHTML=news.slice(0,10).map(n=>{
       const d=n.published_at?new Date(n.published_at):null;
@@ -915,10 +1544,16 @@ async function fetchKapFeed(sym, myGen){
   }catch(e){ box.innerHTML='<div class="hint">KAP bildirimleri alınamadı: '+e.message+'</div>'; }
 }
 
-/* ---------- BIST analist hedef fiyatları ---------- */
+/* ---------- BIST analist hedef fiyatları ----------
+   BİRİNCİL: Fintables analyst-ratings API'si (kurum bazlı: Şeker/İş/Garanti/Ziraat Yatırım…
+   hedef + tavsiye + tarih). CORS açık (*); Cloudflare GERÇEK tarayıcı isteklerini geçirir,
+   sunucu/veri merkezi isteklerini engeller → çağrı bilerek İSTEMCİDE yapılır.
+   YEDEK: TradingView scanner konsensüsü (Content-Type başlıksız POST = preflight'sız;
+   o da olmazsa sunucudaki /tvt köprüsü). */
 const TVT_COLS=['price_target_average','price_target_high','price_target_low','recommendation_total',
   'recommendation_buy','recommendation_over','recommendation_hold','recommendation_under','recommendation_sell',
   'recommendation_mark','close'];
+/* TradingView analist skoru: 1=Al … 3=Sat (Finviz'in 1-5 skalasından farklı) */
 function tvMarkLabel(m){
   if(m==null || isNaN(m)) return null;
   if(m<=1.3) return ['Güçlü Al','g-buy'];
@@ -927,6 +1562,7 @@ function tvMarkLabel(m){
   if(m<=2.7) return ['Sat','g-sell'];
   return ['Güçlü Sat','g-sell'];
 }
+/* Fintables tavsiye tipi → Türkçe rozet (skor: 1=olumlu, 2=nötr, 3=olumsuz — konsensüs için) */
 const FT_TYPE={
   al:['Al','g-buy',1], endeks_ustu:['Endeks Üstü','g-buy',1], guclu_al:['Güçlü Al','g-buy',1],
   tut:['Tut','g-hold',2], endekse_paralel:['Endekse Paralel','g-hold',2], notr:['Nötr','g-hold',2],
@@ -938,19 +1574,23 @@ async function fetchTargetsBIST(sym, myGen){
   card.classList.remove('hidden');
   box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
   try{
+    // 1) BİRİNCİL KAYNAK: Fintables (kurum bazlı!) — tarayıcıdan doğrudan (CORS: *).
+    //    Gerçek tarayıcı istekleri Cloudflare'dan geçiyor; sunucu/veri merkezi istekleri geçmez,
+    //    o yüzden bu çağrı bilerek İSTEMCİDE yapılır. Cari fiyat paralel alınır.
     let ratings=null, cur=null;
     const [ftR, pR]=await Promise.all([
       fetch('https://api.fintables.com/analyst-ratings/?code='+encodeURIComponent(sym))
         .then(r=>r.ok?r.json():null).catch(()=>null),
       fetch('/price?s='+encodeURIComponent(sym+'.IS')+'&range=1d').then(r=>r.json()).catch(()=>null)
     ]);
-    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const meta=pR&&pR.chart&&pR.chart.result&&pR.chart.result[0]&&pR.chart.result[0].meta;
     cur=meta?meta.regularMarketPrice:null;
     if(ftR && Array.isArray(ftR.results)) ratings=ftR.results;
 
     let html='';
     if(ratings && ratings.length){
+      // Son 12 ayın notları; kurum başına en güncel kayıt (liste zaten kurum başına tekil geliyor)
       const cutoff=Date.now()-365*86400000;
       const rows=ratings
         .map(r=>({ firm:(r.brokerage&&(r.brokerage.title||r.brokerage.short_title))||'—',
@@ -958,6 +1598,7 @@ async function fetchTargetsBIST(sym, myGen){
                    type:r.type||null, d:new Date(r.published_at) }))
         .filter(r=> !isNaN(r.d) && r.d.getTime()>=cutoff)
         .sort((a,b)=>b.d-a.d);
+      // Konsensüs bu listeden hesaplanır (en güncel kurum hedeflerinin ort/en yüksek/en düşük)
       const tgts=rows.map(r=>r.tgt).filter(v=>v!=null);
       const mean=tgts.length?tgts.reduce((a,b)=>a+b,0)/tgts.length:null;
       const hi=tgts.length?Math.max(...tgts):null, lo=tgts.length?Math.min(...tgts):null;
@@ -977,6 +1618,7 @@ async function fetchTargetsBIST(sym, myGen){
           <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
           <div class="sm neutral">${rows.length} aracı kurum · son 12 ay</div></div>
       </div>`;
+      // Kurum bazlı tablo — ABD tarafındaki tabloyla aynı düzen
       const trRows=rows.slice(0,20).map(r=>{
         const t=FT_TYPE[r.type]||['—','g-hold'];
         const ds=r.d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
@@ -992,6 +1634,7 @@ async function fetchTargetsBIST(sym, myGen){
       return;
     }
 
+    // 2) YEDEK: Fintables boş/erişilemezse TradingView/Refinitiv konsensüsü (kurum adları olmadan)
     let d=null;
     try{
       const r=await fetch('https://scanner.tradingview.com/turkey/scan',
@@ -1003,10 +1646,10 @@ async function fetchTargetsBIST(sym, myGen){
     }
     if(myGen!=null && myGen!==REQ_GEN) return;
     if(!d || d[0]==null){
-      box.innerHTML='<div class="hint">Bu hisse için analist hedef fiyatı bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
+      box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
       return;
     }
-    const mean=d[0],hi=d[1],lo=d[2],tot=d[3], mark=d[9], close=d[10];
+    const [mean,hi,lo,tot]=d, mark=d[9], close=d[10];
     const cur2=cur!=null?cur:close;
     const up=(cur2&&mean)?(mean-cur2)/cur2*100:null;
     const upCls=up==null?'neutral':(up>0?'up':'down');
@@ -1027,8 +1670,48 @@ async function fetchTargetsBIST(sym, myGen){
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
 }
 
+/* Avrupa analist hedefleri — Fintables/Finviz Avrupa'yı kapsamıyor; doğrudan TradingView/Refinitiv
+   konsensüsü (kurum bazlı liste yok, BIST'in yedek yolu ile aynı mantık). */
+async function fetchTargetsEU(sym, euInfo, myGen){
+  const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  try{
+    const tvTicker=euInfo.tv+':'+euInfo.base.replace(/-/g,'_');
+    const r=await fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:TVT_COLS})});
+    const j=r.ok?await r.json():null;
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const d=j&&j.data&&j.data[0]&&j.data[0].d;
+    if(!d || d[0]==null){
+      box.innerHTML='<div class="hint">Bu hisse için analist hedef fiyatı bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
+      return;
+    }
+    const [mean,hi,lo,tot]=d, mark=d[9], close=d[10];
+    const up=(close&&mean)?(mean-close)/close*100:null;
+    const upCls=up==null?'neutral':(up>0?'up':'down');
+    const rl=tvMarkLabel(mark);
+    box.innerHTML=`<div class="tgt-grid">
+      <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+        <div class="big">${fmtUSD(mean)}</div>
+        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
+        ${close!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(close)}</div>`:''}</div>
+      <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+        <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
+        <div class="sm neutral">aracı kurum hedef aralığı</div></div>
+      <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+        <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
+        <div class="sm neutral">${tot!=null?tot+' aracı kurum analisti':''}</div></div>
+    </div>
+    <div class="hint" style="margin-top:10px">Kurum bazlı liste Avrupa'da mevcut değil (Fintables/Finviz bu bölgeyi kapsamıyor) — TradingView/Refinitiv konsensüsü gösteriliyor. Kaynak: TradingView.</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+}
+
 /* ---------- Canlı + dönemsel hisse fiyatı (Yahoo Finance — anahtarsız köprü) ---------- */
+/* Not: adı fmtUSD kalsa da aktif para sembolünü (CURSYM: $ veya ₺) kullanır. */
 function fmtUSD(n){ return (n==null)?'—':CURSYM+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+/* Piyasa değeri biçimi: $4,17 T / ₺281,50 B / $950,00 M */
 function fmtMcap(n){
   if(n==null) return '—';
   const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1037,6 +1720,9 @@ function fmtMcap(n){
   if(n>=1e6)  return CURSYM+two(n/1e6)+' M';
   return CURSYM+Math.round(n).toLocaleString('tr-TR');
 }
+/* Çalışan sayısı — binlik ayraçla; veri yoksa "—" (TradingView number_of_employees) */
+function fmtEmployees(n){ return (n==null)?'—':Math.round(n).toLocaleString('tr-TR'); }
+/* Dolaşımdaki en güncel pay sayısı (SEC dei kapak sayfası; yedek: us-gaap) */
 async function fetchShares(cik){
   const pick=u=>{ const m={},f={}; u.forEach(e=>{ if(!(e.end in m)||e.filed>f[e.end]){m[e.end]=Number(e.val);f[e.end]=e.filed;} });
     const d=Object.keys(m).sort().reverse()[0]; return d?m[d]:null; };
@@ -1050,32 +1736,44 @@ async function fetchShares(cik){
   }
   return null;
 }
+/* opts: { ysym: Yahoo sembolü (BIST için "THYAO.IS"), shares: hazır pay adedi (BIST: ödenmiş sermaye) } */
 async function fetchPrice(sym, cik, myGen, opts){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote');
   const fd0=FIN&&FIN.filedD0, fd1=FIN&&FIN.filedD1;
-  const ysym=(opts&&opts.ysym)||sym;
+  const ysym=(opts&&opts.ysym)||sym;   // Yahoo'ya giden sembol; ekranda sym gösterilir
   try{
     const now=Math.floor(Date.now()/1000)+86400;
     const earliest = fd1||fd0||'2015-01-01';
     const p1=Math.floor(new Date(earliest).getTime()/1000) - 10*86400;
+    // Canlı (range=1d) + geçmiş (tarih aralığı) + dolaşımdaki pay sayısı paralel
     const [liveR, histR, shares]=await Promise.all([
       fetch(`/price?s=${encodeURIComponent(ysym)}&range=1d`).then(x=>x.json()).catch(()=>null),
       fetch(`/price?s=${encodeURIComponent(ysym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
       (opts&&opts.shares!=null)? Promise.resolve(opts.shares) : (cik? fetchShares(cik) : Promise.resolve(null))
     ]);
-    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const res = histR&&histR.chart&&histR.chart.result&&histR.chart.result[0];
     const liveRes = liveR&&liveR.chart&&liveR.chart.result&&liveR.chart.result[0];
     if(!res && !liveRes){ lp.classList.add('hidden'); return; }
     const m=(liveRes&&liveRes.meta) || (res&&res.meta) || {};
-    const ts=(res&&res.timestamp)||[], closes=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
+    const ts=(res&&res.timestamp)||[];
+    let closes=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
+    // Londra borsası (LSE) fiyatları peni (GBp) cinsinden gelir, pound değil — 100'e bölünmezse
+    // piyasa değeri 100 kat şişer. m.currency==='GBp' olduğunda tüm fiyatları poundlaştır.
+    if(m.currency==='GBp'){
+      if(m.regularMarketPrice!=null) m.regularMarketPrice/=100;
+      if(m.chartPreviousClose!=null) m.chartPreviousClose/=100;
+      closes=closes.map(c=>c==null?c:c/100);
+    }
+    // Belirli tarihteki (veya bir önceki işlem günündeki) kapanış
     const closeOn=iso=>{
       if(!iso) return null;
-      const tgt=new Date(iso).getTime()/1000 + 86400;
+      const tgt=new Date(iso).getTime()/1000 + 86400;   // gün sonu
       let best=null;
       for(let i=0;i<ts.length;i++){ if(ts[i]<=tgt){ if(closes[i]!=null) best=closes[i]; } else break; }
       return best;
     };
+    // Canlı fiyat (sağ üst)
     const live=m.regularMarketPrice, prevC=m.chartPreviousClose;
     if(live!=null){
       const ch = (prevC? (live-prevC)/prevC*100 : null);
@@ -1086,6 +1784,7 @@ async function fetchPrice(sym, cik, myGen, opts){
         `<span class="lp-live">● canlı</span>`;
       lp.classList.remove('hidden');
     }else lp.classList.add('hidden');
+    // Piyasa değeri (≈ canlı fiyat × dolaşımdaki pay) → sağ üstteki rozet
     const mcap = (live!=null && shares) ? live*shares : null;
     const badge=document.getElementById('hdBadge');
     if(badge){
@@ -1096,7 +1795,11 @@ async function fetchPrice(sym, cik, myGen, opts){
         badge.className='hd-badge'; badge.textContent='SEC EDGAR + Bing News';
       }
     }
+    // Değerleme oranları (canlı): F/K, PD/DD — en güncel piyasa değeri + SEC verisiyle
     renderValuation(mcap);
+    // Adil Değer (DCF) — pay adedi + canlı fiyat burada elde edilir
+    if(FIN){ FIN.livePrice=(live!=null)?live:null; FIN.shares=shares||null; initDcf(); }
+    // Dönemsel fiyatlar (açıklandığı gün) — Bilanço Verisi
     const pCur=closeOn(fd0), pPrev=closeOn(fd1);
     const chip=(lbl,date,price,color)=> price==null?'' :
       `<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;padding:7px 11px;font-size:12px">
@@ -1107,96 +1810,18 @@ async function fetchPrice(sym, cik, myGen, opts){
   }catch(e){ lp.classList.add('hidden'); }
 }
 
-/* ---------- İnteraktif Fiyat Grafiği (Yahoo /price, anahtarsız) ---------- */
-let CHART_RANGE='1y', CHART_SYM=null;
-function setChartRange(r){ CHART_RANGE=r; syncChartBtns(); loadChart(); }
-function syncChartBtns(){ document.querySelectorAll('#chartRangeBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.r===CHART_RANGE)); }
-function fetchChart(myGen){
-  const card=document.getElementById('chartCard');
-  if(!card||!FIN) return;
-  CHART_SYM = FIN.market==='BIST' ? FIN.ticker+'.IS' : FIN.ticker;
-  card.classList.remove('hidden'); syncChartBtns(); loadChart(myGen);
-}
-async function loadChart(myGen){
-  const box=document.getElementById('chartBox');
-  if(!box||!CHART_SYM) return;
-  box.innerHTML='<div class="hint">Grafik yükleniyor…</div>';
-  try{
-    const r=await fetch('/price?s='+encodeURIComponent(CHART_SYM)+'&range='+CHART_RANGE);
-    const j=await r.json();
-    if(myGen!=null && myGen!==REQ_GEN) return;
-    const res=j&&j.chart&&j.chart.result&&j.chart.result[0];
-    const ts=res&&res.timestamp, q=res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0];
-    if(!ts||!q){ box.innerHTML='<div class="hint">Grafik verisi bulunamadı.</div>'; return; }
-    const pts=[];
-    for(let i=0;i<ts.length;i++){ if(q.close[i]!=null) pts.push([ts[i]*1000, q.close[i]]); }
-    if(pts.length<2){ box.innerHTML='<div class="hint">Yeterli veri yok.</div>'; return; }
-    box.innerHTML=priceChartSVG(pts);
-    const first=pts[0][1], last=pts[pts.length-1][1], ch=(last-first)/first*100, cls=ch>=0?'up':'down';
-    const info=document.getElementById('chartInfo');
-    if(info) info.innerHTML=`Dönem: <b>${fmtUSD(first)}</b> → <b>${fmtUSD(last)}</b> <span class="${cls}">${ch>=0?'▲':'▼'} ${pct(ch)}</span>`;
-    attachChartHover(pts);
-  }catch(e){ box.innerHTML='<div class="hint">Grafik alınamadı: '+e.message+'</div>'; }
-}
-const PC={W:960,H:340,padL:56,padR:14,padT:14,padB:26};
-function priceChartSVG(pts){
-  const {W,H,padL,padR,padT,padB}=PC;
-  const ys=pts.map(p=>p[1]), xs=pts.map(p=>p[0]);
-  const minY=Math.min(...ys),maxY=Math.max(...ys),spanY=(maxY-minY)||1;
-  const minX=xs[0],maxX=xs[xs.length-1],spanX=(maxX-minX)||1;
-  const px=t=> padL+((t-minX)/spanX)*(W-padL-padR);
-  const py=v=> padT+(1-(v-minY)/spanY)*(H-padT-padB);
-  const up=ys[ys.length-1]>=ys[0], col=up?'var(--good)':'var(--bad)';
-  let line=''; pts.forEach((p,i)=>{ line+=(i?'L':'M')+px(p[0]).toFixed(1)+' '+py(p[1]).toFixed(1)+' '; });
-  const area='M'+px(pts[0][0]).toFixed(1)+' '+(H-padB)+' '+line.replace(/^M/,'L')+'L'+px(maxX).toFixed(1)+' '+(H-padB)+' Z';
-  let grid='';
-  for(let g=0;g<=4;g++){ const val=minY+spanY*g/4, Y=py(val).toFixed(1);
-    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${Y}" y2="${Y}" stroke="var(--line)"/><text x="${padL-6}" y="${(+Y+3).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${fmtUSD(val)}</text>`; }
-  let xlab=''; const fD=new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'short',year:'2-digit'});
-  for(let g=0;g<=4;g++){ const t=minX+spanX*g/4, X=px(t).toFixed(1);
-    xlab+=`<text x="${X}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--muted)">${fD.format(new Date(t))}</text>`; }
-  const gid='pcg'+Math.random().toString(36).slice(2,7);
-  return `<svg id="priceSvg" viewBox="0 0 ${W} ${H}" width="100%" style="display:block;touch-action:none">
-    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity="0.28"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
-    ${grid}<path d="${area}" fill="url(#${gid})"/><path d="${line}" fill="none" stroke="${col}" stroke-width="1.8"/>${xlab}
-    <line id="pcCross" x1="0" x2="0" y1="${padT}" y2="${H-padB}" stroke="var(--accent)" stroke-dasharray="3 3" opacity="0"/>
-    <circle id="pcDot" r="3.5" fill="var(--accent)" opacity="0"/></svg>
-    <div id="pcTip" style="position:absolute;display:none;background:var(--surface-3);border:1px solid var(--line-2);border-radius:8px;padding:6px 9px;font-size:12px;pointer-events:none;white-space:nowrap;z-index:5"></div>`;
-}
-function attachChartHover(pts){
-  const svg=document.getElementById('priceSvg'); if(!svg) return;
-  const cross=document.getElementById('pcCross'), dot=document.getElementById('pcDot'), tip=document.getElementById('pcTip');
-  const {W,padL,padR,padT,padB,H}=PC;
-  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
-  const minY=Math.min(...ys),maxY=Math.max(...ys),spanY=(maxY-minY)||1;
-  const minX=xs[0],maxX=xs[xs.length-1],spanX=(maxX-minX)||1;
-  const px=t=> padL+((t-minX)/spanX)*(W-padL-padR);
-  const py=v=> padT+(1-(v-minY)/spanY)*(H-padT-padB);
-  const fDT=new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
-  const move=cx=>{
-    const rect=svg.getBoundingClientRect();
-    const xView=((cx-rect.left)/rect.width)*W;
-    let bi=0,bd=1e18; for(let i=0;i<pts.length;i++){ const d=Math.abs(px(pts[i][0])-xView); if(d<bd){bd=d;bi=i;} }
-    const p=pts[bi], X=px(p[0]), Y=py(p[1]);
-    cross.setAttribute('x1',X); cross.setAttribute('x2',X); cross.setAttribute('opacity','0.7');
-    dot.setAttribute('cx',X); dot.setAttribute('cy',Y); dot.setAttribute('opacity','1');
-    tip.style.display='block';
-    tip.innerHTML=`<b>${fmtUSD(p[1])}</b> · <span style="color:var(--muted)">${fDT.format(new Date(p[0]))}</span>`;
-    const left=(X/W)*rect.width;
-    tip.style.left=Math.max(4, Math.min(rect.width-tip.offsetWidth-4, left+10))+'px'; tip.style.top='8px';
-  };
-  svg.addEventListener('mousemove', e=>move(e.clientX));
-  svg.addEventListener('mouseleave', ()=>{ cross.setAttribute('opacity','0'); dot.setAttribute('opacity','0'); tip.style.display='none'; });
-  svg.addEventListener('touchmove', e=>{ if(e.touches[0]){ move(e.touches[0].clientX); e.preventDefault(); } }, {passive:false});
-}
-
+/* Değerleme oranları (canlı): F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak.
+   "En güncel": Piyasa Değeri anlık fiyattan; Net Kâr yıllık modda son tam yıl, çeyreklik modda
+   son 4 çeyreğin toplamı (TTM); Defter Değeri (özkaynak) en güncel bilançodan. */
 function renderValuation(mcap){
   const card=document.getElementById('valCard'), box=document.getElementById('valBody');
   if(!card||!box) return;
   if(!FIN || mcap==null){ card.classList.add('hidden'); return; }
   const D=FIN.balance, D0=FIN.D0;
   const vv=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+  // Defter Değeri (özkaynak) — uygulamanın her yerinde kullanılan sağlam türetme
   const bookValue = vv(D.assets,D0) - liabTotal(D,D0);
+  // Net Kâr (F/K için): yıllık = son tam yıl; çeyreklik = son 4 çeyrek toplamı (TTM)
   const niSeries=FIN.income&&FIN.income.netIncome||{};
   const niDates=Object.keys(niSeries).sort().reverse();
   let netIncome=null, niLabel='';
@@ -1207,6 +1832,7 @@ function renderValuation(mcap){
   const fk = (netIncome && netIncome>0) ? mcap/netIncome : null;
   const pddd = (bookValue && bookValue>0) ? mcap/bookValue : null;
   const x2=v=> v==null?'—':v.toFixed(2)+'x';
+  // F/K eşik: 0-15 ucuz(iyi), 15-30 orta, >30 pahalı; negatif kâr → hesaplanamaz
   const fkCls = fk==null?'neutral':(fk<=15?'up':fk<=30?'neutral':'down');
   const pdCls = pddd==null?'neutral':(pddd<=1.5?'up':pddd<=4?'neutral':'down');
   const cell=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
@@ -1220,7 +1846,7 @@ function renderValuation(mcap){
   card.classList.remove('hidden');
 }
 
-/* Güncel haberler — Bing News + Türkçe çeviri (tarayıcıdan) */
+/* Güncel haberler — Google News (en güncel) + Türkçe çeviri (anahtarsız köprü) */
 const safeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 function relTime(d){
   const diff=(Date.now()-d.getTime())/1000;
@@ -1229,14 +1855,20 @@ function relTime(d){
   if(diff<604800) return Math.round(diff/86400)+' gün önce';
   return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
 }
-async function gTranslate(t){
+/* --- Çeviri DOĞRUDAN TARAYICIDAN yapılır (sunucu köprüsü DEĞİL). ---
+   Neden: Render'ın veri merkezi IP'si Google Translate & MyMemory tarafından engelleniyor →
+   sunucu tarafı çeviri canlıda hep İngilizce'ye düşüyordu ve her metin için 2 boş denemeyle
+   çok yavaşlıyordu. Her iki servis de "Access-Control-Allow-Origin: *" döndürdüğü için tarayıcı
+   onları doğrudan çağırabilir; tarayıcı KULLANICININ ev IP'sini kullandığından engel yok, hızlı
+   ve canlıda da Türkçe geliyor. */
+async function gTranslate(t){   // Google gtx (kalite en iyi)
   const u='https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=tr&dt=t&q='+encodeURIComponent(t);
   const r=await fetch(u); if(!r.ok) throw new Error('g '+r.status);
   const j=await r.json();
   if(Array.isArray(j) && Array.isArray(j[0])){ const out=j[0].map(s=>(s&&s[0])?s[0]:'').join('').trim(); if(out) return out; }
   throw new Error('g bos');
 }
-async function mmTranslate(t){
+async function mmTranslate(t){  // MyMemory (yedek)
   const q=t.length>480?t.slice(0,480):t;
   const u='https://api.mymemory.translated.net/get?langpair=en|tr&de=bilanco.analiz.app@gmail.com&q='+encodeURIComponent(q);
   const r=await fetch(u); if(!r.ok) throw new Error('mm '+r.status);
@@ -1245,6 +1877,8 @@ async function mmTranslate(t){
   if(out && !/MYMEMORY WARNING|QUOTA/i.test(out)) return out.trim();
   throw new Error('mm bos');
 }
+/* Tek bir metni Türkçe'ye çevir: Google → MyMemory → (son çare sunucu /tr) → orijinal.
+   Zincir bir kez düşerse kısa beklemeyle 2 kez yeniden dener. */
 async function translateOne(text, tries){
   const t=(text||'').trim();
   if(!t || t==='—') return text;
@@ -1264,12 +1898,15 @@ async function translateOne(text, tries){
     return text;
   }
 }
+/* Diziyi çevir — eşzamanlılığı 6'yla sınırla. Çeviri artık doğrudan tarayıcıdan (kullanıcı IP'si)
+   yapıldığı için sunucu turu yok; 6 paralel istek Google'ı zorlamadan tümünü hızlıca çevirir. */
 async function translateTR(arr){
   const out=new Array(arr.length); let idx=0;
   const worker=async()=>{ while(idx<arr.length){ const k=idx++; out[k]=await translateOne(arr[k]); } };
   await Promise.all(Array.from({length:6}, worker));
   return out;
 }
+/* Üst düzey kaynaklar (sıralamada öne alınır; "msn" elenir). Yahoo Finance öne alındı. */
 const TOP_SOURCES = ['yahoo finance','bloomberg','reuters','cnbc','marketwatch',
   'wall street journal','wsj','financial times','ft.com',
   'forbes','fortune','economist','business insider','businessinsider',
@@ -1278,8 +1915,10 @@ const TOP_SOURCES = ['yahoo finance','bloomberg','reuters','cnbc','marketwatch',
 const PREMIUM_SITES = '(site:finance.yahoo.com OR site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR '+
   'site:wsj.com OR site:ft.com OR site:marketwatch.com OR site:forbes.com OR site:fortune.com OR '+
   'site:investors.com OR site:businessinsider.com OR site:economist.com OR site:morningstar.com)';
+/* Sorun çıkaran/engellenen kaynaklar listede hiç gösterilmez */
 const BLOCK_HOST = /(^|\.)(msn\.com|barrons\.com|seekingalpha\.com)$/i;
 const BLOCK_SRC  = /\bon msn\b|^\s*msn\s*$|barron|seeking ?alpha/i;
+/* BIST: düşük öncelikli kaynaklar — yalnızca başka kaynak yoksa listeye girer (en sona atılır) */
 const TR_LOW_SOURCES=/mynet|haberler\.com|sondakika|ensonhaber|internethaber|takvim|aksam|star\.com/i;
 function parseNewsXML(xml){
   const doc=new DOMParser().parseFromString(xml||'','application/xml');
@@ -1304,6 +1943,8 @@ async function fetchNews(sym, myGen){
   try{
     let items;
     if(isBist){
+      // BIST: en zengin haber havuzu ŞİRKET ADIYLA çıkıyor (test: "Garanti BBVA" 12 haber,
+      // "GARAN hisse" 4) → şirket adını TradingView'den al (tek hafif çağrı), kod + adla ara.
       let coName='';
       try{
         const r=await fetch('https://scanner.tradingview.com/turkey/scan',
@@ -1316,25 +1957,40 @@ async function fetchNews(sym, myGen){
       const xmls=await Promise.all(queries.map(q=>
         fetch('/news?q='+encodeURIComponent(q)+'&m=tr').then(r=>r.text()).catch(()=>'')));
       if(myGen!=null && myGen!==REQ_GEN) return;
+      // Yalın kod sorgusu alakasız sonuç sızdırabilir (örn. "GARAN" bir soyadı da olabilir) →
+      // kod sorgusundan gelenlerde hem kod hem finans/borsa bağlam kelimesi aranır;
+      // "SYM hisse" ve şirket adı sorguları zaten bağlamlı olduğundan olduğu gibi alınır.
       const finRx=/hisse|borsa|bist|hedef|bilanç|temettü|kâr|kar[ıi]|yatır[ıi]m|halka arz|piyasa|analiz|teknik|fiyat|endeks|finans|sermaye|şirket/i;
       const fromCode=parseNewsXML(xmls[1]||'').filter(it=>{
         const txt=((it.title||'')+' '+(it.desc||''));
         return new RegExp('\\b'+sym+'\\b','i').test(txt) && finRx.test(txt);
       });
       items=[...parseNewsXML(xmls[0]||''), ...parseNewsXML(xmls[2]||''), ...fromCode];
+      // Güncellik: 90 günden eski haberler KOŞULSUZ elenir (tarihsizler de elenir)
       const cutoff=Date.now()-90*86400000;
       items=items.filter(it=> it.d && it.d.getTime()>=cutoff);
     }else{
+      // ABD: hisse koduyla arama yeterince isabetli. Avrupa'da kod tek başına belirsiz/kısa
+      // kalabilir (ör. "MC", "SIE") → şirketin kısaltılmış adını kullan (FIN.companyName,
+      // fetchTickerEU'da TradingView'den zaten alınmıştı — ek istek gerekmez).
+      const isEU = FIN && FIN.market==='EU';
+      let q=sym;
+      if(isEU && FIN.companyName){
+        q=FIN.companyName.replace(/\b(AG|SE|PLC|NV|N\.V\.|SA|S\.A\.|S\.p\.A\.|AB|A\/S|ASA|Ltd\.?|Limited|Inc\.?|Group|Aktiengesellschaft|Public Limited Company|Holding)\b\.?/gi,' ')
+          .replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' ') || sym;
+      }
       const [xPrem, xGen]=await Promise.all([
-        fetch('/news?q='+encodeURIComponent(sym+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
-        fetch('/news?q='+encodeURIComponent(sym+' stock')).then(r=>r.text()).catch(()=>'')
+        fetch('/news?q='+encodeURIComponent(q+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
+        fetch('/news?q='+encodeURIComponent(q+' stock')).then(r=>r.text()).catch(()=>'')
       ]);
-      if(myGen!=null && myGen!==REQ_GEN) return;
+      if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
       items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
     }
 
+    // Sorunlu kaynakları ele (MSN, Barron's, Seeking Alpha — çeviri/erişim sorunu çıkarıyor)
     items=items.filter(it=> !BLOCK_HOST.test(it.host||'') && !BLOCK_SRC.test(it.src||''));
 
+    // Tekrarları temizle (host+yol ya da başlık)
     const seen=new Set();
     items=items.filter(it=>{
       let key=(it.title||'').slice(0,60).toLowerCase();
@@ -1342,6 +1998,9 @@ async function fetchNews(sym, myGen){
       if(seen.has(key)) return false; seen.add(key); return true;
     });
 
+    // Sıralama — BIST: EN GÜNCEL en üstte; yalnızca düşük kaliteli kaynaklar (Mynet,
+    // haberler.com vb.) en sona atılır — onlar ancak başka kaynak yoksa görünür.
+    // ABD: üst düzey kaynak önce, sonra en güncel.
     if(isBist){
       const trTier=it=> TR_LOW_SOURCES.test(((it.src||'')+' '+(it.host||'')).toLowerCase()) ? 1 : 0;
       items.sort((a,b)=>{ const t=trTier(a)-trTier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
@@ -1350,6 +2009,9 @@ async function fetchNews(sym, myGen){
       items.sort((a,b)=>{ const t=tier(a)-tier(b); if(t) return t; return (b.d?b.d.getTime():0)-(a.d?a.d.getTime():0); });
     }
 
+    // Çeşitlilik: önce aynı kaynaktan en fazla 3 haber alınır (tek kaynak listeye hakim olmasın).
+    // Bu sınırla en az 12'ye ulaşılamazsa (kaynak çeşitliliği azsa), aynı sıralamayı koruyarak
+    // eksik kalan yerleri sınırı esnetip aynı kaynaklardan tamamlar → her zaman en az 12 haber.
     const MIN_ITEMS=12, MAX_ITEMS=16, CAP=3;
     const included=new Array(items.length).fill(false);
     const srcCount={};
@@ -1370,9 +2032,11 @@ async function fetchNews(sym, myGen){
     items=items.filter((it,i)=>included[i]);
     if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
 
+    // Başlık + özetler: BIST haberleri zaten Türkçe → çeviri atlanır (hız + doğruluk);
+    // ABD haberleri tek havuzda Türkçe'ye çevrilir (eşzamanlılık sınırlı)
     const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
     const tr = isBist ? allTexts : await translateTR(allTexts);
-    if(myGen!=null && myGen!==REQ_GEN) return;
+    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
@@ -1386,15 +2050,19 @@ async function fetchNews(sym, myGen){
     }).join('');
   }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
 }
+/* Haber başlığına tıklayınca özeti aç/kapat */
 function toggleNews(el){ el.classList.toggle('open'); }
 
-/* ---- Sağlam yükümlülük/özkaynak toplamları ---- */
+/* ---- Sağlam yükümlülük/özkaynak toplamları (eksik SEC etiketlerini telafi eder) ---- */
 const bsVal=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
+/* Özkaynak (azınlık payı dahil): önce IncludingNCI; yoksa ana ortaklık + azınlık payı */
 function equityAllIn(D,d){
   const incl=bsVal(D.equityIncl,d);
   if(incl) return incl;
   return bsVal(D.equity,d)+bsVal(D.minority,d);
 }
+/* Toplam yükümlülük: raporlanmışsa Liabilities; yoksa (Pasif Toplamı − Özkaynak);
+   o da yoksa KV + UV yükümlülük. */
 function liabTotal(D,d){
   if(D.liab && (d in D.liab)) return D.liab[d];
   const base=bsVal(D.liabEquity,d)||bsVal(D.assets,d);
@@ -1403,6 +2071,8 @@ function liabTotal(D,d){
   return bsVal(D.liabCur,d)+bsVal(D.liabNoncur,d);
 }
 
+/* SEC kavram haritalarını uygulamanın satır yapısına çevirir.
+   Bölüm toplamına göre bir "denge" satırı eklenir → Aktif = Pasif korunur. */
 function buildRowsFromSEC(D,D0,D1){
   const out=[];
   const v=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
@@ -1444,6 +2114,9 @@ function buildRowsFromSEC(D,D0,D1){
     ['Uzun Vadeli Finansal Borçlar',D.ltDebt],
   ],null,'Diğer Uzun Vadeli Yük.', d=> (liabTotal(D,d)-v(D.liabCur,d)) );
 
+  // Özkaynak toplamı = Aktif − (sağlam) Toplam Yükümlülük → bilanço HER ZAMAN dengelenir.
+  // Azınlık payları (NCI) ve mezzanine gibi StockholdersEquity'ye dahil OLMAYAN
+  // kalemler "Diğer Özkaynak" satırında toplanır.
   section('equity',[
     ['Ödenmiş Sermaye',D.common],
     ['Dağıtılmamış Kârlar',D.retained],
@@ -1485,8 +2158,10 @@ function hidePriceUI(){
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
   const ec=document.getElementById('econCard'); if(ec) ec.classList.add('hidden');
-  const cfCard=document.getElementById('cashflowCard'); if(cfCard) cfCard.classList.add('hidden');
-  const chC=document.getElementById('chartCard'); if(chC) chC.classList.add('hidden');
+  ['chartCard','sectorCard','top10Card','dcfCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
+  TECH_SHORT=null;
+  const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
+  const ws=document.getElementById('watchStar'); if(ws) ws.classList.add('hidden');
   stopNyClock();
 }
 function loadSample(){
@@ -1510,15 +2185,17 @@ function readData(){
 }
 const sum=(rows,f,key)=>rows.filter(f).reduce((a,r)=>a+r[key],0);
 
+/* Cari değeri önceki döneme göre renklendir: iyi=yeşil, kötü=kırmızı.
+   Yön: varlık & özkaynak artışı iyi; yükümlülük artışı kötü. */
 function colorInputRows(){
   document.querySelectorAll('#inputBody tr').forEach(tr=>{
     const curEl=tr.querySelector('.cur'), prevEl=tr.querySelector('.prev'), catEl=tr.querySelector('.catsel');
     if(!curEl||!prevEl||!catEl) return;
     curEl.classList.remove('cell-good','cell-bad');
     const cur=num(curEl.value), prev=num(prevEl.value);
-    if(!prev) return;
+    if(!prev) return;                                  // karşılaştırılacak önceki dönem yok
     const dv=cur-prev;
-    if(Math.abs(dv) < Math.abs(prev)*0.0005) return;
+    if(Math.abs(dv) < Math.abs(prev)*0.0005) return;   // anlamlı değişim yok → nötr
     const favorable = (CAT_GROUP[catEl.value]==='liab') ? dv<0 : dv>0;
     curEl.classList.add(favorable?'cell-good':'cell-bad');
   });
@@ -1531,9 +2208,9 @@ function analyze(){
   if(d.length===0){ alert('Lütfen en az bir kalem girin veya "Örnek Veri Yükle"ye basın.'); return; }
   document.getElementById('results').classList.remove('hidden');
 
-  const isE=r=>CAT_GROUP[r.cat]==='equity';
+  const isA=r=>CAT_GROUP[r.cat]==='asset', isL=r=>CAT_GROUP[r.cat]==='liab', isE=r=>CAT_GROUP[r.cat]==='equity';
   const period=['cur','prev'];
-  const T={};
+  const T={}; // toplamlar
   period.forEach(p=>{
     T[p]={
       donenV:   sum(d,r=>r.cat==='asset_current',p),
@@ -1557,21 +2234,25 @@ function analyze(){
   renderVertical(d,T);
   renderFlags(d,T);
 
+  // Gelir tablosu / kârlılık / trend / nakit akışı / sağlık karnesi yalnızca çekilmiş veri varsa
   const incCard=document.getElementById('incomeCard'), trCard=document.getElementById('trendCard');
   if(FIN){
-    renderIncome(T); renderCashflow(); renderTrends();
+    renderIncome(T); renderTrends();
+    renderCashFlow(); renderHealth(T);
     incCard.classList.remove('hidden'); trCard.classList.remove('hidden');
   }else{
     incCard.classList.add('hidden'); trCard.classList.add('hidden');
-    const cfC=document.getElementById('cashflowCard'); if(cfC) cfC.classList.add('hidden');
+    ['cashCard','healthCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }
 
+  // Rapor başlığı (dışa aktarmada da kullanılır)
   const rt=document.getElementById('reportTitle');
   if(rt){
     rt.textContent = FIN
       ? `${FIN.ticker} · ${FIN.market==='BIST'?'BIST':'ABD'} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${FIN.market==='BIST'?'TL':'USD'}`
       : 'Elle girilen veri';
   }
+  // Dönem notu: bildirilme tarihi + yıllık veride gecikme açıklaması
   const pn=document.getElementById('periodNote');
   if(pn){
     if(FIN && FIN.market==='BIST'){
@@ -1616,6 +2297,7 @@ function exportCSV(){
   push('Oluşturma', new Date().toLocaleString('tr-TR'));
   push('');
 
+  // Bilanço (ham sayılarla)
   push('BİLANÇO'); push('Kalem','Kategori','Cari','Önceki');
   d.forEach(r=> push(r.name, CATS[r.cat], Math.round(r.cur), Math.round(r.prev)));
   push('');
@@ -1624,11 +2306,10 @@ function exportCSV(){
   if(FIN){
     section('GELİR TABLOSU', ['Kalem','Cari','Önceki','Değişim'], '#incomeBody');
     section('KÂRLILIK ORANLARI', ['Oran','Cari','Önceki','Değişim','Durum'], '#profBody');
-    section('NAKİT AKIŞ TABLOSU', ['Kalem','Cari','Önceki','Değişim'], '#cashflowBody');
   }
   section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki','Değişim ($)','Değişim (%)','Yön'], '#varBody');
 
-  const csv='﻿'+L.join('\r\n');
+  const csv='﻿'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');
   const name=(FIN?FIN.ticker:'bilanco')+'-analiz-'+new Date().toISOString().slice(0,10)+'.csv';
@@ -1641,9 +2322,11 @@ function exportCSV(){
 function renderIncome(T){
   const I=FIN.income, D0=FIN.D0, D1=FIN.D1;
   const iv=(k,d)=> (d && I[k] && (d in I[k])) ? I[k][d] : null;
+  // Gelir/Net kâr için tarih, bilanço D0 ile birebir olmayabilir → gelir serisinin en güncel 2 tarihi
   const revDates=Object.keys(I.revenue||{}).sort().reverse();
   const R0=revDates[0]||D0, R1=revDates[1]||D1;
 
+  // KPI kartları: Gelir, Net Kâr, Net Marj, ROE
   const rev0=iv('revenue',R0), rev1=iv('revenue',R1);
   const ni0=iv('netIncome',R0), ni1=iv('netIncome',R1);
   const nm0=(rev0&&ni0!=null)?ni0/rev0:null, nm1=(rev1&&ni1!=null)?ni1/rev1:null;
@@ -1665,6 +2348,7 @@ function renderIncome(T){
     kpi('Özkaynak Kârlılığı (ROE)', roe0, roe1, pp),
   ].join('');
 
+  // Gelir tablosu satırları
   const lines=[
     ['Gelir (Hasılat)','revenue',false],
     ['Satış Maliyeti','costRev',true],
@@ -1682,6 +2366,7 @@ function renderIncome(T){
     return `<tr><td>${lbl}</td><td><b>${c==null?'—':fmtAbbr(c)}</b></td><td>${p==null?'—':fmtAbbr(p)}</td><td>${ch}</td></tr>`;
   }).filter(Boolean).join('');
 
+  // Kârlılık oranları tablosu
   const gp0=iv('grossProfit',R0), gp1=iv('grossProfit',R1);
   const op0=iv('opIncome',R0), op1=iv('opIncome',R1);
   const roa0=T.cur.toplamV?(ni0!=null?ni0/T.cur.toplamV:null):null;
@@ -1705,60 +2390,705 @@ function renderIncome(T){
   }).join('');
 }
 
-/* ---- Nakit Akış Tablosu & Serbest Nakit Akışı (FCF) ---- */
-function renderCashflow(){
-  const card=document.getElementById('cashflowCard');
-  const kbox=document.getElementById('cfKpis'), body=document.getElementById('cashflowBody');
-  if(!card||!kbox||!body) return;
-  const C=(FIN&&FIN.cashflow)||{}, I=(FIN&&FIN.income)||{};
-  const dates=Object.keys(C.opCF||{}).sort().reverse();
-  if(!dates.length){ card.classList.add('hidden'); return; }
-  const R0=dates[0], R1=dates[1];
+/* ---- Piyasa Şeridi (Bloomberg WEI tarzı) ----
+   Endeks/döviz/emtia anlık özeti — Yahoo /price köprüsünden, 60 sn'de bir yenilenir. */
+const STRIP_SYMS=[
+  ['BIST 100','XU100.IS',2], ['USD/TRY','TRY=X',2], ['EUR/TRY','EURTRY=X',2],
+  ['Altın $','GC=F',0], ['Brent','BZ=F',1], ['S&P 500','^GSPC',0], ['Nasdaq','^IXIC',0],
+  ['BTC','BTC-USD',0], ['ABD 10Y','^TNX',2]
+];
+let STRIP_TIMER=null;
+async function fetchMarketStrip(){
+  const el=document.getElementById('mktStrip');
+  if(!el) return;
+  const rs=await Promise.all(STRIP_SYMS.map(([n,s])=>
+    fetch('/price?s='+encodeURIComponent(s)+'&range=1d').then(r=>r.json()).catch(()=>null)));
+  const html=STRIP_SYMS.map(([name,sym,dec],i)=>{
+    const m=rs[i]&&rs[i].chart&&rs[i].chart.result&&rs[i].chart.result[0]&&rs[i].chart.result[0].meta;
+    if(!m||m.regularMarketPrice==null) return '';
+    const v=m.regularMarketPrice, p=m.chartPreviousClose;
+    const ch=p?(v-p)/p*100:null;
+    const cls=ch==null?'neutral':(ch>0.001?'up':ch<-0.001?'down':'neutral');
+    const ar=ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
+    return `<span class="mkt-item"><span class="mn">${name}</span>
+      <span class="mv">${v.toLocaleString('tr-TR',{minimumFractionDigits:dec,maximumFractionDigits:dec})}${sym==='^TNX'?'%':''}</span>
+      ${ch!=null?`<span class="mc ${cls}">${ar}${Math.abs(ch).toFixed(2)}%</span>`:''}</span>`;
+  }).join('');
+  if(html) el.innerHTML=html;
+}
+function startMarketStrip(){
+  fetchMarketStrip();
+  if(STRIP_TIMER) clearInterval(STRIP_TIMER);
+  STRIP_TIMER=setInterval(fetchMarketStrip, 60000);
+}
+
+/* ---- Teknik Görünüm & Risk (her iki pazar — TradingView; ABD'ye Finviz kısa pozisyonu eklenir) ---- */
+let TECH_SHORT=null;   // ABD: fetchTargets doldurur {floatPct, ratio}
+const TECH_COLS=['RSI','SMA50','SMA200','price_52_week_high','price_52_week_low',
+  'Perf.W','Perf.1M','Perf.3M','Perf.YTD','Perf.Y','beta_1_year','Volatility.M','close','relative_volume_10d_calc'];
+async function fetchTechPanel(sym, market, myGen, euOpt){
+  const card=document.getElementById('techCard'), box=document.getElementById('techBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Teknik veriler yükleniyor…</div>';
+  try{
+    const scan = euOpt ? euOpt.scan : (market==='BIST'?'turkey':'america');
+    const tickers = euOpt ? [euOpt.tv] : (market==='BIST'?['BIST:'+sym]:['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym]);
+    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:TECH_COLS})});
+    const j=r.ok?await r.json():null;
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const row=(j&&j.data||[]).find(x=>x.d && x.d[0]!=null);
+    if(!row){ box.innerHTML='<div class="hint">Teknik veri bulunamadı.</div>'; return; }
+    const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close,relVol]=row.d;
+    const num=(v,d)=> v==null?'—':Number(v).toFixed(d==null?2:d);
+    const clsOf=v=> v==null?'neutral':(v>0?'up':v<0?'down':'neutral');
+    const sgn=v=> v==null?'—':(v>0?'+':'')+v.toFixed(1)+'%';
+    // RSI bölgesi
+    const rsiZone= rsi==null?['—','neutral'] : rsi>=70?['Aşırı Alım','down'] : rsi<=30?['Aşırı Satım','up'] : ['Nötr','neutral'];
+    // Ortalamalara mesafe
+    const d50=(close&&sma50)?(close/sma50-1)*100:null;
+    const d200=(close&&sma200)?(close/sma200-1)*100:null;
+    // 52 hafta konumu
+    const pos=(close!=null&&hi52!=null&&lo52!=null&&hi52>lo52)?(close-lo52)/(hi52-lo52)*100:null;
+    const kpi=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
+      <div class="val" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
+      ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
+    let html='<div class="grid" style="margin-bottom:16px">';
+    html+=kpi('RSI (14)', num(rsi,1), rsiZone[0], rsiZone[1]);
+    html+=kpi('50 Günlük Ort. Mesafe', sgn(d50), 'SMA50: '+num(sma50), clsOf(d50));
+    html+=kpi('200 Günlük Ort. Mesafe', sgn(d200), 'SMA200: '+num(sma200), clsOf(d200));
+    html+=kpi('Beta (1 Yıl)', num(beta), beta==null?'':(beta>1.2?'piyasadan oynak':beta<0.8?'piyasadan sakin':'piyasayla uyumlu'));
+    html+=kpi('Aylık Volatilite', num(volM,1)+'%', 'günlük ort. dalgalanma');
+    html+=kpi('Göreli Hacim (10g)', num(relVol), relVol!=null&&relVol>1.5?'ortalamanın üstünde ilgi':'');
+    html+='</div>';
+    // 52 hafta konum çubuğu
+    if(pos!=null){
+      html+=`<div style="margin-bottom:16px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">52 Hafta Aralığındaki Konum —
+          <b style="color:var(--ink)">%${pos.toFixed(0)}</b>
+          <span class="neutral">(düşük ${fmtUSD(lo52)} · yüksek ${fmtUSD(hi52)})</span></div>
+        <div style="position:relative;height:10px;border-radius:6px;background:linear-gradient(90deg,var(--bad),var(--warn),var(--good))">
+          <div style="position:absolute;left:${Math.min(99,Math.max(1,pos)).toFixed(1)}%;top:-4px;width:4px;height:18px;background:#fff;border-radius:2px;box-shadow:0 0 0 2px rgba(255,255,255,.25)"></div>
+        </div></div>`;
+    }
+    // Dönemsel getiriler
+    const perf=[['1 Hafta',pW],['1 Ay',p1M],['3 Ay',p3M],['Yıl Başından',pYTD],['1 Yıl',pY]];
+    html+=`<table><thead><tr>${perf.map(p=>`<th>${p[0]}</th>`).join('')}</tr></thead>
+      <tbody><tr>${perf.map(p=>`<td class="${clsOf(p[1])}"><b>${sgn(p[1])}</b></td>`).join('')}</tr></tbody></table>`;
+    // ABD kısa pozisyonu (Finviz — fetchTargets doldurur; hazırsa bas, değilse sonra güncellenir)
+    html+='<div id="techShortRow"></div>';
+    box.innerHTML=html;
+    renderTechShort();
+  }catch(e){ box.innerHTML='<div class="hint">Teknik veri alınamadı: '+e.message+'</div>'; }
+}
+function renderTechShort(){
+  const el=document.getElementById('techShortRow');
+  if(!el || !TECH_SHORT || TECH_SHORT.floatPct==null) return;
+  const s=TECH_SHORT;
+  const cls=s.floatPct>=10?'down':s.floatPct>=5?'warn':'up';
+  el.innerHTML=`<div style="margin-top:14px;padding:11px 14px;border:1px solid var(--line);border-left:4px solid var(--${cls==='down'?'bad':cls==='warn'?'warn':'good'});border-radius:11px;background:var(--surface-2);font-size:12.5px">
+    <b style="color:var(--ink)">Kısa Pozisyon (ayı bahisleri):</b>
+    dolaşımdaki payların <b class="${cls==='warn'?'neutral':cls}">%${s.floatPct.toFixed(2)}</b>'i açığa satılmış${s.ratio!=null?` · kapatma süresi ≈ <b>${s.ratio.toFixed(1)} gün</b>`:''}.
+    <span class="neutral">%10+ yüksek ayı baskısı / short-squeeze potansiyeli demektir. Kaynak: Finviz.</span></div>`;
+  document.getElementById('techShortSrc').textContent=' + Finviz (kısa pozisyon)';
+}
+
+/* ---- Ortaklık Yapısı (pasta grafik) ----
+   BIST: İş Yatırım OrtaklikYapisi (/bistown) — ortak adı + %oran ("Diğer" = halka açık kısım).
+   ABD: Finviz sahiplik alanları (/targets yanıtındaki own) — kurumsal %, içeriden %, kalan
+   halka açık/diğer. SVG donut: stroke-dasharray dilimleri + renkli lejant. */
+const PIE_COLORS=['#4f9cf9','#34d39a','#f3b44e','#f06a72','#a78bfa','#38bdf8','#fb923c','#7585a0'];
+function pieSVG(slices, centerTop, centerBottom){
+  const R=52, C=2*Math.PI*R;
+  let off=0;
+  const segs=slices.map(s=>{
+    const len=Math.max(0,s.pct)/100*C;
+    const el=`<circle r="${R}" cx="75" cy="75" fill="none" stroke="${s.color}" stroke-width="26"
+      stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"
+      transform="rotate(-90 75 75)"><title>${s.label}: %${s.pct.toFixed(2)}</title></circle>`;
+    off+=len; return el;
+  }).join('');
+  return `<svg viewBox="0 0 150 150" width="185" height="185" style="flex:0 0 auto">${segs}
+    <text x="75" y="70" text-anchor="middle" font-size="16" font-weight="800" fill="var(--ink)">${centerTop||''}</text>
+    <text x="75" y="88" text-anchor="middle" font-size="9.5" fill="var(--muted)">${centerBottom||''}</text></svg>`;
+}
+function renderOwnerPie(slices, note){
+  const card=document.getElementById('ownerCard'), box=document.getElementById('ownerBody');
+  if(!card||!box) return;
+  slices=slices.filter(s=>s.pct>0.01);
+  if(!slices.length){ card.classList.add('hidden'); return; }
+  slices.forEach((s,i)=>s.color=PIE_COLORS[i%PIE_COLORS.length]);
+  // Merkezde halka açıklık oranı (varsa)
+  const halka=slices.find(s=>/halka|diğer/i.test(s.label));
+  const legend=slices.map(s=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px">
+    <span style="width:11px;height:11px;border-radius:3px;background:${s.color};flex:0 0 auto"></span>
+    <span style="color:var(--ink);flex:1">${safeHTML(s.label)}</span>
+    <b style="color:var(--ink);font-variant-numeric:tabular-nums">%${s.pct.toFixed(2)}</b></div>`).join('');
+  box.innerHTML=`<div style="display:flex;gap:26px;align-items:center;flex-wrap:wrap">
+    ${pieSVG(slices, halka?('%'+halka.pct.toFixed(1)):'', halka?'halka açık':'')}
+    <div style="flex:1;min-width:230px">${legend}
+      ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}</div></div>`;
+  card.classList.remove('hidden');
+}
+async function fetchOwnershipBIST(sym, myGen){
+  try{
+    const j=await fetch('/bistown?hisse='+encodeURIComponent(sym)).then(r=>r.ok?r.json():null);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    let rows=((j&&j.value)||[]).map(v=>({
+      label:(v.FO_ORTAK||'').trim(), pct:parseFloat(String(v.FO_ORTAK_ORANI||'').replace(',','.'))||0
+    })).filter(r=>r.label && r.pct>0);
+    if(!rows.length){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
+    rows.forEach(r=>{ if(/^diğer$/i.test(r.label)) r.label='Halka Açık / Diğer'; });
+    rows.sort((a,b)=>b.pct-a.pct);
+    renderOwnerPie(rows, 'Kaynak: KAP ortaklık yapısı (İş Yatırım aracılığıyla). "Halka Açık / Diğer" borsada işlem gören kısımdır.');
+  }catch(e){ document.getElementById('ownerCard')?.classList.add('hidden'); }
+}
+/* Avrupa: isim-isim ortak listesi için ücretsiz kaynak yok (KAP/Finviz karşılığı yok) —
+   TradingView'in fiili dolaşım (free float) verisiyle 2 dilimli pasta: halka açık vs büyük ortaklar. */
+function renderOwnershipEU(floatPct, floatShares, totalShares){
+  if(floatPct==null || floatPct<=0 || floatPct>100){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
+  const slices=[
+    { label:'Halka Açık Dolaşım (free float)', pct:floatPct },
+    { label:'Büyük Ortaklar / Stratejik Paylar', pct:Math.max(0,100-floatPct) }
+  ];
+  let note='Kaynak: TradingView fiili dolaşım verisi. Avrupa\'da pay sahipleri isim isim tek merkezden açıklanmaz; dağılım halka açık / büyük ortak olarak raporlanır.';
+  if(floatShares && totalShares) note+=` Fiili dolaşım: ${fmtShort(floatShares)} / ${fmtShort(totalShares)} pay.`;
+  renderOwnerPie(slices, note);
+}
+function renderOwnershipUS(own){
+  if(!own || own.inst==null){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
+  const inst=own.inst||0, ins=own.insider||0;
+  const other=Math.max(0, 100-inst-ins);
+  const slices=[
+    { label:'Kurumsal Yatırımcılar (fonlar)', pct:inst },
+    { label:'Şirket İçi (yönetici/kurucu)', pct:ins },
+    { label:'Halka Açık / Bireysel Diğer', pct:other }
+  ];
+  let note='Kaynak: Finviz. ABD\'de pay sahipleri isim isim açıklanmaz; dağılım kurumsal/içeriden/diğer olarak raporlanır.';
+  if(own.shsFloat && own.shsOut) note+=` Fiili dolaşım: ${fmtShort(own.shsFloat)} / ${fmtShort(own.shsOut)} pay (%${(own.shsFloat/own.shsOut*100).toFixed(1)}).`;
+  renderOwnerPie(slices, note);
+}
+
+/* ---- Adil Değer Hesaplayıcı (Mini DCF) ----
+   2 aşamalı FCF modeli: 5 yıl büyüme (g) + uç değer (gt), iskonto r.
+   Özkaynak değeri = PV(FCF'ler) + PV(uç değer) − net borç; hisse başına = / pay adedi.
+   Veriler: FCF (nakit akışı kartıyla aynı seri), pay adedi + canlı fiyat (fetchPrice'tan). */
+function dcfFcf0(){
+  const CF=FIN && FIN.income && FIN.income._cash;
+  if(!CF || !Object.keys(CF.fcf||{}).length) return null;
+  const dates=Object.keys(CF.fcf).sort().reverse();
+  if(FIN.market==='BIST' && FIN.mode==='quarter'){
+    // Son 4 ayrık çeyreğin toplamı (eksikse yıllıklandır)
+    const last=dates.slice(0,4).map(d=>CF.fcf[d]);
+    if(!last.length) return null;
+    const sum=last.reduce((a,b)=>a+b,0);
+    return last.length===4 ? sum : sum*(4/last.length);
+  }
+  return CF.fcf[dates[0]];   // yıllık (ABD her zaman; BIST yıllık modda)
+}
+function dcfNetDebt(){
+  const D=FIN&&FIN.balance; if(!D) return 0;
+  const d=FIN.D0, v=(m)=> (d && m && (d in m)) ? m[d] : 0;
+  return v(D.stDebt)+v(D.ltDebt)-v(D.cash);
+}
+function initDcf(){
+  const card=document.getElementById('dcfCard');
+  if(!card || !FIN) return;
+  const fcf0=dcfFcf0();
+  if(fcf0==null || fcf0<=0 || !FIN.shares || !FIN.livePrice){
+    // FCF negatif/yok ya da pay adedi/fiyat yok → model uygulanamaz
+    if(fcf0!=null && fcf0<=0){
+      card.classList.remove('hidden');
+      document.getElementById('dcfSliders').style.display='none';
+      document.getElementById('dcfResult').innerHTML='<div class="hint">Serbest nakit akışı negatif ya da bulunamadı — DCF modeli bu şirkete uygulanamaz.</div>';
+    } else card.classList.add('hidden');
+    return;
+  }
+  document.getElementById('dcfSliders').style.display='grid';
+  // Pazar bazlı makul varsayılanlar (TL nominal oranlar yüksek)
+  const def = FIN.market==='BIST' ? {g:25,r:30,t:15} : {g:8,r:10,t:2.5};
+  document.getElementById('dcfG').value=def.g;
+  document.getElementById('dcfR').value=def.r;
+  document.getElementById('dcfT').value=def.t;
+  card.classList.remove('hidden');
+  renderDcf();
+}
+function dcfCompute(fcf0,g,r,gt){
+  if(gt>=r) return null;
+  let pv=0, f=fcf0;
+  for(let t=1;t<=5;t++){ f=f*(1+g); pv+=f/Math.pow(1+r,t); }
+  const tv=f*(1+gt)/(r-gt)/Math.pow(1+r,5);
+  return pv+tv;
+}
+function renderDcf(){
+  const box=document.getElementById('dcfResult');
+  if(!box || !FIN || !FIN.shares || !FIN.livePrice) return;
+  const fcf0=dcfFcf0(); if(fcf0==null||fcf0<=0) return;
+  const g=+document.getElementById('dcfG').value/100;
+  const r=+document.getElementById('dcfR').value/100;
+  const gt=+document.getElementById('dcfT').value/100;
+  document.getElementById('dcfGv').textContent='%'+(g*100).toFixed(1);
+  document.getElementById('dcfRv').textContent='%'+(r*100).toFixed(1);
+  document.getElementById('dcfTv').textContent='%'+(gt*100).toFixed(1);
+  if(gt>=r){ box.innerHTML='<div class="hint down">Uç büyüme, iskonto oranından küçük olmalı — kaydırıcıları ayarla.</div>'; return; }
+  const netDebt=dcfNetDebt();
+  const perShare=(ev)=> ev==null?null:(ev-netDebt)/FIN.shares;
+  const fv=perShare(dcfCompute(fcf0,g,r,gt));
+  const cur=FIN.livePrice;
+  // Negatif özkaynak değeri: net borç, FCF'lerin bugünkü değerini aşıyor → sayı yerine açıklama
+  if(fv==null || fv<=0){
+    box.innerHTML=`<div class="tgt-grid">
+      <div class="tgt-box"><div class="lbl">Adil Değer / Hisse</div><div class="big">—</div>
+        <div class="sm neutral">Baz FCF: ${fmtAbbr(fcf0)} · Net borç: ${fmtAbbr(netDebt)}</div></div>
+      <div class="tgt-box"><div class="lbl">Cari Fiyat</div><div class="big">${fmtUSD(cur)}</div></div>
+    </div>
+    <div class="hint" style="margin-top:10px">Bu varsayımlarla FCF'lerin bugünkü değeri net borcu karşılamıyor (özkaynak değeri ≤ 0) — kiralama/finansman borcu yüksek şirketlerde sık görülür. Büyüme varsayımını artırıp veya iskontoyu düşürüp tekrar dene; model bu tür bilançolarda sınırlı anlam taşır.</div>`;
+    return;
+  }
+  const diff=(fv-cur)/cur*100;
+  const cls=diff>0?'up':'down';
+  // Duyarlılık: büyüme ±5 puan × iskonto ±3 puan
+  const gs=[g-0.05,g,g+0.05].map(x=>Math.max(0,x));
+  const rs=[r-0.03,r,r+0.03].map(x=>Math.max(0.02,x));
+  const sens=rs.map(rr=>gs.map(gg=>perShare(dcfCompute(fcf0,gg,rr,Math.min(gt,rr-0.005)))));
+  const sensRows=rs.map((rr,i)=>`<tr><td>iskonto %${(rr*100).toFixed(1)}</td>${gs.map((gg,jx)=>{
+    const v=sens[i][jx]; const merkez=(i===1&&jx===1);
+    const ok=(v!=null&&v>0);
+    return `<td${merkez?' style="background:var(--surface-3);font-weight:700"':''} class="${ok?(v>cur?'up':'down'):'neutral'}">${ok?fmtUSD(v):'—'}</td>`;
+  }).join('')}</tr>`).join('');
+  box.innerHTML=`<div class="tgt-grid">
+    <div class="tgt-box"><div class="lbl">Adil Değer / Hisse</div><div class="big">${fmtUSD(fv)}</div>
+      <div class="sm neutral">Baz FCF: ${fmtAbbr(fcf0)} · Net borç: ${fmtAbbr(netDebt)}</div></div>
+    <div class="tgt-box"><div class="lbl">Cari Fiyat</div><div class="big">${fmtUSD(cur)}</div></div>
+    <div class="tgt-box"><div class="lbl">${diff>0?'İskonto (Ucuz)':'Prim (Pahalı)'}</div>
+      <div class="big ${cls}" style="color:var(--${diff>0?'good':'bad'})">${diff>0?'▲':'▼'} ${pct(Math.abs(diff)*(diff>0?1:-1)).replace('-','')}</div>
+      <div class="sm neutral">adil değere göre</div></div>
+  </div>
+  <div style="font-weight:700;color:var(--ink);margin:14px 0 6px">Duyarlılık — Adil Değer/Hisse</div>
+  <table><thead><tr><th></th>${gs.map(gg=>`<th>büyüme %${(gg*100).toFixed(1)}</th>`).join('')}</tr></thead><tbody>${sensRows}</tbody></table>
+  <div class="hint" style="margin-top:6px"><span class="up">Yeşil</span> = cari fiyatın üstünde (iskontolu), <span class="down">kırmızı</span> = altında. Ortadaki hücre seçili varsayımlar.</div>`;
+}
+
+/* ---- İçeriden Alım-Satım — SEC Form 4 (yalnızca ABD) ----
+   submissions JSON'dan son Form 4'ler → her birinin ham form4.xml'i /secw köprüsünden
+   (xsl klasör öneki atılır) → isim, ünvan, işlem kodu, adet, fiyat DOMParser ile çözülür. */
+const FORM4_CODE={ P:['Alım','up'], S:['Satış','down'], M:['Opsiyon Kullanımı','neutral'],
+  A:['Hisse Ödülü','neutral'], F:['Vergi İçin Satış','neutral'], G:['Hediye','neutral'],
+  D:['Elden Çıkarma','down'], C:['Dönüştürme','neutral'], X:['Opsiyon Kullanımı','neutral'] };
+async function fetchInsiders(cik, myGen){
+  const card=document.getElementById('insiderCard'), box=document.getElementById('insiderBody');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Form 4 bildirimleri yükleniyor…</div>';
+  try{
+    const sub=await fetch('/sec/submissions/CIK'+cik+'.json').then(r=>r.ok?r.json():null);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const rec=sub&&sub.filings&&sub.filings.recent;
+    if(!rec){ box.innerHTML='<div class="hint">Bildirim verisi alınamadı.</div>'; return; }
+    const picks=[];
+    for(let i=0;i<rec.form.length && picks.length<6;i++){
+      if(rec.form[i]==='4') picks.push({ acc:rec.accessionNumber[i], date:rec.filingDate[i], doc:rec.primaryDocument[i] });
+    }
+    if(!picks.length){ box.innerHTML='<div class="hint">Yakın tarihli Form 4 bildirimi yok.</div>'; return; }
+    const cikNum=parseInt(cik,10);
+    const results=await Promise.all(picks.map(async p=>{
+      try{
+        const folder=p.acc.replace(/-/g,'');
+        const raw=(p.doc||'').replace(/^.*\//,'');          // "xslF345X06/form4.xml" → "form4.xml"
+        const url='/secw/Archives/edgar/data/'+cikNum+'/'+folder+'/'+raw;
+        const xml=await fetch(url).then(r=>r.ok?r.text():'');
+        if(!xml) return null;
+        const doc=new DOMParser().parseFromString(xml,'text/xml');
+        const gv=(el,tag)=>{ const n=el.querySelector(tag); if(!n) return ''; const v=n.querySelector('value'); return (v?v.textContent:n.textContent).trim(); };
+        const name=gv(doc,'rptOwnerName');
+        const title=gv(doc,'officerTitle') || (gv(doc,'isDirector')==='1'?'Yönetim Kurulu Üyesi':'') || (gv(doc,'isTenPercentOwner')==='1'?'%10+ Ortak':'');
+        const tx=doc.querySelector('nonDerivativeTransaction');
+        let code='', shares=null, price=null, tdate=p.date;
+        if(tx){
+          code=gv(tx,'transactionCode');
+          shares=parseFloat(gv(tx,'transactionShares'))||null;
+          price=parseFloat(gv(tx,'transactionPricePerShare'))||null;
+          tdate=gv(tx,'transactionDate')||p.date;
+        }
+        const view='https://www.sec.gov/Archives/edgar/data/'+cikNum+'/'+folder+'/'+p.doc;
+        return { name, title, code, shares, price, tdate, view };
+      }catch(e){ return null; }
+    }));
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const rows=results.filter(Boolean);
+    if(!rows.length){ box.innerHTML='<div class="hint">Form 4 belgeleri okunamadı.</div>'; return; }
+    box.innerHTML=`<table><thead><tr><th>Tarih</th><th>Kişi</th><th>İşlem</th><th>Adet</th><th>Fiyat</th><th></th></tr></thead><tbody>
+      ${rows.map(r=>{
+        const [ad,cls]=FORM4_CODE[r.code]||[r.code||'—','neutral'];
+        return `<tr>
+          <td style="white-space:nowrap">${fmtDate(r.tdate)}</td>
+          <td style="white-space:normal">${safeHTML(r.name)}${r.title?`<br><span class="ratio-formula">${safeHTML(r.title)}</span>`:''}</td>
+          <td class="${cls}">${ad}</td>
+          <td>${r.shares!=null?Math.round(r.shares).toLocaleString('tr-TR'):'—'}</td>
+          <td>${r.price!=null?'$'+r.price.toFixed(2):'—'}</td>
+          <td><a href="${r.view}" target="_blank" rel="noopener">SEC'te gör →</a></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>
+    <div class="hint" style="margin-top:8px"><b>Alım (P)</b> açık piyasadan gerçek alımdır (en güçlü sinyal); Hisse Ödülü/Opsiyon Kullanımı rutin ödemedir, Vergi İçin Satış otomatiktir. Kaynak: SEC EDGAR Form 4.</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">Form 4 alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---- Fiyat Grafiği (etkileşimli SVG, bağımsız) ---- */
+let CHART_STATE={ sym:null, ysym:null, range:'1y', filedD0:null, filedD1:null };
+const CHART_RANGE_MAP={'1mo':{yrange:'1mo'},'6mo':{yrange:'6mo'},'1y':{yrange:'1y'},'5y':{yrange:'5y'}};
+async function fetchPriceChart(sym, ysym, myGen){
+  const card=document.getElementById('chartCard');
+  if(!card) return;
+  CHART_STATE.sym=sym; CHART_STATE.ysym=ysym||sym;
+  CHART_STATE.filedD0=FIN&&FIN.filedD0; CHART_STATE.filedD1=FIN&&FIN.filedD1;
+  card.classList.remove('hidden');
+  document.querySelectorAll('#chartBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.r===CHART_STATE.range));
+  loadChartRange(myGen);
+}
+function setChartRange(r){ CHART_STATE.range=r; document.querySelectorAll('#chartBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.r===r)); loadChartRange(REQ_GEN); }
+async function loadChartRange(myGen){
+  const box=document.getElementById('chartBody'), info=document.getElementById('chartInfo');
+  box.innerHTML='<div class="hint">Grafik yükleniyor…</div>';
+  try{
+    const yr=CHART_RANGE_MAP[CHART_STATE.range].yrange;
+    const r=await fetch(`/price?s=${encodeURIComponent(CHART_STATE.ysym)}&range=${yr}`).then(x=>x.json());
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const res=r&&r.chart&&r.chart.result&&r.chart.result[0];
+    const ts=(res&&res.timestamp)||[];
+    let closes=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
+    if(res&&res.meta&&res.meta.currency==='GBp') closes=closes.map(c=>c==null?c:c/100);   // peni → pound
+    const pts=ts.map((t,i)=>[t*1000,closes[i]]).filter(p=>p[1]!=null);
+    if(pts.length<2){ box.innerHTML='<div class="hint">Bu dönem için grafik verisi bulunamadı.</div>'; return; }
+    drawPriceChart(box, pts);
+    const first=pts[0][1], last=pts[pts.length-1][1];
+    const ch=(last-first)/first*100;
+    info.innerHTML=`Dönem değişimi: <span class="${ch>=0?'up':'down'}">${ch>=0?'▲':'▼'} ${pct(ch)}</span>`;
+  }catch(e){ box.innerHTML='<div class="hint">Grafik alınamadı: '+e.message+'</div>'; }
+}
+function drawPriceChart(box, pts){
+  const W=680, H=220, padL=52, padR=14, padT=14, padB=26;
+  const xs=pts.map(p=>p[0]), ys=pts.map(p=>p[1]);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  const spanY=(maxY-minY)||Math.abs(maxY)||1;
+  const X=t=> padL + (maxX>minX ? (t-minX)/(maxX-minX) : 0)*(W-padL-padR);
+  const Y=v=> padT + (1-(v-minY)/spanY)*(H-padT-padB);
+  let path='M'+pts.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' L');
+  const areaPath=path+` L${X(xs[xs.length-1]).toFixed(1)},${(H-padB).toFixed(1)} L${X(xs[0]).toFixed(1)},${(H-padB).toFixed(1)} Z`;
+  const up = pts[pts.length-1][1]>=pts[0][1];
+  const col = up?'var(--good)':'var(--bad)';
+  // Bilanço açıklanma günleri işaretle (varsa, grafik aralığındaysa)
+  const markers=[CHART_STATE.filedD0, CHART_STATE.filedD1].filter(Boolean).map(d=>{
+    const t=new Date(d).getTime();
+    if(t<minX||t>maxX) return '';
+    const x=X(t);
+    return `<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${padT}" y2="${H-padB}" stroke="var(--gold)" stroke-width="1" stroke-dasharray="3,3"/>
+      <circle cx="${x.toFixed(1)}" cy="${padT}" r="3" fill="var(--gold)"><title>Bilanço açıklanma: ${fmtDate(d)}</title></circle>`;
+  }).join('');
+  // Y ekseni 4 çizgi + etiket
+  let grid='';
+  for(let i=0;i<=3;i++){ const v=minY+spanY*i/3; const y=Y(v); grid+=`<line x1="${padL}" x2="${W-padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="4" y="${(y+4).toFixed(1)}" font-size="10" fill="var(--muted)">${fmtUSD(v)}</text>`; }
+  const fXAxis=new Intl.DateTimeFormat('tr-TR',{day:'2-digit',month:'short'});
+  const xLabels=[0,Math.floor(pts.length/2),pts.length-1].map(i=>{
+    const p=pts[i]; return `<text x="${X(p[0]).toFixed(1)}" y="${H-8}" font-size="10" fill="var(--muted)" text-anchor="middle">${fXAxis.format(new Date(p[0]))}</text>`;
+  }).join('');
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;background:var(--surface-2);border-radius:12px;border:1px solid var(--line)">
+    ${grid}
+    <path d="${areaPath}" fill="${col}" opacity="0.10"/>
+    <path d="${path}" fill="none" stroke="${col}" stroke-width="2"/>
+    ${markers}
+    ${xLabels}
+  </svg>
+  <div class="hint" style="margin-top:6px">📍 altın çizgi = bilançonun SEC'e açıklandığı gün. Kaynak: Yahoo Finance.</div>`;
+}
+
+/* ---- Sektör Karşılaştırması (TradingView tarayıcı API'si) ---- */
+async function fetchSectorComparison(sym, market, myGen, euOpt){
+  const card=document.getElementById('sectorCard'), box=document.getElementById('sectorBody'), sub=document.getElementById('sectorSub');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Sektör verisi yükleniyor…</div>';
+  try{
+    const scan = euOpt ? euOpt.scan : (market==='BIST' ? 'turkey' : 'america');
+    const cols=['name','description','sector','close','market_cap_basic','price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'];
+    // 1) Hissenin sektörünü öğren (ABD'de birden çok borsa öneki denenir; Avrupa'da borsa kesin bilindiğinden tek deneme)
+    const tickers = euOpt ? [euOpt.tv] : (market==='BIST' ? ['BIST:'+sym] : ['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym]);
+    const r1=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{method:'POST',body:JSON.stringify({symbols:{tickers},columns:cols})});
+    const j1=r1.ok?await r1.json():null;
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const me=j1&&j1.data&&j1.data.find(x=>x.d&&x.d[0]!=null);
+    if(!me || !me.d[2]){ box.innerHTML='<div class="hint">Bu hisse için sektör verisi bulunamadı.</div>'; return; }
+    const sector=me.d[2];
+    sub.innerHTML=`<b>${safeHTML(sector)}</b> sektöründeki en büyük şirketlerle karşılaştırma (piyasa değerine göre). Kaynak: TradingView.`;
+    // 2) Aynı sektördeki en büyük 8 şirket
+    const r2=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{method:'POST',body:JSON.stringify({
+      filter:[{left:'sector',operation:'equal',right:sector}], columns:cols,
+      sort:{sortBy:'market_cap_basic',sortOrder:'desc'}, range:[0,8]
+    })});
+    const j2=r2.ok?await r2.json():null;
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    let rows=(j2&&j2.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
+    if(!rows.some(d=>d[0]===sym)) rows.unshift(me.d);   // hisse listede yoksa başa ekle
+    const med=arr=>{ const v=arr.filter(x=>x!=null).sort((a,b)=>a-b); if(!v.length) return null; const m=Math.floor(v.length/2); return v.length%2?v[m]:(v[m-1]+v[m])/2; };
+    const medFK=med(rows.map(d=>d[5])), medPD=med(rows.map(d=>d[6])), medROE=med(rows.map(d=>d[7]));
+    // TradingView return_on_equity/net_margin zaten yüzde olarak döner (114.3 = %114.3) → tekrar ×100 yapma
+    const pp=v=>v==null?'—':v.toFixed(1)+'%';
+    const xx=v=>v==null?'—':v.toFixed(1)+'x';
+    const trRows=rows.slice(0,8).map(d=>{
+      const isMe=d[0]===sym;
+      return `<tr${isMe?' style="background:var(--surface-3)"':''}>
+        <td>${isMe?'<b>':''}${safeHTML(d[0])}${isMe?' ★</b>':''}</td>
+        <td>${fmtMcap(d[4])}</td>
+        <td>${xx(d[5])}</td>
+        <td>${xx(d[6])}</td>
+        <td>${pp(d[7])}</td>
+        <td>${pp(d[8])}</td>
+        <td>${fmtEmployees(d[9])}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Piyasa Değeri</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+      <tbody>${trRows}
+        <tr class="total"><td>Sektör Medyanı</td><td>—</td><td>${xx(medFK)}</td><td>${xx(medPD)}</td><td>${pp(medROE)}</td><td>—</td><td>—</td></tr>
+      </tbody></table>`;
+  }catch(e){ box.innerHTML='<div class="hint">Sektör verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---- Borsanın Devleri — piyasa değerine göre ilk 10 (TradingView scanner) ----
+   companiesmarketcap.com'un ülke/borsa sıralamasına eşdeğer, ama üçüncü taraf siteyi
+   kazımak yerine (statik yapı olsa da resmi API'si yok, sayfa yapısı/ToS zamanla değişebilir)
+   uygulamanın zaten güvenilir şekilde kullandığı TradingView scanner'ı — sektör
+   karşılaştırmasıyla AYNI uç nokta, yalnızca sektör filtresi olmadan piyasa değerine göre
+   sıralanmış tüm borsa. 17 pazarın (BIST/ABD/15 Avrupa borsası) hepsinde aynı şekilde çalışır. */
+async function fetchExchangeTop10(sym, market, myGen, euOpt){
+  const card=document.getElementById('top10Card'), box=document.getElementById('top10Body'), sub=document.getElementById('top10Sub');
+  if(!card) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Borsa verisi yükleniyor…</div>';
+  try{
+    const scan = euOpt ? euOpt.scan : (market==='BIST' ? 'turkey' : 'america');
+    const exchangeName = euOpt ? euOpt.country : (market==='BIST' ? 'Borsa İstanbul' : 'ABD Borsaları');
+    const cols=['name','description','close','market_cap_basic','price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'];
+    // is_primary=true → çapraz kotasyonlu yabancı devlerin (ör. Xetra'da işlem gören NVIDIA)
+    // yerel sıralamayı ele geçirmesini engeller; yalnızca o borsanın kendi birincil kotasyonlu
+    // şirketleri sayılır (bkz. EU_EXCHANGES üstündeki not — aynı prensip).
+    const filter=[{left:'is_primary',operation:'equal',right:true}];
+    if(euOpt && euOpt.tv) filter.push({left:'exchange',operation:'equal',right:euOpt.tv});
+    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{method:'POST',body:JSON.stringify({
+      columns:cols, filter, sort:{sortBy:'market_cap_basic',sortOrder:'desc'}, range:[0,10]
+    })});
+    const j=r.ok?await r.json():null;
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const rows=(j&&j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
+    if(!rows.length){ box.innerHTML='<div class="hint">Borsa verisi bulunamadı.</div>'; return; }
+    sub.innerHTML=`<b>${safeHTML(exchangeName)}</b>'da piyasa değerine göre en büyük 10 şirket. Kaynak: TradingView.`;
+    const pp=v=>v==null?'—':v.toFixed(1)+'%';
+    const xx=v=>v==null?'—':v.toFixed(1)+'x';
+    const trRows=rows.map((d,i)=>{
+      const isMe=d[0]===sym;
+      return `<tr${isMe?' style="background:var(--surface-3)"':''}>
+        <td>${i+1}</td>
+        <td>${isMe?'<b>':''}${safeHTML(d[0])}${isMe?' ★</b>':''} <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+        <td>${fmtMcap(d[3])}</td>
+        <td>${xx(d[4])}</td>
+        <td>${xx(d[5])}</td>
+        <td>${pp(d[6])}</td>
+        <td>${pp(d[7])}</td>
+        <td>${fmtEmployees(d[8])}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML=`<table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+      <tbody>${trRows}</tbody></table>
+      ${!rows.some(d=>d[0]===sym)?'<div class="hint" style="margin-top:8px">Aranan hisse ilk 10\'da değil.</div>':''}`;
+  }catch(e){ box.innerHTML='<div class="hint">Borsa verisi alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---- İzleme Listesi (localStorage) ---- */
+const WATCH_KEY='bilanco_watchlist';
+function getWatchlist(){ try{ return JSON.parse(localStorage.getItem(WATCH_KEY)||'[]'); }catch(e){ return []; } }
+function saveWatchlist(list){ try{ localStorage.setItem(WATCH_KEY, JSON.stringify(list)); }catch(e){} }
+function isWatched(sym, market){ return getWatchlist().some(w=>w.sym===sym && w.market===market); }
+/* Avrupa'da tek başına ticker kodu borsalar arası çakışabilir (ör. "MC") → izleme listesi
+   anahtarı olarak kod+eki birlikte kullanılır ("SIE.DE"); diğer pazarlarda salt kod yeterli. */
+function watchSymFor(){ return FIN.market==='EU' ? FIN.ticker+'.'+FIN.euInfo.suffix : FIN.ticker; }
+function updateWatchStar(){
+  const btn=document.getElementById('watchStar');
+  if(!btn || !FIN) return;
+  btn.classList.remove('hidden');
+  const on=isWatched(watchSymFor(), FIN.market);
+  btn.innerHTML = on ? '★ Listemde' : '☆ Listeme Ekle';
+  btn.classList.toggle('primary', on);
+}
+function toggleWatch(){
+  if(!FIN) return;
+  let list=getWatchlist();
+  const mySym=watchSymFor();
+  const key=w=>w.sym===mySym && w.market===FIN.market;
+  if(list.some(key)) list=list.filter(w=>!key(w));
+  else list.unshift({ sym:mySym, market:FIN.market,
+    ysym: FIN.market==='BIST'?FIN.ticker+'.IS':(FIN.market==='EU'?mySym:FIN.ticker),
+    ccySym: FIN.market==='EU'?CURSYM:undefined });
+  saveWatchlist(list.slice(0,20));
+  updateWatchStar();
+  renderWatchlist();
+}
+async function renderWatchlist(){
+  const card=document.getElementById('watchCard'), box=document.getElementById('watchBody');
+  if(!card) return;
+  const list=getWatchlist();
+  if(!list.length){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Yükleniyor…</div>';
+  const rows=await Promise.all(list.map(async w=>{
+    try{
+      const r=await fetch(`/price?s=${encodeURIComponent(w.ysym)}&range=1d`).then(x=>x.json());
+      const meta=r&&r.chart&&r.chart.result&&r.chart.result[0]&&r.chart.result[0].meta;
+      const live=meta&&meta.regularMarketPrice, prevC=meta&&meta.chartPreviousClose;
+      const ch=(live!=null&&prevC)?(live-prevC)/prevC*100:null;
+      return { ...w, live, ch };
+    }catch(e){ return { ...w, live:null, ch:null }; }
+  }));
+  const ccy=w=> w.ccySym!=null ? w.ccySym : (w.market==='BIST'?'₺':'$');
+  const marketLbl={BIST:'BIST', US:'ABD', EU:'Avrupa'};
+  box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Pazar</th><th>Fiyat</th><th>Günlük</th><th></th></tr></thead><tbody>
+    ${rows.map(w=>`<tr>
+      <td style="cursor:pointer" onclick="watchGo('${w.sym}','${w.market}')"><b>${safeHTML(w.sym)}</b></td>
+      <td class="ratio-formula">${marketLbl[w.market]||w.market}</td>
+      <td>${w.live!=null?ccy(w)+w.live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
+      <td class="${w.ch==null?'neutral':w.ch>0?'up':'down'}">${w.ch==null?'—':(w.ch>0?'▲ ':'▼ ')+pct(w.ch)}</td>
+      <td class="row-actions"><button class="delrow" onclick="event.stopPropagation();removeWatch('${w.sym}','${w.market}')" title="Kaldır">✕</button></td>
+    </tr>`).join('')}
+  </tbody></table>`;
+}
+function watchGo(sym, market){
+  // BIST kodu ".IS" ile zorlanır; EU kaydı zaten "SIE.DE" gibi eki üstünde taşır; ABD olduğu gibi.
+  document.getElementById('ticker').value = market==='BIST' ? sym+'.IS' : sym;
+  fetchTicker();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function removeWatch(sym, market){
+  saveWatchlist(getWatchlist().filter(w=>!(w.sym===sym && w.market===market)));
+  updateWatchStar();
+  renderWatchlist();
+}
+
+/* ---- Nakit Akışı & FCF ---- */
+function renderCashFlow(){
+  const card=document.getElementById('cashCard'), grid=document.getElementById('cashKpis'), note=document.getElementById('cashNote');
+  const CF=FIN && FIN.income && FIN.income._cash;
+  if(!CF || !Object.keys(CF.opCF||{}).length){ if(card) card.classList.add('hidden'); return; }
+  const dates=Object.keys(CF.opCF).sort().reverse();
+  const C0=dates[0], C1=dates[1]||null;
   const v=(m,d)=> (d && m && (d in m)) ? m[d] : null;
-
-  const op0=v(C.opCF,R0),   op1=v(C.opCF,R1);
-  const inv0=v(C.invCF,R0), inv1=v(C.invCF,R1);
-  const fin0=v(C.finCF,R0), fin1=v(C.finCF,R1);
-  const cap0=v(C.capex,R0), cap1=v(C.capex,R1);
-  const dep0=v(C.dep,R0),   dep1=v(C.dep,R1);
-  const fcf0=(op0!=null)? op0-(cap0||0):null, fcf1=(op1!=null)? op1-(cap1||0):null;
-  const rev0=v(I.revenue,R0), rev1=v(I.revenue,R1);
-  const fcfM0=(rev0&&fcf0!=null)? fcf0/rev0:null, fcfM1=(rev1&&fcf1!=null)? fcf1/rev1:null;
-  const pp=x=>(x==null?'—':(x*100).toFixed(1)+'%');
-
-  const kpi=(lbl,c,p,fn,color)=>{
+  // kpi: mode 'good' = artış yeşil; 'plain' = renk yok (yatırım/finansman NA'da negatif normaldir)
+  const kpi=(lbl,c,p,mode,fmtFn)=>{
+    fmtFn=fmtFn||fmtAbbr;
     if(c==null) return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">—</div></div>`;
     let delta='';
-    if(p!=null && p!==0){ const ch=(c-p)/Math.abs(p)*100;
-      const cls=(color===false)?'neutral':(Math.abs(ch)<0.05?'neutral':(ch>0?'up':'down'));
+    if(p!=null && p!==0){
+      const ch=(c-p)/Math.abs(p)*100;
+      const cls=mode==='plain'?'neutral':(Math.abs(ch)<0.05?'neutral':(ch>0?'up':'down'));
       const ar=Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
-      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fn(p)})</span></div>`; }
-    const valStyle=(fn===fmtAbbr && c<0)?'style="color:var(--bad)"':'';
-    return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val" ${valStyle}>${fn(c)}</div>${delta}</div>`;
+      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fmtFn(p)})</span></div>`;
+    }
+    return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${fmtFn(c)}</div>${delta}</div>`;
   };
-  kbox.innerHTML=[
-    kpi('Faaliyet Nakit Akışı', op0, op1, fmtAbbr),
-    kpi('Serbest Nakit Akışı (FCF)', fcf0, fcf1, fmtAbbr),
-    kpi('FCF Marjı', fcfM0, fcfM1, pp),
-    kpi('Sermaye Harcaması (Capex)', cap0, cap1, fmtAbbr, false),
-  ].join('');
-
-  const rows=[
-    ['Faaliyetlerden Nakit Akışı', op0, op1, true, false],
-    ['Yatırım Faaliyetlerinden', inv0, inv1, false, false],
-    ['Finansman Faaliyetlerinden', fin0, fin1, false, false],
-    ['(−) Sermaye Harcaması (Capex)', cap0!=null?-cap0:null, cap1!=null?-cap1:null, false, false],
-    ['Serbest Nakit Akışı (FCF)', fcf0, fcf1, true, true],
-    ['Amortisman (D&A)', dep0, dep1, false, false],
+  const cells=[
+    kpi('Faaliyet Nakit Akışı', v(CF.opCF,C0), v(CF.opCF,C1), 'good'),
+    kpi('Yatırım Nakit Akışı', v(CF.invCF,C0), v(CF.invCF,C1), 'plain'),
+    kpi('Finansman Nakit Akışı', v(CF.finCF,C0), v(CF.finCF,C1), 'plain'),
+    kpi('Serbest Nakit Akış (FCF)', v(CF.fcf,C0), v(CF.fcf,C1), 'good'),
   ];
-  body.innerHTML=rows.map(([lbl,c,p,colored,bold])=>{
-    let ch='—';
-    if(c!=null&&p!=null&&p!==0){ const dd=(c-p)/Math.abs(p)*100;
-      const cls=colored?(Math.abs(dd)<0.05?'neutral':(dd>0?'up':'down')):'neutral';
-      ch=`<span class="${cls}">${pct(dd)}</span>`; }
-    return `<tr ${bold?'style="font-weight:700"':''}><td>${lbl}</td>
-      <td><b>${c==null?'—':fmtAbbr(c)}</b></td><td>${p==null?'—':fmtAbbr(p)}</td><td>${ch}</td></tr>`;
-  }).join('');
+  // FCF Marjı: aynı tarihte gelir varsa (ABD yıllık↔yıllık; BIST her modda hizalı)
+  const rev0=v(FIN.income.revenue,C0), rev1=v(FIN.income.revenue,C1);
+  const fm0=(rev0&&v(CF.fcf,C0)!=null)?v(CF.fcf,C0)/rev0:null;
+  const fm1=(rev1&&v(CF.fcf,C1)!=null)?v(CF.fcf,C1)/rev1:null;
+  if(fm0!=null) cells.push(kpi('FCF Marjı (FCF/Gelir)', fm0, fm1, 'good', x=>(x*100).toFixed(1)+'%'));
+  grid.innerHTML=cells.join('');
+  const isQ = FIN.market==='BIST' && FIN.mode==='quarter' && /03-31|06-30|09-30/.test(C0);
+  note.textContent='Dönem: '+fmtDate(C0)+(C1?' ↔ '+fmtDate(C1):'')+(FIN.market!=='BIST'?' (ABD nakit akışları her zaman yıllıktır)':(isQ?' (çeyreklik)':''));
+  card.classList.remove('hidden');
+}
+
+/* ---- Sağlık Karnesi: DuPont · Piotroski F-Score · Altman Z' ---- */
+function renderHealth(T){
+  const card=document.getElementById('healthCard'), box=document.getElementById('healthBody');
+  if(!card||!box||!FIN) return;
+  const D=FIN.balance, I=FIN.income, CF=I._cash||{};
+  const bd=Object.keys(D.assets||{}).sort().reverse();
+  const rd=Object.keys(I.revenue||{}).sort().reverse();
+  const B0=bd[0], B1=bd[1], R0=rd[0], R1=rd[1];
+  if(!B0||!R0){ card.classList.add('hidden'); return; }
+  const g=(m,d)=> (d && m && (d in m)) ? m[d] : null;
+  const isBank = FIN.bankGroup==='UFRS';
+  // Çeyreklik modda akış kalemleri yıllıklandırılır (×4) — DuPont devir hızı ve Altman için
+  const ann = FIN.mode==='quarter' ? 4 : 1;
+
+  const eq=(d)=>{ const a=g(D.assets,d); return a!=null? a-liabTotal(D,d) : null; };
+  const sd=(a,b)=> (a==null||b==null||b===0)?null:a/b;
+
+  /* --- DuPont: ROE = Net Marj × Varlık Devir Hızı × Kaldıraç Çarpanı --- */
+  const dupont=(bDate,rDate)=>{
+    const ni=g(I.netIncome,rDate), rev=g(I.revenue,rDate), as=g(D.assets,bDate), e=eq(bDate);
+    return { nm:sd(ni,rev), at:sd(rev!=null?rev*ann:null,as), em:sd(as,e),
+             roe:sd(ni!=null?ni*ann:null,e) };
+  };
+  const d0=dupont(B0,R0), d1=(B1&&R1)?dupont(B1,R1):null;
+  const pp=x=> x==null?'—':(x*100).toFixed(1)+'%';
+  const xx=x=> x==null?'—':x.toFixed(2)+'x';
+  const dpRow=(lbl,c,p,fmt)=>`<tr><td>${lbl}</td><td><b>${fmt(c)}</b></td><td>${p!=null?fmt(p):'—'}</td></tr>`;
+  let html=`<div style="font-weight:700;color:var(--ink);margin-bottom:6px">DuPont Analizi — ROE'nin Kaynağı</div>
+  <table><thead><tr><th>Bileşen</th><th>Cari</th><th>Önceki</th></tr></thead><tbody>
+    ${dpRow('Net Kâr Marjı (NI/Gelir)', d0.nm, d1&&d1.nm, pp)}
+    ${dpRow('Varlık Devir Hızı (Gelir/Varlık)', d0.at, d1&&d1.at, xx)}
+    ${dpRow('Kaldıraç Çarpanı (Varlık/Özkaynak)', d0.em, d1&&d1.em, xx)}
+    ${dpRow('= Özkaynak Kârlılığı (ROE)', d0.roe, d1&&d1.roe, pp)}
+  </tbody></table>
+  ${FIN.mode==='quarter'?'<div class="hint" style="margin-top:4px">Çeyreklik akış kalemleri yıllıklandırıldı (×4).</div>':''}`;
+
+  /* --- Piotroski F-Score (9 kriter; hesaplanamayan kriter kapsam dışı kalır) --- */
+  const cfDates=Object.keys(CF.opCF||{}).sort().reverse();
+  const CF0=cfDates[0];
+  const niAtCF=g(I.netIncome,CF0);   // ABD çeyreklik modda nakit yıllık → NI hizasızsa kriter düşer
+  const checks=[
+    ['Aktif kârlılığı pozitif (ROA > 0)', (()=>{ const r=sd(g(I.netIncome,R0),g(D.assets,B0)); return r==null?null:r>0; })()],
+    ['Faaliyet nakit akışı pozitif', CF0?(g(CF.opCF,CF0)>0):null],
+    ['ROA iyileşiyor', (()=>{ if(!B1||!R1) return null; const a=sd(g(I.netIncome,R0),g(D.assets,B0)), b=sd(g(I.netIncome,R1),g(D.assets,B1)); return (a==null||b==null)?null:a>b; })()],
+    ['Nakit akışı kârdan büyük (kalite)', (CF0&&niAtCF!=null)?(g(CF.opCF,CF0)>niAtCF):null],
+    ['Kaldıraç azalıyor (Borç/Varlık)', (()=>{ if(!B1) return null; const l0=sd(liabTotal(D,B0),g(D.assets,B0)), l1=sd(liabTotal(D,B1),g(D.assets,B1)); return (l0==null||l1==null)?null:l0<l1; })()],
+    ['Cari oran iyileşiyor', (()=>{ if(!B1||isBank) return null; const c0=sd(g(D.assetsCur,B0),g(D.liabCur,B0)), c1=sd(g(D.assetsCur,B1),g(D.liabCur,B1)); return (c0==null||c1==null)?null:c0>c1; })()],
+    ['Sermaye sulandırması yok (ödenmiş sermaye ↑ değil)', (()=>{ if(!B1) return null; const s0=g(D.common,B0), s1=g(D.common,B1); return (s0==null||s1==null)?null:s0<=s1; })()],
+    ['Brüt marj iyileşiyor', (()=>{ if(!R1) return null; const m0=sd(g(I.grossProfit,R0),g(I.revenue,R0)), m1=sd(g(I.grossProfit,R1),g(I.revenue,R1)); return (m0==null||m1==null)?null:m0>m1; })()],
+    ['Varlık devir hızı iyileşiyor', (()=>{ if(!B1||!R1) return null; const a=sd(g(I.revenue,R0),g(D.assets,B0)), b=sd(g(I.revenue,R1),g(D.assets,B1)); return (a==null||b==null)?null:a>b; })()],
+  ];
+  const evaluable=checks.filter(c=>c[1]!==null);
+  const score=evaluable.filter(c=>c[1]===true).length;
+  const denom=evaluable.length;
+  const sCls= score>=7?'good': score>=4?'warn':'bad';
+  html+=`<div style="font-weight:700;color:var(--ink);margin:18px 0 6px">Piotroski F-Score
+    <span class="pill ${sCls}" style="margin-left:8px;font-size:14px">${score} / ${denom}</span>
+    ${denom<9?`<span class="hint" style="font-weight:400"> · ${9-denom} kriter veri yetersizliğinden kapsam dışı</span>`:''}</div>`;
+  html+=checks.map(([lbl,ok])=>`<div style="padding:3px 0;font-size:12.5px;color:var(--ink-2)">
+    ${ok===null?'<span class="neutral">—</span>':ok?'<span class="up">✓</span>':'<span class="down">✗</span>'} ${lbl}</div>`).join('');
+
+  /* --- Altman Z'-Score (defter değeri sürümü; banka/sigortaya uygulanmaz) --- */
+  if(!isBank){
+    const TA=g(D.assets,B0), TL=liabTotal(D,B0);
+    const wc=(g(D.assetsCur,B0)!=null&&g(D.liabCur,B0)!=null)?g(D.assetsCur,B0)-g(D.liabCur,B0):null;
+    const re=g(D.retained,B0), ebit=g(I.opIncome,R0), sales=g(I.revenue,R0), be=eq(B0);
+    if(TA && TL && wc!=null && ebit!=null && sales!=null && be!=null){
+      const z=0.717*(wc/TA)+0.847*((re||0)/TA)+3.107*(ebit*ann/TA)+0.420*(be/TL)+0.998*(sales*ann/TA);
+      const zone= z>2.9?['Güvenli Bölge','good'] : z>=1.23?['Gri Bölge','warn'] : ['Riskli Bölge','bad'];
+      html+=`<div style="font-weight:700;color:var(--ink);margin:18px 0 6px">Altman Z'-Score
+        <span class="pill ${zone[1]}" style="margin-left:8px;font-size:14px">${z.toFixed(2)} · ${zone[0]}</span></div>
+      <div class="hint">Z' > 2,9 güvenli · 1,23–2,9 gri · &lt; 1,23 yüksek iflas riski. (Defter değeri sürümü${re==null?'; dağıtılmamış kârlar verisi yok, 0 alındı':''}${FIN.mode==='quarter'?'; çeyreklik akışlar yıllıklandırıldı':''}.)</div>`;
+    }else{
+      html+=`<div class="hint" style="margin-top:14px">Altman Z' için gerekli kalemler eksik.</div>`;
+    }
+  }else{
+    html+=`<div class="hint" style="margin-top:14px">Altman Z-Score ve likidite bazlı kriterler banka/sigorta bilançolarına uygulanmaz.</div>`;
+  }
+  box.innerHTML=html;
   card.classList.remove('hidden');
 }
 
@@ -1774,7 +3104,7 @@ function fmtShort(n){
 function miniBarChart(title, series){
   const entries=Object.keys(series||{}).map(d=>[d,series[d]]).filter(e=>typeof e[1]==='number');
   entries.sort((a,b)=> a[0]<b[0]?-1:1);
-  const data=entries.slice(-6);
+  const data=entries.slice(-6);                 // son 6 dönem
   if(data.length<2) return '';
   const W=330,H=170, padT=22, padB=28;
   const vals=data.map(d=>d[1]);
@@ -1803,6 +3133,7 @@ function renderTrends(){
   const charts=[
     ['Gelir (Hasılat)', FIN.income.revenue],
     ['Net Kâr', FIN.income.netIncome],
+    ['Serbest Nakit Akış (FCF)', FIN.income._cash && FIN.income._cash.fcf],
     ['Toplam Varlık', FIN.balance.assets],
     ['Özkaynak', FIN.balance.equity],
     ['Toplam Yükümlülük', FIN.balance.liab],
@@ -1834,7 +3165,7 @@ function renderKPIs(T){
   ];
   document.getElementById('kpis').innerHTML = cards.map(([lbl,cur,prev,inv])=>{
     const ch = prev!==0 ? (cur-prev)/Math.abs(prev)*100 : (cur!==0?100:0);
-    const goodDir = inv ? ch<0 : ch>0;
+    const goodDir = inv ? ch<0 : ch>0; // borç için azalış iyi
     const cls = Math.abs(ch)<0.05?'neutral':(goodDir?'up':'down');
     const arrow = Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
     return `<div class="kpi"><div class="lbl">${lbl}</div>
@@ -1859,6 +3190,7 @@ function renderRatios(T){
     };
   }
   const c=build('cur'), pr=build('prev');
+  // [ad, formül, curVal, prevVal, biçim, eşik fonksiyonu(durum)]
   const defs=[
     ['Cari Oran','Dönen V. / KV Yük.', c.cari, pr.cari, 'x', v=> v>=1.5?'good':v>=1?'warn':'bad'],
     ['Asit-Test (Likidite)','(Dönen V. − Stok) / KV Yük.', c.asit, pr.asit, 'x', v=> v>=1?'good':v>=0.7?'warn':'bad'],
@@ -1894,10 +3226,10 @@ function renderVariance(d){
   rows.sort((a,b)=>Math.abs(b.dv)-Math.abs(a.dv));
   const top=rows.slice(0,8);
   document.getElementById('varBody').innerHTML = top.map(r=>{
-    const inv = CAT_GROUP[r.cat]!=='asset';
+    const inv = CAT_GROUP[r.cat]!=='asset'; // yükümlülük/özkaynak artışı yorumu farklı
     const fav = inv ? r.dv<0 : r.dv>0;
     const dir = Math.abs(r.dp)<0.05?'neutral':(fav?'up':'down');
-    const tag = r.dv>0?'Artış':'Azalış';
+    const tag = CAT_GROUP[r.cat]==='asset' ? (r.dv>0?'Artış':'Azalış') : (r.dv>0?'Artış':'Azalış');
     return `<tr>
       <td>${r.name} <span class="ratio-formula">(${CATS[r.cat]})</span></td>
       <td>${fmtAbbr(r.cur)}</td><td>${fmtAbbr(r.prev)}</td>
@@ -1939,6 +3271,7 @@ function renderFlags(d,T){
   const borcOz=c.ozkaynak?c.toplamYuk/c.ozkaynak:null;
   const ozkOran=c.toplamV?c.ozkaynak/c.toplamV:null;
 
+  // Likidite
   if(cari!==null){
     if(cari<1) add('bad','Likidite riski yüksek',`Cari oran ${cari.toFixed(2)}x — dönen varlıklar kısa vadeli borçları karşılamıyor. Nakit akışı baskısı olabilir.`);
     else if(cari<1.5) add('warn','Likidite sınırda',`Cari oran ${cari.toFixed(2)}x. 1,5x üzeri daha güvenli kabul edilir.`);
@@ -1946,6 +3279,7 @@ function renderFlags(d,T){
   }
   if(asit!==null && asit<0.7) add('warn','Stoğa bağımlılık',`Asit-test ${asit.toFixed(2)}x. Likidite büyük ölçüde stoklara bağlı; stok devri yavaşsa risk artar.`);
 
+  // Kaldıraç
   if(borcOz!==null){
     if(borcOz>2) add('bad','Yüksek borçluluk',`Borç/Özkaynak ${borcOz.toFixed(2)}x — özkaynağın 2 katından fazla borç. Faiz/kur şoklarına kırılgan.`);
     else if(borcOz>1) add('warn','Orta düzey kaldıraç',`Borç/Özkaynak ${borcOz.toFixed(2)}x. Borç yükü yakından izlenmeli.`);
@@ -1953,13 +3287,16 @@ function renderFlags(d,T){
   }
   if(ozkOran!==null && ozkOran<0.25) add('bad','İnce özkaynak tabanı',`Özkaynak oranı %${(ozkOran*100).toFixed(0)} — varlıkların çok büyük kısmı borçla finanse ediliyor.`);
 
+  // Net işletme sermayesi
   if(c.netSermaye<0) add('bad','Negatif işletme sermayesi',`Net işletme sermayesi ${fmtAbbr(c.netSermaye)} ${CUR} — kısa vadeli borçlar dönen varlıkları aşıyor.`);
   else if(p.netSermaye!==0 && c.netSermaye<p.netSermaye*0.7) add('warn','İşletme sermayesi eridi',`Net işletme sermayesi ${fmtAbbr(p.netSermaye)} → ${fmtAbbr(c.netSermaye)} ${CUR}'ye geriledi.`);
 
+  // KV kredi artışı
   const kvKredi=d.filter(r=>/banka kred|kredi/i.test(r.name)&&r.cat==='liab_current');
   const kvK=kvKredi.reduce((a,r)=>a+r.cur,0), kvKp=kvKredi.reduce((a,r)=>a+r.prev,0);
   if(kvKp>0 && kvK>kvKp*1.5) add('warn','Kısa vadeli kredi sıçraması',`Kısa vadeli banka kredileri ${fmtAbbr(kvKp)} → ${fmtAbbr(kvK)} ${CUR} (%${((kvK/kvKp-1)*100).toFixed(0)} artış). Yeniden finansman riski.`);
 
+  // Alacak / stok şişmesi
   const checkBloat=(rx,label)=>{
     const it=d.filter(r=>rx.test(r.name)&&CAT_GROUP[r.cat]==='asset');
     const cv=it.reduce((a,r)=>a+r.cur,0), pv=it.reduce((a,r)=>a+r.prev,0);
@@ -1970,13 +3307,16 @@ function renderFlags(d,T){
   checkBloat(/alacak/i,'Ticari alacaklar');
   checkBloat(/stok/i,'Stoklar');
 
+  // Nakit erimesi
   if(p.nakit>0 && c.nakit<p.nakit*0.6) add('warn','Nakit pozisyonu zayıfladı',`Nakit ve benzerleri ${fmtAbbr(p.nakit)} → ${fmtAbbr(c.nakit)} ${CUR}'ye düştü (%${((1-c.nakit/p.nakit)*100).toFixed(0)} azalış).`);
 
+  // Özkaynak büyümesi (olumlu)
   if(p.ozkaynak>0 && c.ozkaynak>p.ozkaynak*1.05) add('good','Özkaynak güçlendi',`Özkaynak ${fmtAbbr(p.ozkaynak)} → ${fmtAbbr(c.ozkaynak)} ${CUR}'ye yükseldi (kârlılık/sermaye katkısı).`);
 
   if(F.length===0) add('good','Belirgin risk işareti yok','Girilen verilere göre eşikleri aşan kritik bir sinyal bulunamadı.');
 
   const ic={bad:'⛔',warn:'⚠️',good:'✅'};
+  // önce kötüler
   F.sort((a,b)=>({bad:0,warn:1,good:2}[a.lvl]-{bad:0,warn:1,good:2}[b.lvl]));
   document.getElementById('flags').innerHTML = F.map(f=>
     `<div class="flag ${f.lvl}"><div class="ic">${ic[f.lvl]}</div>
@@ -1985,7 +3325,10 @@ function renderFlags(d,T){
 
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
+  startMarketStrip();   // üst piyasa şeridi (60 sn'de bir yenilenir)
   loadSample();
+  renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
+  // Bilanço Verisi'nde değer/kategori değişince cari hücreleri anında yeniden renklendir
   const body=document.getElementById('inputBody');
   body.addEventListener('input', colorInputRows);
   body.addEventListener('change', colorInputRows);
