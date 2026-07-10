@@ -2824,27 +2824,43 @@ async function fetchSectorComparison(sym, market, myGen, euOpt){
     if(myGen!=null && myGen!==REQ_GEN) return;
     let rows=(j2&&j2.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
     if(!rows.some(d=>d[0]===sym)) rows.unshift(me.d);   // hisse listede yoksa başa ekle
+    const shown=rows.slice(0,8);
     const med=arr=>{ const v=arr.filter(x=>x!=null).sort((a,b)=>a-b); if(!v.length) return null; const m=Math.floor(v.length/2); return v.length%2?v[m]:(v[m-1]+v[m])/2; };
     const medFK=med(rows.map(d=>d[5])), medPD=med(rows.map(d=>d[6])), medROE=med(rows.map(d=>d[7]));
     // TradingView return_on_equity/net_margin zaten yüzde olarak döner (114.3 = %114.3) → tekrar ×100 yapma
     const pp=v=>v==null?'—':v.toFixed(1)+'%';
     const xx=v=>v==null?'—':v.toFixed(1)+'x';
-    const trRows=rows.slice(0,8).map(d=>{
+    // En iyi değeri yeşille vurgula (tabloda gösterilen satırlar arasında). dir=-1 düşük iyi
+    // (F/K, PD/DD — ucuzluk), dir=1 yüksek iyi (ROE, Net Marj — kârlılık). Negatif F/K (zarar
+    // eden şirket) "en ucuz" sayılmasın diye F/K'de yalnız pozitif değerler karşılaştırılır.
+    // Tüm değerler eşitse (veya karşılaştıracak yeterli veri yoksa) hiçbir hücre vurgulanmaz.
+    const bestOf=(arr,dir)=>{
+      const v=arr.filter(x=>x!=null && (dir>0 || x>0));
+      if(v.length<2) return null;
+      const best=dir>0?Math.max(...v):Math.min(...v);
+      const worst=dir>0?Math.min(...v):Math.max(...v);
+      return best!==worst?best:null;
+    };
+    const bestFK=bestOf(shown.map(d=>d[5]),-1), bestPD=bestOf(shown.map(d=>d[6]),-1);
+    const bestROE=bestOf(shown.map(d=>d[7]),1), bestNM=bestOf(shown.map(d=>d[8]),1);
+    const cellCls=(v,best)=> (v!=null && best!=null && v===best) ? ' class="up"' : '';
+    const trRows=shown.map(d=>{
       const isMe=d[0]===sym;
       return `<tr${isMe?' style="background:var(--surface-3)"':''}>
         <td>${isMe?'<b>':''}${safeHTML(d[0])}${isMe?' ★</b>':''}</td>
         <td>${fmtMcap(d[4])}</td>
-        <td>${xx(d[5])}</td>
-        <td>${xx(d[6])}</td>
-        <td>${pp(d[7])}</td>
-        <td>${pp(d[8])}</td>
+        <td${cellCls(d[5],bestFK)}>${xx(d[5])}</td>
+        <td${cellCls(d[6],bestPD)}>${xx(d[6])}</td>
+        <td${cellCls(d[7],bestROE)}>${pp(d[7])}</td>
+        <td${cellCls(d[8],bestNM)}>${pp(d[8])}</td>
         <td>${fmtEmployees(d[9])}</td>
       </tr>`;
     }).join('');
     box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Piyasa Değeri</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
       <tbody>${trRows}
         <tr class="total"><td>Sektör Medyanı</td><td>—</td><td>${xx(medFK)}</td><td>${xx(medPD)}</td><td>${pp(medROE)}</td><td>—</td><td>—</td></tr>
-      </tbody></table>`;
+      </tbody></table>
+      <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span> = gösterilen şirketler arasında o metrikte en iyi değer (F/K ve PD/DD'de en düşük, ROE ve Net Marj'da en yüksek).</div>`;
   }catch(e){ box.innerHTML='<div class="hint">Sektör verisi alınamadı: '+e.message+'</div>'; }
 }
 
