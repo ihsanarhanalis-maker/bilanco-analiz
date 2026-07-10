@@ -391,11 +391,15 @@ http.createServer((req, res) => {
   // --- Investing.com TAM ekonomik takvim köprüsü (Türkçe isim + Investing'in kendi önem
   //     yıldızları + kendi olumlu/olumsuz renk sınıfları). Investing'in sayfa AJAX ucu;
   //     X-Requested-With + Referer başlıkları ŞART, tarayıcıdan CORS ile çağrılamaz →
-  //     sunucu köprüsü. c=US→ülke 5, TR→63; tab=today/tomorrow/yesterday/thisWeek/nextWeek.
+  //     sunucu köprüsü. c=ISO ülke kodu (ABD/TR + 15 Avrupa borsa ülkesi, aşağıdaki harita);
+  //     tab=today/tomorrow/yesterday/thisWeek/nextWeek.
   //     timeZone=63 (İstanbul) → saatler ve tarihler doğrudan TSİ. ---
   if (urlPath === '/investcal') {
     const q = new URLSearchParams(req.url.split('?')[1] || '');
-    const country = (q.get('c') === 'US') ? '5' : '63';
+    // ISO → Investing.com ülke ID'si (investpy tablosu; DE/GB/CH/PL/FI/AT/DK curl ile doğrulandı)
+    const INVESTING_COUNTRY = { US:'5', TR:'63', GB:'4', DE:'17', FR:'22', NL:'21', BE:'34', PT:'38',
+      IT:'10', ES:'26', CH:'12', SE:'9', DK:'24', NO:'60', FI:'71', AT:'54', PL:'53' };
+    const country = INVESTING_COUNTRY[q.get('c')] || '63';
     const tabs = { yesterday:'yesterday', today:'today', tomorrow:'tomorrow', thisWeek:'thisWeek', nextWeek:'nextWeek' };
     const tab = tabs[q.get('tab')] || 'thisWeek';
     const post = 'country%5B%5D=' + country + '&timeZone=63&currentTab=' + tab + '&limit_from=0';

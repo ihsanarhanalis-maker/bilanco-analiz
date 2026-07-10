@@ -258,7 +258,7 @@
   <!-- ŞİRKET ARAMA -->
   <div class="card no-print">
     <h2>Hisse Ara</h2>
-    <div class="sub">ABD, Borsa İstanbul veya Avrupa hissesinin kodunu yaz, <b>Ara</b>'ya bas. ABD: NVDA, AAPL, MSFT · BIST: THYAO, ASELS, GARAN (iki borsada da varsa sonuna <b>.IS</b> ekle) · <b>Avrupa: kodun sonuna borsa eki ekle</b> — SIE<b>.DE</b> (Almanya/Xetra), VOD<b>.L</b> (Londra), MC<b>.PA</b> (Paris/Euronext), ENEL<b>.MI</b> (Milano), SAN<b>.MC</b> (Madrid), NESN<b>.SW</b> (İsviçre), VOLV-B<b>.ST</b> (İsveç), ASML<b>.AS</b> (Amsterdam) gibi.</div>
+    <div class="sub">Hisse kodunu yaz, <b>Ara</b>'ya bas — borsa otomatik bulunur (ABD · Borsa İstanbul · 15 Avrupa borsası: İngiltere, Almanya, Fransa, Hollanda, Belçika, Portekiz, İtalya, İspanya, İsviçre, İsveç, Danimarka, Norveç, Finlandiya, Avusturya, Polonya). Örnek: <b>NVDA</b>, <b>THYAO</b>, <b>NESN</b>, <b>VOLV-B</b>. Aynı kod birden fazla borsada varsa seçenekler listelenir; oradan tıkla ya da eki elle yaz (SAP<b>.DE</b>, ASML<b>.AS</b>, SASA<b>.IS</b>, AAPL<b>.US</b> gibi).</div>
     <div class="toolbar" style="align-items:center">
       <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()">
       <select id="periodType" class="cell" style="width:auto">
@@ -344,6 +344,7 @@
       <div class="sub">Kapanış fiyatları (Yahoo Finance). <span id="chartInfo"></span></div>
       <div class="toolbar" id="chartBtns">
         <button data-r="1mo" onclick="setChartRange('1mo')">1 Ay</button>
+        <button data-r="3mo" onclick="setChartRange('3mo')">3 Ay</button>
         <button data-r="6mo" onclick="setChartRange('6mo')">6 Ay</button>
         <button data-r="1y" class="primary" onclick="setChartRange('1y')">1 Yıl</button>
         <button data-r="5y" onclick="setChartRange('5y')">5 Yıl</button>

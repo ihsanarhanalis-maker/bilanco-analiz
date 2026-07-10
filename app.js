@@ -820,6 +820,60 @@ async function fetchTickerEU(euInfo, mode, myGen){
   }
 }
 
+/* ---------- Bare kod → borsa tespiti ----------
+   Kullanıcı ülke eki YAZMADAN arayabilsin diye: kod eksiz girildiğinde hangi borsalarda
+   birincil kotasyonu olduğu tek bir TradingView global scan çağrısıyla bulunur
+   (BIST + 12 benzersiz Avrupa borsa öneki tek istekte; EURONEXT 4 ülkeyi kapsadığından
+   ülke sütunuyla ayrıştırılır). ABD tespiti yerel CIK haritasından (istek gerekmez).
+   Tek borsada bulunduysa otomatik oraya yönlenir; birden fazlaysa tıklanabilir
+   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .DE / .AS …). */
+const EURONEXT_COUNTRY_SUFFIX={ 'France':'PA', 'Netherlands':'AS', 'Belgium':'BR', 'Portugal':'LS' };
+async function detectBareMarkets(sym){
+  const map=window.CIK_MAP||{};
+  const cands=[];
+  let scanOk=false;
+  if(map[sym]) cands.push({ market:'US', code:sym+'.US', label:'🇺🇸 ABD', desc:'' });
+  try{
+    const tvSym=sym.replace(/-/g,'_');
+    const prefixes=[...new Set(Object.values(EU_EXCHANGES).map(e=>e.tv))];
+    const tickers=['BIST:'+tvSym, ...prefixes.map(p=>p+':'+tvSym)];
+    const r=await fetch('https://scanner.tradingview.com/global/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['name','is_primary','close','country','description']})});
+    if(r.ok){
+      const j=await r.json();
+      scanOk=true;
+      const rows=(j.data||[]).filter(x=>x.d && x.d[2]!=null);   // close dolu = gerçek kotasyon
+      const bistRow=rows.find(x=>x.s.indexOf('BIST:')===0);
+      if(bistRow) cands.push({ market:'BIST', code:sym+'.IS', label:'🇹🇷 Borsa İstanbul', desc:bistRow.d[4]||'' });
+      let euRows=rows.filter(x=>x.s.indexOf('BIST:')!==0);
+      const prim=euRows.filter(x=>x.d[1]===true);
+      // Birincil kotasyon varsa çapraz kotasyonları ele; hiç birincil yoksa ve başka aday da
+      // yoksa (VOLV-B gibi is_primary=false görünen yerel seriler için) hepsini kabul et.
+      euRows = prim.length ? prim : (cands.length ? [] : euRows);
+      euRows.forEach(x=>{
+        const pfx=x.s.split(':')[0];
+        let sfx=null;
+        if(pfx==='EURONEXT') sfx=EURONEXT_COUNTRY_SUFFIX[x.d[3]]||null;
+        else{ const ent=Object.entries(EU_EXCHANGES).find(([s,e])=>e.tv===pfx); sfx=ent?ent[0]:null; }
+        if(sfx && !cands.some(c=>c.code===sym+'.'+sfx))
+          cands.push({ market:'EU', code:sym+'.'+sfx, label:EU_EXCHANGES[sfx].flag+' '+EU_EXCHANGES[sfx].country, desc:x.d[4]||'' });
+      });
+    }
+  }catch(e){}
+  return { cands, scanOk };
+}
+/* Birden fazla borsada bulunan kod için seçenek düğmeleri (tıkla → o borsada ara) */
+function renderMarketChoices(sym,cands){
+  const el=document.getElementById('fetchStatus');
+  el.style.color='var(--warn)';
+  el.innerHTML='⚠ <b>'+safeHTML(sym)+'</b> birden fazla borsada bulundu — hangisini istiyorsun?<br>'+
+    cands.map(c=>`<button type="button" style="margin:4px 4px 0 0;padding:5px 11px;font-size:12px" onclick="searchExact('${c.code}')">${c.label}${c.desc?' · '+safeHTML(c.desc).slice(0,30):''}</button>`).join('')+
+    '<br><span class="hint">İstersen eki elle de yazabilirsin: '+cands.map(c=>'<b>'+c.code+'</b>').join(' · ')+'</span>';
+}
+function searchExact(code){
+  document.getElementById('ticker').value=code;
+  fetchTicker();
+}
 async function fetchTicker(){
   if(location.protocol==='file:'){
     setStatus('⚠ Bu dosyayı çift tıklamak yerine "Bilanco-Baslat.bat" ile açın (anahtarsız veri için yerel köprü gerekir).','bad');
@@ -828,32 +882,74 @@ async function fetchTicker(){
   let sym=(document.getElementById('ticker').value||'').trim().toUpperCase();
   if(!sym){ setStatus('Lütfen bir hisse kodu yazın.','bad'); return; }
   const mode=document.getElementById('periodType').value;        // 'annual' | 'quarter'
-  const formPrefix = mode==='annual' ? '10-K' : '10-Q';
   const map=window.CIK_MAP||{};
-  // Pazar tespiti — sırayla: Avrupa borsa eki (SIE.DE, VOD.L…) → ".IS" ile BIST zorlama →
-  // ABD listesinde yoksa BIST dene.
+  // Elle yazılmış ekler her zaman doğrudan yönlendirir: Avrupa (SAP.DE…), BIST (.IS), ABD (.US)
   const euInfo=parseEUSymbol(sym);
-  if(euInfo){
+  if(euInfo && euInfo.suffix!=='US' && euInfo.suffix!=='IS'){
     setStatus('⏳ '+euInfo.base+'.'+euInfo.suffix+' '+euInfo.country+' borsasından çekiliyor…','muted');
     const myGen=++REQ_GEN;
     fetchTickerEU(euInfo, mode, myGen);
     return;
   }
-  const forceBist=/\.IS$/.test(sym);
-  if(forceBist) sym=sym.replace(/\.IS$/,'');
-  if(forceBist || !map[sym]){
+  if(/\.IS$/.test(sym)){
+    sym=sym.replace(/\.IS$/,'');
     setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
     const myGen=++REQ_GEN;
     fetchTickerBIST(sym, mode, myGen);
     return;
   }
+  if(/\.US$/.test(sym)){
+    sym=sym.replace(/\.US$/,'');
+    if(!map[sym]){ setStatus('✕ "'+sym+'" ABD listesinde bulunamadı.','bad'); return; }
+    const myGen=++REQ_GEN;
+    fetchTickerUS(sym, mode, myGen);
+    return;
+  }
+  // Eksiz kod → borsayı otomatik bul
+  const myGen=++REQ_GEN;
+  setStatus('⏳ '+sym+' borsalarda aranıyor…','muted');
+  const { cands, scanOk }=await detectBareMarkets(sym);
+  if(myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
+  if(!cands.length){
+    if(!scanOk){
+      // Tespit servisi erişilemedi → eski davranış: ABD listesinde varsa ABD, yoksa BIST dene
+      if(map[sym]) fetchTickerUS(sym, mode, myGen);
+      else fetchTickerBIST(sym, mode, myGen);
+      return;
+    }
+    setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · 15 Avrupa borsası tarandı).','bad');
+    return;
+  }
+  if(cands.length>1){ renderMarketChoices(sym, cands); return; }
+  const c=cands[0];
+  if(c.market==='US') fetchTickerUS(sym, mode, myGen);
+  else if(c.market==='BIST'){
+    setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
+    fetchTickerBIST(sym, mode, myGen);
+  }else{
+    const eu=parseEUSymbol(c.code);
+    setStatus('⏳ '+eu.base+'.'+eu.suffix+' '+eu.country+' borsasından çekiliyor…','muted');
+    fetchTickerEU(eu, mode, myGen);
+  }
+}
+async function fetchTickerUS(sym, mode, myGen){
+  const map=window.CIK_MAP||{};
+  const formPrefix = mode==='annual' ? '10-K' : '10-Q';
   const cik=String(map[sym]).padStart(10,'0');
   setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
-  const myGen=++REQ_GEN;   // bu arama için nesil numarası — sonuçlar yazılırken kontrol edilir
 
   try{
-    const { D, I, filed } = await fetchSeries(cik, mode, formPrefix);
+    let { D, I, filed } = await fetchSeries(cik, mode, formPrefix);
     if(myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
+
+    // Bazı ABD listesindeki ADR'ler (SAP, gelecekte eklenebilecek benzerleri) SEC'e us-gaap/10-K
+    // yerine ifrs-full/20-F ile kayıtlıdır (yabancı özel ihraççı) → boşsa bu yolu dene.
+    let isIfrs20F=false;
+    if(!Object.keys(D.assets).length){
+      const ifrs=await fetchSecIfrsSeries(cik);
+      if(myGen!==REQ_GEN) return;
+      if(ifrs && Object.keys(ifrs.D.assets).length){ D=ifrs.D; I=ifrs.I; filed=null; isIfrs20F=true; }
+    }
 
     if(!Object.keys(D.assets).length){ setStatus('✕ '+sym+' için bilanço verisi bulunamadı (form: '+formPrefix+').','bad'); return; }
     // Referans dönem tarihleri: toplam aktiften en güncel iki dönem sonu
@@ -875,7 +971,8 @@ async function fetchTicker(){
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
     document.getElementById('curNote').textContent='USD cinsinden';
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
-    setStatus(`✓ ${sym} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
+    const periodLbl = isIfrs20F ? 'yıllık (20-F)' : (mode==='annual'?'yıllık':'çeyreklik');
+    setStatus(`✓ ${sym} — ${periodLbl} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
     analyze();
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
@@ -1234,6 +1331,9 @@ async function renderWatchlist(){
    YEDEK: Investing (CF engeli vb) veri vermezse TradingView /econ + küratörlü ECON_MAP devreye
    girer (isim/önem tahminle; kart boş kalmasın diye). Renderda hangi kaynak kullanıldığı yazar. */
 let ECON_IMP=1, ECON_TIME='buhafta', ECON_MARKET='TR';
+/* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + 15 Avrupa borsa ülkesi) —
+   ISO→Investing ülke ID eşlemesi server.js /investcal rotasında */
+const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL'];
 const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
 const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
 const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
@@ -1440,11 +1540,11 @@ async function loadEconTab(myGen){
   if(c && (Date.now()-c.ts)<30*60000){ renderEcon(); return; }
   box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
   let rows=[], src='', investingOk=false;
-  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — yalnız ABD/TR (ülke kodları
-  //    yalnız bu ikisi için biliniyor; Avrupa ülkeleri doğrudan TV yedeğine gider).
+  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — ABD/TR + 15 Avrupa borsa
+  //    ülkesinin tamamı (ISO→Investing ülke ID haritası server.js /investcal içinde).
   //    Geçerli JSON (data alanı string) → Investing ÇALIŞTI say (0 satır = o gün veri yok, normal).
   //    Yalnızca istek GERÇEKTEN başarısızsa (403/502/JSON değil) yedeğe düş.
-  if(ECON_MARKET==='US'||ECON_MARKET==='TR'){
+  if(INVESTING_MARKETS.includes(ECON_MARKET)){
     try{
       const r=await fetch('/investcal?c='+ECON_MARKET+'&tab='+tab);
       if(myGen!=null && myGen!==REQ_GEN) return;
@@ -1500,7 +1600,7 @@ function renderEcon(){
   </tr>`).join('');
   const kaynak = c.src==='Investing.com'
     ? 'İsim, önem yıldızı ve renkler doğrudan <b>Investing.com</b> ekonomik takviminden alınır.'
-    : (ECON_MARKET==='US'||ECON_MARKET==='TR')
+    : INVESTING_MARKETS.includes(ECON_MARKET)
       ? 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).'
       : 'Kaynak: <b>TradingView</b> ekonomik takvimi (isimler Türkçeleştirilir, önem yaklaşıktır).';
   box.innerHTML=`<table><thead><tr><th>Tarih (TSİ)</th><th>Veri</th><th>Açıklanan</th><th>Beklenti</th><th>Önceki</th></tr></thead><tbody>${rows}</tbody></table>
@@ -2604,7 +2704,7 @@ async function fetchInsiders(cik, myGen){
 
 /* ---- Fiyat Grafiği (etkileşimli SVG, bağımsız) ---- */
 let CHART_STATE={ sym:null, ysym:null, range:'1y', filedD0:null, filedD1:null };
-const CHART_RANGE_MAP={'1mo':{yrange:'1mo'},'6mo':{yrange:'6mo'},'1y':{yrange:'1y'},'5y':{yrange:'5y'}};
+const CHART_RANGE_MAP={'1mo':{yrange:'1mo'},'3mo':{yrange:'3mo'},'6mo':{yrange:'6mo'},'1y':{yrange:'1y'},'5y':{yrange:'5y'}};
 async function fetchPriceChart(sym, ysym, myGen){
   const card=document.getElementById('chartCard');
   if(!card) return;
@@ -2828,8 +2928,9 @@ async function renderWatchlist(){
   </tbody></table>`;
 }
 function watchGo(sym, market){
-  // BIST kodu ".IS" ile zorlanır; EU kaydı zaten "SIE.DE" gibi eki üstünde taşır; ABD olduğu gibi.
-  document.getElementById('ticker').value = market==='BIST' ? sym+'.IS' : sym;
+  // Ek her zaman açıkça verilir (BIST → .IS, ABD → .US, EU kaydı eki zaten taşır) —
+  // böylece izleme listesinden açarken borsa tespiti/çakışma sorusu atlanır.
+  document.getElementById('ticker').value = market==='BIST' ? sym+'.IS' : (market==='US' ? sym+'.US' : sym);
   fetchTicker();
   window.scrollTo({top:0,behavior:'smooth'});
 }
