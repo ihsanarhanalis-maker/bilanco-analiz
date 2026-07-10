@@ -328,6 +328,25 @@ http.createServer((req, res) => {
     return;
   }
 
+  // --- Yahoo hisse arama köprüsü (Güney Kore için doğru KS/KQ eki çözümlemesi) ---
+  //     Kore'de aynı 6 haneli kod hem KOSPI (.KS) hem KOSDAQ (.KQ) borsasında olabilir;
+  //     TradingView'in "KRX" öneki ikisini de tek isimde topladığından hangisi olduğunu
+  //     ayırt etmez. Yahoo'nun kendi arama uç noktası doğru eki (symbol alanında) doğrudan
+  //     verir — CORS göndermediği için anahtarsız proxy şart (aynı /price gibi).
+  if (urlPath === '/yfsearch') {
+    const q = encodeURIComponent(new URLSearchParams(req.url.split('?')[1] || '').get('q') || '');
+    const yUrl = 'https://query1.finance.yahoo.com/v1/finance/search?q=' + q;
+    https.get(yUrl, { headers: { 'User-Agent': BUA } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"quotes":[]}'); });
+    return;
+  }
+
   // --- BIST mali tablo köprüsü (İş Yatırım'ın halka açık KAP verisi, anahtarsız) ---
   //     İstemci year1/period1..year4/period4 + companyCode + financialGroup gönderir;
   //     parametreler olduğu gibi İş Yatırım'a iletilir. CORS göndermediği için proxy şart.
@@ -396,9 +415,9 @@ http.createServer((req, res) => {
   //     timeZone=63 (İstanbul) → saatler ve tarihler doğrudan TSİ. ---
   if (urlPath === '/investcal') {
     const q = new URLSearchParams(req.url.split('?')[1] || '');
-    // ISO → Investing.com ülke ID'si (investpy tablosu; DE/GB/CH/PL/FI/AT/DK curl ile doğrulandı)
+    // ISO → Investing.com ülke ID'si (investpy tablosu; DE/GB/CH/PL/FI/AT/DK/KR curl ile doğrulandı)
     const INVESTING_COUNTRY = { US:'5', TR:'63', GB:'4', DE:'17', FR:'22', NL:'21', BE:'34', PT:'38',
-      IT:'10', ES:'26', CH:'12', SE:'9', DK:'24', NO:'60', FI:'71', AT:'54', PL:'53' };
+      IT:'10', ES:'26', CH:'12', SE:'9', DK:'24', NO:'60', FI:'71', AT:'54', PL:'53', KR:'11' };
     const country = INVESTING_COUNTRY[q.get('c')] || '63';
     const tabs = { yesterday:'yesterday', today:'today', tomorrow:'tomorrow', thisWeek:'thisWeek', nextWeek:'nextWeek' };
     const tab = tabs[q.get('tab')] || 'thisWeek';

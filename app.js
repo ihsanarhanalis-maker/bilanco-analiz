@@ -547,6 +547,11 @@ const EU_EXCHANGES={
   HE: {tv:'OMXHEX',   scan:'finland',     country:'Finlandiya', ccy:'EUR', sym:'€',    city:'Helsinki',  tz:'Europe/Helsinki',   open:600, close:1110, flag:'🇫🇮', iso:'FI'},
   VI: {tv:'VIE',      scan:'austria',     country:'Avusturya',  ccy:'EUR', sym:'€',    city:'Viyana',    tz:'Europe/Vienna',     open:540, close:1055, flag:'🇦🇹', iso:'AT'},
   WA: {tv:'GPW',      scan:'poland',      country:'Polonya',    ccy:'PLN', sym:'zł ',  city:'Varşova',   tz:'Europe/Warsaw',     open:540, close:1020, flag:'🇵🇱', iso:'PL'},
+  // Avrupa değil ama aynı "tek harf/rakam eki → yabancı borsa" mekanizmasını paylaşıyor —
+  // TradingView'in "KRX" öneki hem KOSPI hem KOSDAQ'ı kapsar; asıl Yahoo eki (.KS/.KQ)
+  // fetchTickerEU içinde /yfsearch ile ayrıca çözümlenir (bkz. o fonksiyondaki not).
+  KS: {tv:'KRX',      scan:'korea',       country:'Güney Kore', ccy:'KRW', sym:'₩',    city:'Seul',      tz:'Asia/Seoul',        open:540, close:930,  flag:'🇰🇷', iso:'KR'},
+  KQ: {tv:'KRX',      scan:'korea',       country:'Güney Kore', ccy:'KRW', sym:'₩',    city:'Seul',      tz:'Asia/Seoul',        open:540, close:930,  flag:'🇰🇷', iso:'KR'},   // KOSDAQ — .KS ile aynı, kullanıcı isterse açıkça yazabilir
 };
 /* "SIE.DE" → {base:'SIE', suffix:'DE', ...EU_EXCHANGES.DE}; eşleşmezse null */
 function parseEUSymbol(sym){
@@ -738,10 +743,32 @@ async function fetchYahooFundSeries(ysym, mode){
     return { D, I, dates };
   }catch(e){ return null; }
 }
+/* Güney Kore: kullanıcı her zaman ".KS" ile arar (diğer ülkeler gibi tek sabit ek), ama
+   Yahoo'da fiyat/finansal veri için gerçek borsa ekinin (.KS=KOSPI / .KQ=KOSDAQ) BİREBİR
+   doğru olması şart — yanlış ekte Yahoo veriyi "MUTUALFUND" gibi bambaşka bir enstrümana
+   bağlıyor (curl ile doğrulandı). Yahoo'nun kendi arama uç noktası (server.js /yfsearch)
+   ilk EQUITY sonucunda doğru eki doğrudan verir; başarısız olursa varsayılan .KS'de kalınır. */
+async function resolveKrYahooSymbol(code){
+  try{
+    const r=await fetch('/yfsearch?q='+encodeURIComponent(code));
+    if(!r.ok) return null;
+    const j=await r.json();
+    const hit=(j.quotes||[]).find(q=>q.quoteType==='EQUITY' && /\.(KS|KQ)$/.test(q.symbol||''));
+    return hit?hit.symbol:null;
+  }catch(e){ return null; }
+}
 async function fetchTickerEU(euInfo, mode, myGen){
   const tvTicker=euInfo.tv+':'+euInfo.base.replace(/-/g,'_');
-  const ysym=euInfo.base+'.'+euInfo.suffix;
+  let ysym=euInfo.base+'.'+euInfo.suffix;
   const sym=euInfo.base;
+  if(euInfo.suffix==='KS'||euInfo.suffix==='KQ'){
+    const resolved=await resolveKrYahooSymbol(euInfo.base);
+    if(myGen!==REQ_GEN) return;
+    if(resolved){
+      ysym=resolved;
+      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);   // ekran etiketi de gerçek borsayı (.KS/.KQ) yansıtsın
+    }
+  }
   try{
     const r=await fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
       {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})});
@@ -823,10 +850,10 @@ async function fetchTickerEU(euInfo, mode, myGen){
 /* ---------- Bare kod → borsa tespiti ----------
    Kullanıcı ülke eki YAZMADAN arayabilsin diye: kod eksiz girildiğinde hangi borsalarda
    birincil kotasyonu olduğu tek bir TradingView global scan çağrısıyla bulunur
-   (BIST + 12 benzersiz Avrupa borsa öneki tek istekte; EURONEXT 4 ülkeyi kapsadığından
+   (BIST + 13 benzersiz Avrupa/Kore borsa öneki tek istekte; EURONEXT 4 ülkeyi kapsadığından
    ülke sütunuyla ayrıştırılır). ABD tespiti yerel CIK haritasından (istek gerekmez).
    Tek borsada bulunduysa otomatik oraya yönlenir; birden fazlaysa tıklanabilir
-   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .DE / .AS …). */
+   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .DE / .AS / .KS …). */
 const EURONEXT_COUNTRY_SUFFIX={ 'France':'PA', 'Netherlands':'AS', 'Belgium':'BR', 'Portugal':'LS' };
 async function detectBareMarkets(sym){
   const map=window.CIK_MAP||{};
@@ -1333,7 +1360,7 @@ async function renderWatchlist(){
 let ECON_IMP=1, ECON_TIME='buhafta', ECON_MARKET='TR';
 /* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + 15 Avrupa borsa ülkesi) —
    ISO→Investing ülke ID eşlemesi server.js /investcal rotasında */
-const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL'];
+const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR'];
 const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
 const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
 const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
@@ -2619,7 +2646,7 @@ function renderOwnershipEU(floatPct, floatShares, totalShares){
     { label:'Halka Açık Dolaşım (free float)', pct:floatPct },
     { label:'Büyük Ortaklar / Stratejik Paylar', pct:Math.max(0,100-floatPct) }
   ];
-  let note='Kaynak: TradingView fiili dolaşım verisi. Avrupa\'da pay sahipleri isim isim tek merkezden açıklanmaz; dağılım halka açık / büyük ortak olarak raporlanır.';
+  let note='Kaynak: TradingView fiili dolaşım verisi. Bu borsada pay sahipleri isim isim tek merkezden açıklanmaz; dağılım halka açık / büyük ortak olarak raporlanır.';
   if(floatShares && totalShares) note+=` Fiili dolaşım: ${fmtShort(floatShares)} / ${fmtShort(totalShares)} pay.`;
   renderOwnerPie(slices, note);
 }
