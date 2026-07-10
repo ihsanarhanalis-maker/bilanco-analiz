@@ -833,7 +833,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
     fetchNextEarnings(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
     fetchPriceChart(sym, ysym, myGen);
     fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
-    fetchExchangeTop10(sym, 'EU', myGen, { scan:euInfo.scan, country:euInfo.country, tv:euInfo.tv });
+    fetchExchangeTop10(sym, 'EU', myGen, { scan:euInfo.scan, country:euInfo.country, tv:euInfo.tv, suffix:euInfo.suffix });
     TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
     fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
     updateWatchStar();
@@ -2875,12 +2875,21 @@ async function fetchExchangeTop10(sym, market, myGen, euOpt){
     if(myGen!=null && myGen!==REQ_GEN) return;
     const rows=(j&&j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
     if(!rows.length){ box.innerHTML='<div class="hint">Borsa verisi bulunamadı.</div>'; return; }
-    sub.innerHTML=`<b>${safeHTML(exchangeName)}</b>'da piyasa değerine göre en büyük 10 şirket. Kaynak: TradingView.`;
+    sub.innerHTML=`<b>${safeHTML(exchangeName)}</b>'da piyasa değerine göre en büyük 10 şirket. Kaynak: TradingView. <b>Satıra tıklayınca o şirketin analizi açılır.</b>`;
     const pp=v=>v==null?'—':v.toFixed(1)+'%';
     const xx=v=>v==null?'—':v.toFixed(1)+'x';
+    // Satır tıklaması → o hissenin analizini aç. Ek her zaman açıkça verilir (borsa tespiti
+    // atlanır): BIST → .IS, ABD → .US, Avrupa/Kore → mevcut aramanın borsa eki (euOpt.suffix;
+    // top10 listesi zaten aynı ülkenin scan'inden geldiği için ek de aynıdır).
+    // TV isimlerindeki alt çizgi (VOLV_B) bizim kod biçimimizde tireye çevrilir.
+    const clickCode=t=>{
+      const base=t.replace(/_/g,'-');
+      if(euOpt && euOpt.suffix) return base+'.'+euOpt.suffix;
+      return base+(market==='BIST'?'.IS':'.US');
+    };
     const trRows=rows.map((d,i)=>{
       const isMe=d[0]===sym;
-      return `<tr${isMe?' style="background:var(--surface-3)"':''}>
+      return `<tr style="cursor:pointer${isMe?';background:var(--surface-3)':''}" onclick="searchExact('${clickCode(d[0])}');window.scrollTo({top:0,behavior:'smooth'})" title="${safeHTML(d[1]||d[0])} analizini aç">
         <td>${i+1}</td>
         <td>${isMe?'<b>':''}${safeHTML(d[0])}${isMe?' ★</b>':''} <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
         <td>${fmtMcap(d[3])}</td>
