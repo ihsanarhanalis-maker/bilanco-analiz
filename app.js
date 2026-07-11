@@ -1,10 +1,12 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','econ'].forEach(x=>{
+  ['home','stock','econ','top100','sect'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
-  if(p==='econ') initEconPage();   // ülke kutuları ilk girişte kurulur (tembel)
+  if(p==='econ') initEconPage();       // ülke kutuları ilk girişte kurulur (tembel)
+  if(p==='top100') initTop100Page();
+  if(p==='sect') initSectPage();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 /* Ana sayfadaki büyük arama: değeri Bilanço sekmesindeki arama kutusuna taşıyıp orada aratır */
@@ -525,7 +527,6 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchNextEarnings(sym, 'BIST', myGen);
     fetchPriceChart(sym, sym+'.IS', myGen);
     fetchSectorComparison(sym, 'BIST', myGen);
-    fetchExchangeTop10(sym, 'BIST', myGen);
     fetchOwnershipBIST(sym, myGen);   // ortaklık yapısı pastası (KAP verisi)
     TECH_SHORT=null;                  // kısa pozisyon verisi yalnız ABD'de var
     fetchTechPanel(sym, 'BIST', myGen);
@@ -851,7 +852,6 @@ async function fetchTickerEU(euInfo, mode, myGen){
     fetchNextEarnings(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
     fetchPriceChart(sym, ysym, myGen);
     fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
-    fetchExchangeTop10(sym, 'EU', myGen, { scan:euInfo.scan, country:euInfo.country, tv:euInfo.tv, suffix:euInfo.suffix });
     TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
     fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
     updateWatchStar();
@@ -916,6 +916,7 @@ function renderMarketChoices(sym,cands){
 }
 function searchExact(code){
   document.getElementById('ticker').value=code;
+  switchPage('stock');   // İlk 100 gibi başka sekmelerden gelen tıklamalarda analiz sekmesine geç
   fetchTicker();
 }
 async function fetchTicker(){
@@ -1025,7 +1026,6 @@ async function fetchTickerUS(sym, mode, myGen){
     startNyClock();   // sağ üstte saniyelik canlı New York saati
     fetchPriceChart(sym, sym, myGen);
     fetchSectorComparison(sym, 'US', myGen);
-    fetchExchangeTop10(sym, 'US', myGen);
     fetchInsiders(cik, myGen);   // Form 4 içeriden işlemler (yalnızca ABD)
     TECH_SHORT=null;             // önceki hissenin kısa pozisyonu görünmesin
     fetchTechPanel(sym, 'US', myGen);
@@ -1713,6 +1713,302 @@ function renderEconPanel(cc){
     <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span>/<span class="down">kırmızı</span> açıklanan değer, beklentiye göre olumlu/olumsuz demektir. "—" henüz açıklanmadı. ${kaynak}</div>`;
 }
 
+/* ---------- İlk 100 Şirket sayfası (companiesmarketcap.com karşılığı) ----------
+   Ekonomik takvimle aynı ülke-kutusu düzeni ama TEK panel: bir ülkeye tıklayınca ilk 100
+   listesi açılır, başka ülkeye tıklayınca öncekinin yerini alır, aynı ülkeye tekrar
+   tıklayınca kapanır. Veri: TradingView scanner — Borsanın Devleri (top10) ile AYNI sorgu,
+   yalnızca range 100'e çıkarılmış; is_primary=true çapraz kotasyonları eler. */
+const TOP100_MARKETS={
+  TR:{scan:'turkey',                     sym:'₺',    click:c=>c+'.IS'},
+  US:{scan:'america',                    sym:'$',    click:c=>c+'.US'},
+  KR:{scan:'korea',                      sym:'₩',    click:c=>c},        // sayısal kodlar tekil — otomatik borsa tespiti .KS/.KQ'yu doğru çözer
+  GB:{scan:'uk',          ex:'LSE',      sym:'£',    click:c=>c+'.L'},
+  DE:{scan:'germany',     ex:'XETR',     sym:'€',    click:c=>c+'.DE'},
+  FR:{scan:'france',      ex:'EURONEXT', sym:'€',    click:c=>c+'.PA'},
+  IT:{scan:'italy',       ex:'MIL',      sym:'€',    click:c=>c+'.MI'},
+  ES:{scan:'spain',       ex:'BME',      sym:'€',    click:c=>c+'.MC'},
+  NL:{scan:'netherlands', ex:'EURONEXT', sym:'€',    click:c=>c+'.AS'},
+  BE:{scan:'belgium',     ex:'EURONEXT', sym:'€',    click:c=>c+'.BR'},
+  PT:{scan:'portugal',    ex:'EURONEXT', sym:'€',    click:c=>c+'.LS'},
+  CH:{scan:'switzerland', ex:'SIX',      sym:'CHF ', click:c=>c+'.SW'},
+  SE:{scan:'sweden',      ex:'OMXSTO',   sym:'kr ',  click:c=>c+'.ST'},
+  DK:{scan:'denmark',     ex:'OMXCOP',   sym:'kr ',  click:c=>c+'.CO'},
+  NO:{scan:'norway',      ex:'OSL',      sym:'kr ',  click:c=>c+'.OL'},
+  FI:{scan:'finland',     ex:'OMXHEX',   sym:'€',    click:c=>c+'.HE'},
+  AT:{scan:'austria',     ex:'VIE',      sym:'€',    click:c=>c+'.VI'},
+  PL:{scan:'poland',      ex:'GPW',      sym:'zł ',  click:c=>c+'.WA'},
+};
+let TOP100_OPEN=null, TOP100_GEN=0, TOP100_PAGE_INIT=false;
+const TOP100_CACHE={};   // cc → { rows, ts } (10 dk)
+function fmtMcapSym(n, sym){
+  if(n==null) return '—';
+  const two=x=>x.toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(n>=1e12) return sym+two(n/1e12)+' T';
+  if(n>=1e9)  return sym+two(n/1e9)+' B';
+  if(n>=1e6)  return sym+two(n/1e6)+' M';
+  return sym+Math.round(n).toLocaleString('tr-TR');
+}
+function initTop100Page(){
+  if(TOP100_PAGE_INIT) return;
+  TOP100_PAGE_INIT=true;
+  document.getElementById('topCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
+    `<button class="cbox" id="tbox-${cc}" onclick="toggleTopCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  toggleTopCountry('TR');
+}
+function toggleTopCountry(cc){
+  const prev=TOP100_OPEN;
+  // Açık olan her ne varsa kapat (aynı ülkeyse iş biter, farklıysa yenisi açılır)
+  if(prev){
+    TOP100_OPEN=null; TOP100_GEN++;
+    document.getElementById('tpanel-'+prev)?.remove();
+    document.getElementById('tbox-'+prev)?.classList.remove('active');
+  }
+  if(prev!==cc){
+    TOP100_OPEN=cc;
+    document.getElementById('tbox-'+cc)?.classList.add('active');
+    const c=ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc];
+    const el=document.createElement('div');
+    el.className='card'; el.id='tpanel-'+cc;
+    el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${flagSpan(cc)}${c[1]} — Piyasa Değerine Göre İlk 100</h2>
+      <div class="sub">Canlı sıralama (TradingView) — yalnızca bu borsada birincil kote şirketler. <b>Satıra tıklayınca analiz açılır.</b></div>
+      <div id="topBody-${cc}"><div class="hint">İlk 100 listesi yükleniyor…</div></div>`;
+    document.getElementById('topPanels').appendChild(el);
+    loadTop100Panel(cc);
+  }
+  const hint=document.getElementById('topEmptyHint');
+  if(hint) hint.style.display=TOP100_OPEN?'none':'';
+}
+async function loadTop100Panel(cc){
+  const m=TOP100_MARKETS[cc];
+  const box=document.getElementById('topBody-'+cc);
+  if(!m || !box) return;
+  const cached=TOP100_CACHE[cc];
+  if(cached && (Date.now()-cached.ts)<10*60000){ renderTop100Panel(cc, cached.rows); return; }
+  const myGen=++TOP100_GEN;
+  try{
+    const filter=[{left:'is_primary',operation:'equal',right:true}];
+    if(m.ex) filter.push({left:'exchange',operation:'equal',right:m.ex});
+    const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
+      columns:['name','description','market_cap_basic','close','change',
+        'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'],
+      filter, sort:{sortBy:'market_cap_basic',sortOrder:'desc'}, range:[0,100]
+    })});
+    const j=r.ok?await r.json():null;
+    if(myGen!==TOP100_GEN || TOP100_OPEN!==cc) return;   // bu arada kapatıldı/değişti
+    const rows=(j&&j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
+    if(!rows.length){ box.innerHTML='<div class="hint">Liste alınamadı.</div>'; return; }
+    TOP100_CACHE[cc]={ rows, ts:Date.now() };
+    renderTop100Panel(cc, rows);
+  }catch(e){
+    if(TOP100_OPEN===cc) box.innerHTML='<div class="hint">Liste alınamadı: '+e.message+'</div>';
+  }
+}
+function renderTop100Panel(cc, rows){
+  const m=TOP100_MARKETS[cc];
+  const box=document.getElementById('topBody-'+cc);
+  if(!m || !box) return;
+  const pp=v=>v==null?'—':v.toFixed(1)+'%';
+  const xx=v=>v==null?'—':v.toFixed(1)+'x';
+  const trRows=rows.map((d,i)=>{
+    const code=m.click(d[0].replace(/_/g,'-'));
+    return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
+      <td style="color:var(--muted)">${i+1}</td>
+      <td><b>${safeHTML(d[0].replace(/_/g,'-'))}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+      <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
+      <td>${d[3]==null?'—':m.sym+d[3].toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
+      <td>${xx(d[5])}</td>
+      <td>${xx(d[6])}</td>
+      <td>${pp(d[7])}</td>
+      <td>${pp(d[8])}</td>
+      <td>${fmtEmployees(d[9])}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+    <tbody>${trRows}</tbody></table></div>`;
+}
+
+/* ---------- Sektör Devleri sayfası (companiesmarketcap.com kategori sıralaması karşılığı) ----------
+   Üstte ülke seçici (🌍 dünya + 18 ülke, radyo mantığı), solda 20 sektör kutusu (aç/kapa).
+   Veri: TradingView scanner — ülke seçiliyse o ülkenin scan bölgesi (İlk 100 ile aynı harita),
+   🌍'de 'global' scan (piyasa değerleri TV tarafından USD'ye normalize edilir, sıralama doğru —
+   curl ile doğrulandı: Toyota/Tencent/Nintendo USD değerle döner). Sektörler TV'nin FactSet
+   endüstri adlarıyla eşlenir (in_range filtresi); Video Oyunu ve Yapay Zeka TV'de ayrı endüstri
+   OLMADIĞINDAN (oyun şirketleri "Packaged Software" içinde) companiesmarketcap'in yaptığı gibi
+   KÜRATÖRLÜ ticker listesiyle gelir (canlı değerler yine TV'den, istemcide sıralanır). */
+const SECT_SECTORS=[
+  ['oto',        '🚗','Otomobil Üreticileri', {ind:['Motor Vehicles']}],
+  ['havayolu',   '✈️','Hava Yolları',         {ind:['Airlines']}],
+  ['banka',      '🏦','Bankalar',             {ind:['Major Banks','Regional Banks','Savings Banks']}],
+  ['ilac',       '💊','İlaçlar',              {ind:['Pharmaceuticals: Major','Pharmaceuticals: Other','Pharmaceuticals: Generic']}],
+  ['eticaret',   '🛒','E-Ticaret',            {ind:['Internet Retail']}],
+  ['saglik',     '🏥','Sağlık Hizmetleri',    {ind:['Managed Health Care','Hospital/Nursing Management','Medical/Nursing Services','Services to the Health Industry','Medical Distributors']}],
+  ['medya',      '📰','Medya & Basın',        {ind:['Media Conglomerates','Broadcasting','Cable/Satellite TV','Movies/Entertainment','Publishing: Newspapers','Publishing: Books/Magazines']}],
+  ['sigorta',    '🛡️','Sigorta',              {ind:['Multi-Line Insurance','Property/Casualty Insurance','Life/Health Insurance','Insurance Brokers/Services','Specialty Insurance']}],
+  ['yazilim',    '💻','Yazılım',              {ind:['Packaged Software','Internet Software/Services','Information Technology Services']}],
+  ['yemek',      '🍔','Yemek & İçecek',       {ind:['Food: Major Diversified','Food: Specialty/Candy','Food: Meat/Fish/Dairy','Restaurants','Beverages: Non-Alcoholic','Beverages: Alcoholic','Food Retail','Agricultural Commodities/Milling']}],
+  ['yariiletken','🔌','Yarı İletkenler',      {ind:['Semiconductors','Electronic Production Equipment']}],
+  ['finans',     '💳','Finansal Hizmetler',   {ind:['Financial Conglomerates','Finance/Rental/Leasing','Investment Banks/Brokers']}],
+  ['petrol',     '🛢️','Petrol & Doğalgaz',    {ind:['Integrated Oil','Oil & Gas Production','Oil Refining/Marketing','Oilfield Services/Equipment','Oil & Gas Pipelines','Contract Drilling']}],
+  ['yatirim',    '📈','Yatırım',              {ind:['Investment Managers','Investment Trusts/Mutual Funds','Investment Banks/Brokers']}],
+  ['telekom',    '📡','Telekomünikasyon',     {ind:['Major Telecommunications','Specialty Telecommunications','Wireless Telecommunications']}],
+  ['perakende',  '🏬','Perakende',            {ind:['Specialty Stores','Department Stores','Discount Stores','Apparel/Footwear Retail','Electronics/Appliance Stores','Home Improvement Chains','Food Retail','Drugstore Chains','Catalog/Specialty Distribution','Internet Retail']}],
+  ['internet',   '🌐','İnternet',             {ind:['Internet Software/Services','Internet Retail']}],
+  ['oyun',       '🎮','Video Oyunu',          {curated:'GAMES'}],
+  ['teknoloji',  '🖥️','Teknoloji',            {sec:['Technology Services','Electronic Technology']}],
+  ['ai',         '🤖','Yapay Zeka',           {curated:'AI'}],
+];
+/* Küratörlü listeler: [TV kodu, ülke]. Ülkesi 18'lik listede olmayanlar (JP/CN/TW/SG…)
+   yalnız 🌍 görünümünde çıkar. Değerler canlı çekilir, piyasa değerine göre istemcide sıralanır. */
+const SECT_CURATED={
+  GAMES:[
+    ['HKEX:700','CN'],['TSE:7974','JP'],['NYSE:SE','SG'],['NASDAQ:EA','US'],['NASDAQ:TTWO','US'],
+    ['NYSE:RBLX','US'],['HKEX:9999','CN'],['TSE:7832','JP'],['TSE:9684','JP'],['TSE:9697','JP'],
+    ['TSE:9766','JP'],['TSE:3659','JP'],['TSE:6460','JP'],['KRX:259960','KR'],['KRX:036570','KR'],
+    ['KRX:251270','KR'],['EURONEXT:UBI','FR'],['GPW:CDR','PL'],['OMXSTO:EMBRAC_B','SE'],
+    ['NASDAQ:PLTK','US'],['NYSE:U','US'],['LSE:TM17','GB'],['LSE:FDEV','GB'],['NYSE:GRVY','KR'],
+  ],
+  AI:[
+    ['NASDAQ:NVDA','US'],['NASDAQ:MSFT','US'],['NASDAQ:GOOG','US'],['NASDAQ:META','US'],
+    ['TWSE:2330','TW'],['NASDAQ:AVGO','US'],['KRX:005930','KR'],['NYSE:ORCL','US'],
+    ['NASDAQ:AMD','US'],['NASDAQ:PLTR','US'],['NYSE:CRM','US'],['NYSE:IBM','US'],
+    ['XETR:SAP','DE'],['NASDAQ:MU','US'],['KRX:000660','KR'],['NASDAQ:ARM','US'],
+    ['NASDAQ:SMCI','US'],['NYSE:SNOW','US'],['NYSE:PATH','US'],['NYSE:AI','US'],
+    ['NASDAQ:SOUN','US'],['NASDAQ:TEM','US'],['NASDAQ:BBAI','US'],['NASDAQ:RXRX','US'],
+  ],
+};
+/* TV borsa öneki → uygulamanın arama eki (satır tıklaması için). Haritada olmayan borsalar
+   (TSE/HKEX/TWSE…) uygulamada analiz desteklenmediğinden tıklanamaz bırakılır.
+   EURONEXT önekinden ülke eki türetilemez (FR/NL/BE/PT ortak) → yalın kod gönderilir,
+   mevcut otomatik borsa tespiti (/yfsearch) doğru eki kendisi çözer. */
+const TV_EX2CODE={
+  NASDAQ:c=>c+'.US', NYSE:c=>c+'.US', AMEX:c=>c+'.US', BIST:c=>c+'.IS', KRX:c=>c,
+  LSE:c=>c+'.L', XETR:c=>c+'.DE', MIL:c=>c+'.MI', BME:c=>c+'.MC', SIX:c=>c+'.SW',
+  OMXSTO:c=>c+'.ST', OMXCOP:c=>c+'.CO', OSL:c=>c+'.OL', OMXHEX:c=>c+'.HE',
+  VIE:c=>c+'.VI', GPW:c=>c+'.WA', EURONEXT:c=>c,
+};
+let SECT_CC='GLOBAL', SECT_OPEN=null, SECT_GEN=0, SECT_PAGE_INIT=false;
+const SECT_CACHE={};   // "sektör:cc" → { rows, ts } (10 dk)
+function initSectPage(){
+  if(SECT_PAGE_INIT) return;
+  SECT_PAGE_INIT=true;
+  document.getElementById('sectCountries').innerHTML=
+    `<button class="cbox" id="sbox-GLOBAL" onclick="selectSectCountry('GLOBAL')"><span class="cfl" style="font-size:17px;line-height:1">🌍</span><span>Bütün Dünya</span></button>`+
+    ECON_COUNTRIES.map(([cc,name])=>
+      `<button class="cbox" id="sbox-${cc}" onclick="selectSectCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  document.getElementById('sectSectors').innerHTML=SECT_SECTORS.map(([id,ic,name])=>
+    `<button class="cbox" id="secbox-${id}" onclick="toggleSectSector('${id}')"><span class="cfl" style="font-size:16px;line-height:1">${ic}</span><span>${name}</span></button>`).join('');
+  document.getElementById('sbox-GLOBAL')?.classList.add('active');
+  toggleSectSector('yazilim');   // ilk açılış örneği: dünya yazılım devleri
+}
+function selectSectCountry(cc){
+  if(SECT_CC===cc) return;
+  document.getElementById('sbox-'+SECT_CC)?.classList.remove('active');
+  SECT_CC=cc;
+  document.getElementById('sbox-'+cc)?.classList.add('active');
+  if(SECT_OPEN) loadSectPanel();   // açık sektör varsa yeni ülkeyle yeniden yükle
+}
+function toggleSectSector(id){
+  const prev=SECT_OPEN;
+  if(prev){
+    SECT_OPEN=null; SECT_GEN++;
+    document.getElementById('spanel')?.remove();
+    document.getElementById('secbox-'+prev)?.classList.remove('active');
+  }
+  if(prev!==id){
+    SECT_OPEN=id;
+    document.getElementById('secbox-'+id)?.classList.add('active');
+    loadSectPanel();
+  }
+  const hint=document.getElementById('sectEmptyHint');
+  if(hint) hint.style.display=SECT_OPEN?'none':'';
+}
+async function loadSectPanel(){
+  const id=SECT_OPEN;
+  const def=SECT_SECTORS.find(s=>s[0]===id);
+  if(!def) return;
+  const cc=SECT_CC;
+  // Paneli (yeniden) kur
+  document.getElementById('spanel')?.remove();
+  const cName = cc==='GLOBAL' ? 'Bütün Dünya' : (ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  const cIcon = cc==='GLOBAL' ? '<span class="cfl" style="font-size:17px;line-height:1">🌍</span>' : flagSpan(cc);
+  const el=document.createElement('div');
+  el.className='card'; el.id='spanel';
+  el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${cIcon}${cName} — ${def[1]} ${def[2]} Devleri</h2>
+    <div class="sub">Piyasa değerine göre canlı sıralama (TradingView${cc==='GLOBAL'?', USD':''}). <b>Satıra tıklayınca analiz açılır.</b>${def[3].curated?' Liste küratörlüdür (TV\'de bu kategori ayrı sektör olarak sınıflandırılmaz).':''}</div>
+    <div id="sectBody"><div class="hint">Yükleniyor…</div></div>`;
+  document.getElementById('sectPanel').appendChild(el);
+  const key=id+':'+cc;
+  const cached=SECT_CACHE[key];
+  if(cached && (Date.now()-cached.ts)<10*60000){ renderSectPanel(def, cc, cached.rows); return; }
+  const myGen=++SECT_GEN;
+  try{
+    const cols=['name','description','market_cap_basic','close','currency',
+      'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'];
+    let rows;
+    if(def[3].curated){
+      let list=SECT_CURATED[def[3].curated];
+      if(cc!=='GLOBAL') list=list.filter(([,c])=>c===cc);
+      if(!list.length){ if(SECT_OPEN===id) document.getElementById('sectBody').innerHTML='<div class="hint">Bu ülkede bu kategoriden izlenen şirket yok. 🌍 Bütün Dünya görünümünü dene.</div>'; return; }
+      const r=await fetch('https://scanner.tradingview.com/global/scan',{method:'POST',body:JSON.stringify({
+        symbols:{tickers:list.map(([t])=>t)}, columns:cols })});
+      const j=r.ok?await r.json():null;
+      if(myGen!==SECT_GEN || SECT_OPEN!==id) return;
+      rows=(j&&j.data||[]).filter(x=>x.d&&x.d[2]!=null).sort((a,b)=>b.d[2]-a.d[2]);
+    }else{
+      const scan = cc==='GLOBAL' ? 'global' : TOP100_MARKETS[cc].scan;
+      const filter=[{left:'is_primary',operation:'equal',right:true}];
+      if(cc!=='GLOBAL' && TOP100_MARKETS[cc].ex) filter.push({left:'exchange',operation:'equal',right:TOP100_MARKETS[cc].ex});
+      filter.push(def[3].sec
+        ? {left:'sector',  operation:'in_range', right:def[3].sec}
+        : {left:'industry',operation:'in_range', right:def[3].ind});
+      const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{method:'POST',body:JSON.stringify({
+        columns:cols, filter, sort:{sortBy:'market_cap_basic',sortOrder:'desc'}, range:[0,50] })});
+      const j=r.ok?await r.json():null;
+      if(myGen!==SECT_GEN || SECT_OPEN!==id) return;
+      rows=(j&&j.data||[]);
+      // Küresel listede aynı şirketin çift hisse sınıfı (GOOG/GOOGL) art arda çıkar — ada göre teke indir
+      const seen=new Set();
+      rows=rows.filter(x=>{ const dsc=x.d&&x.d[1]&&x.d[1].replace(/ Class [A-C].*$/,''); if(!dsc||seen.has(dsc)) return false; seen.add(dsc); return true; });
+    }
+    if(!rows.length){ document.getElementById('sectBody').innerHTML='<div class="hint">Bu ülke/sektör kombinasyonunda şirket bulunamadı. 🌍 Bütün Dünya görünümünü dene.</div>'; return; }
+    SECT_CACHE[key]={ rows, ts:Date.now() };
+    renderSectPanel(def, cc, rows);
+  }catch(e){
+    if(SECT_OPEN===id) document.getElementById('sectBody').innerHTML='<div class="hint">Liste alınamadı: '+e.message+'</div>';
+  }
+}
+function renderSectPanel(def, cc, rows){
+  const box=document.getElementById('sectBody');
+  if(!box) return;
+  const mSym = cc==='GLOBAL' ? '$' : TOP100_MARKETS[cc].sym;
+  const pp=v=>v==null?'—':v.toFixed(1)+'%';
+  const xx=v=>v==null?'—':v.toFixed(1)+'x';
+  const trRows=rows.slice(0,50).map((x,i)=>{
+    const d=x.d;
+    const [ex,rawCode]=x.s.split(':');
+    const base=(rawCode||d[0]).replace(/_/g,'-');
+    const codeFn=TV_EX2CODE[ex];
+    const click=codeFn?` style="cursor:pointer" onclick="searchExact('${codeFn(base)}')" title="${safeHTML(d[1]||d[0])} analizini aç"`:' title="Bu borsa uygulamada analiz için desteklenmiyor"';
+    const price=d[3]==null?'—':(cc==='GLOBAL'
+      ? d[3].toLocaleString('tr-TR',{maximumFractionDigits:2})+' '+safeHTML(d[4]||'')
+      : mSym+d[3].toLocaleString('tr-TR',{maximumFractionDigits:2}));
+    return `<tr${click}>
+      <td style="color:var(--muted)">${i+1}</td>
+      <td><b>${safeHTML(base)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+      <td><b>${fmtMcapSym(d[2], cc==='GLOBAL'?'$':mSym)}</b></td>
+      <td>${price}</td>
+      <td>${xx(d[5])}</td>
+      <td>${xx(d[6])}</td>
+      <td>${pp(d[7])}</td>
+      <td>${pp(d[8])}</td>
+      <td>${fmtEmployees(d[9])}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+    <tbody>${trRows}</tbody></table></div>
+    ${cc==='GLOBAL'?'<div class="hint" style="margin-top:8px">Dünya görünümünde piyasa değerleri USD\'ye çevrilmiştir; fiyatlar şirketin kendi para birimindedir.</div>':''}`;
+}
+
 /* ---------- KAP Bildirimleri (yalnızca BIST) ----------
    Kaynak: Fintables topic-feed API'si (CORS *, tarayıcıdan çağrılır — CF gerçek tarayıcıyı
    geçirir). Akıştaki type==='news' öğeleri KAP bildirimleridir; kap_id ile resmi KAP
@@ -2361,7 +2657,7 @@ function hidePriceUI(){
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
-  ['chartCard','sectorCard','top10Card','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
+  ['chartCard','sectorCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
   const ws=document.getElementById('watchStar'); if(ws) ws.classList.add('hidden');
@@ -2940,64 +3236,6 @@ async function fetchSectorComparison(sym, market, myGen, euOpt){
       </tbody></table>
       <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span> = gösterilen şirketler arasında o metrikte en iyi değer (F/K ve PD/DD'de en düşük, ROE ve Net Marj'da en yüksek).</div>`;
   }catch(e){ box.innerHTML='<div class="hint">Sektör verisi alınamadı: '+e.message+'</div>'; }
-}
-
-/* ---- Borsanın Devleri — piyasa değerine göre ilk 10 (TradingView scanner) ----
-   companiesmarketcap.com'un ülke/borsa sıralamasına eşdeğer, ama üçüncü taraf siteyi
-   kazımak yerine (statik yapı olsa da resmi API'si yok, sayfa yapısı/ToS zamanla değişebilir)
-   uygulamanın zaten güvenilir şekilde kullandığı TradingView scanner'ı — sektör
-   karşılaştırmasıyla AYNI uç nokta, yalnızca sektör filtresi olmadan piyasa değerine göre
-   sıralanmış tüm borsa. 17 pazarın (BIST/ABD/15 Avrupa borsası) hepsinde aynı şekilde çalışır. */
-async function fetchExchangeTop10(sym, market, myGen, euOpt){
-  const card=document.getElementById('top10Card'), box=document.getElementById('top10Body'), sub=document.getElementById('top10Sub');
-  if(!card) return;
-  card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Borsa verisi yükleniyor…</div>';
-  try{
-    const scan = euOpt ? euOpt.scan : (market==='BIST' ? 'turkey' : 'america');
-    const exchangeName = euOpt ? euOpt.country : (market==='BIST' ? 'Borsa İstanbul' : 'ABD Borsaları');
-    const cols=['name','description','close','market_cap_basic','price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'];
-    // is_primary=true → çapraz kotasyonlu yabancı devlerin (ör. Xetra'da işlem gören NVIDIA)
-    // yerel sıralamayı ele geçirmesini engeller; yalnızca o borsanın kendi birincil kotasyonlu
-    // şirketleri sayılır (bkz. EU_EXCHANGES üstündeki not — aynı prensip).
-    const filter=[{left:'is_primary',operation:'equal',right:true}];
-    if(euOpt && euOpt.tv) filter.push({left:'exchange',operation:'equal',right:euOpt.tv});
-    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{method:'POST',body:JSON.stringify({
-      columns:cols, filter, sort:{sortBy:'market_cap_basic',sortOrder:'desc'}, range:[0,10]
-    })});
-    const j=r.ok?await r.json():null;
-    if(myGen!=null && myGen!==REQ_GEN) return;
-    const rows=(j&&j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
-    if(!rows.length){ box.innerHTML='<div class="hint">Borsa verisi bulunamadı.</div>'; return; }
-    sub.innerHTML=`<b>${safeHTML(exchangeName)}</b>'da piyasa değerine göre en büyük 10 şirket. Kaynak: TradingView. <b>Satıra tıklayınca o şirketin analizi açılır.</b>`;
-    const pp=v=>v==null?'—':v.toFixed(1)+'%';
-    const xx=v=>v==null?'—':v.toFixed(1)+'x';
-    // Satır tıklaması → o hissenin analizini aç. Ek her zaman açıkça verilir (borsa tespiti
-    // atlanır): BIST → .IS, ABD → .US, Avrupa/Kore → mevcut aramanın borsa eki (euOpt.suffix;
-    // top10 listesi zaten aynı ülkenin scan'inden geldiği için ek de aynıdır).
-    // TV isimlerindeki alt çizgi (VOLV_B) bizim kod biçimimizde tireye çevrilir.
-    const clickCode=t=>{
-      const base=t.replace(/_/g,'-');
-      if(euOpt && euOpt.suffix) return base+'.'+euOpt.suffix;
-      return base+(market==='BIST'?'.IS':'.US');
-    };
-    const trRows=rows.map((d,i)=>{
-      const isMe=d[0]===sym;
-      return `<tr style="cursor:pointer${isMe?';background:var(--surface-3)':''}" onclick="searchExact('${clickCode(d[0])}');window.scrollTo({top:0,behavior:'smooth'})" title="${safeHTML(d[1]||d[0])} analizini aç">
-        <td>${i+1}</td>
-        <td>${isMe?'<b>':''}${safeHTML(d[0])}${isMe?' ★</b>':''} <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
-        <td>${fmtMcap(d[3])}</td>
-        <td>${xx(d[4])}</td>
-        <td>${xx(d[5])}</td>
-        <td>${pp(d[6])}</td>
-        <td>${pp(d[7])}</td>
-        <td>${fmtEmployees(d[8])}</td>
-      </tr>`;
-    }).join('');
-    box.innerHTML=`<table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
-      <tbody>${trRows}</tbody></table>
-      ${!rows.some(d=>d[0]===sym)?'<div class="hint" style="margin-top:8px">Aranan hisse ilk 10\'da değil.</div>':''}`;
-  }catch(e){ box.innerHTML='<div class="hint">Borsa verisi alınamadı: '+e.message+'</div>'; }
 }
 
 /* ---- İzleme Listesi (localStorage) ---- */
