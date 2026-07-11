@@ -312,6 +312,7 @@
     <button class="tab-btn active" id="tabbtn-home" onclick="switchPage('home')">🏠 Ana Sayfa</button>
     <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
     <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
+    <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
   </div>
 </nav>
 
@@ -506,12 +507,6 @@
       <div id="sectorBody"><div class="hint">—</div></div>
     </div>
 
-    <div class="card hidden" id="top10Card">
-      <h2>Borsanın Devleri</h2>
-      <div class="sub" id="top10Sub">Bu hissenin işlem gördüğü borsada piyasa değerine göre en büyük 10 şirket. (Kaynak: TradingView)</div>
-      <div id="top10Body"><div class="hint">—</div></div>
-    </div>
-
     <div class="card hidden" id="insiderCard">
       <h2>İçeriden Alım-Satım (Form 4)</h2>
       <div class="sub">Şirket yöneticileri ve büyük ortakların kendi hisselerindeki işlemleri — SEC'e zorunlu Form 4 bildirimlerinden. Yöneticilerin <span class="up">alımı</span> genelde güven işareti sayılır. (Yalnızca ABD hisselerinde; BIST'te benzer bildirimler KAP Bildirimleri kartında gelir.)</div>
@@ -557,6 +552,23 @@
       <div id="flags"></div>
     </div>
 
+  </div>
+
+</div>
+
+<!-- ============ SAYFA 4: İLK 100 ŞİRKET ============ -->
+<div id="page-top100" class="page">
+
+  <div class="card no-print" style="margin-bottom:16px">
+    <h2>Piyasa Değerine Göre İlk 100 Şirket — 18 Ülke</h2>
+    <div class="sub">Soldan ülke kutusuna tıkla — o ülkenin borsasındaki en değerli 100 şirket canlı piyasa değerine göre sıralı açılır, <b>tekrar tıklayınca kapanır</b>. Tek seferde bir ülke listesi açık kalır; başka ülkeye tıklayınca öncekinin yerini alır. <b>Satıra tıklayınca o şirketin bilanço analizi açılır.</b> Kaynak: TradingView (canlı).</div>
+  </div>
+
+  <div class="econ-layout">
+    <div class="econ-side no-print" id="topCountries"></div>
+    <div class="econ-main" id="topPanels">
+      <div class="hint" id="topEmptyHint" style="padding:26px 10px;text-align:center">İlk 100 listesini görmek istediğin ülkeyi soldan seç.</div>
+    </div>
   </div>
 
 </div>
