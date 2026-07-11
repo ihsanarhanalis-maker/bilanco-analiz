@@ -44,6 +44,48 @@
   .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
   .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 
+  /* --- Sekme çubuğu (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) --- */
+  .tabs-nav{background:rgba(12,16,34,.92);border-bottom:1px solid var(--line-2);
+    position:sticky;top:0;z-index:50;backdrop-filter:blur(8px)}
+  .tabs-in{max-width:1180px;margin:0 auto;padding:0 28px;display:flex;gap:6px}
+  .tab-btn{background:none;border:none;border-radius:0;color:var(--muted);font-size:13.5px;font-weight:700;
+    padding:13px 16px;border-bottom:2.5px solid transparent;transition:.15s}
+  .tab-btn:hover{color:var(--ink);background:none;border-color:var(--line-2)}
+  .tab-btn.active{color:var(--accent-2);border-bottom-color:var(--accent)}
+  .page{display:none}
+  .page.active{display:block}
+
+  /* --- Ana sayfa: büyük arama --- */
+  .hero{text-align:center;padding:52px 16px 40px}
+  .hero .hero-logo{display:inline-flex;width:72px;height:72px;border-radius:19px;margin-bottom:18px;
+    background:linear-gradient(140deg,#1b2942,#101626);border:1px solid var(--line-2);
+    align-items:center;justify-content:center;box-shadow:0 8px 26px rgba(0,0,0,.45)}
+  .hero h2{margin:0 0 8px;font-size:27px;font-weight:800;color:#fff;letter-spacing:.2px}
+  .hero .hero-sub{color:var(--ink-2);font-size:13.5px;margin-bottom:26px;line-height:1.6}
+  .hero-search{display:flex;gap:10px;justify-content:center;align-items:stretch;flex-wrap:wrap;max-width:640px;margin:0 auto}
+  .hero-search input{flex:1;min-width:230px;background:var(--surface);border:1px solid var(--line-2);color:var(--ink);
+    padding:14px 18px;border-radius:13px;font-size:16px;font-weight:700;text-transform:uppercase;
+    box-shadow:var(--shadow)}
+  .hero-search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(79,156,249,.18)}
+  .hero-search select{background:var(--surface);border:1px solid var(--line-2);color:var(--ink);
+    padding:0 14px;border-radius:13px;font-size:13.5px;font-weight:600}
+  .hero-search button{padding:14px 26px;border-radius:13px;font-size:15px}
+  .hero .hero-hint{color:var(--muted);font-size:12px;margin-top:16px}
+  .hero .hero-hint b{color:var(--ink-2)}
+
+  /* --- Ekonomik takvim sayfası: solda ülke kutuları, sağda açık paneller --- */
+  .econ-layout{display:flex;gap:18px;align-items:flex-start}
+  .econ-side{flex:0 0 210px;display:flex;flex-direction:column;gap:8px;position:sticky;top:64px}
+  .cbox{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+    background:var(--surface);border:1px solid var(--line);border-radius:11px;
+    padding:10px 13px;font-size:13px;font-weight:600;color:var(--ink-2)}
+  .cbox:hover{border-color:var(--accent);color:var(--ink);background:var(--surface-2)}
+  .cbox.active{background:rgba(79,156,249,.12);border-color:rgba(79,156,249,.45);color:var(--accent-2)}
+  .cfl{display:inline-flex;flex:0 0 auto;line-height:0}
+  .cfl svg{width:22px;height:auto;border-radius:2.5px;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+  .cbox.active::after{content:"✓";margin-left:auto;font-weight:800;color:var(--accent-2)}
+  .econ-main{flex:1;min-width:0}
+
   .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 70px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;
     padding:20px 22px;margin-bottom:18px;box-shadow:var(--shadow)}
@@ -163,6 +205,17 @@
 
   /* --- Mobil (telefon) uyumu --- */
   @media (max-width:600px){
+    .tabs-in{padding:0 8px}
+    .tab-btn{padding:11px 10px;font-size:12.5px;flex:1;text-align:center}
+    .hero{padding:30px 6px 24px}
+    .hero h2{font-size:21px}
+    .hero-search input{min-width:0;font-size:15px;padding:12px 14px}
+    .hero-search button{padding:12px 18px}
+    /* Ekonomik takvim: ülke kutuları üstte yatay kaydırmalı şerit olur */
+    .econ-layout{flex-direction:column}
+    .econ-side{position:static;flex-direction:row;overflow-x:auto;width:100%;padding-bottom:6px;
+      -webkit-overflow-scrolling:touch}
+    .cbox{flex:0 0 auto;width:auto;white-space:nowrap}
     .hd-inner{padding:13px 14px;gap:10px;flex-wrap:wrap}
     header h1{font-size:18px}
     header p{font-size:11px}
@@ -253,7 +306,52 @@
   </div>
 </header>
 
+<!-- SEKME ÇUBUĞU -->
+<nav class="tabs-nav no-print">
+  <div class="tabs-in">
+    <button class="tab-btn active" id="tabbtn-home" onclick="switchPage('home')">🏠 Ana Sayfa</button>
+    <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
+    <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
+  </div>
+</nav>
+
 <div class="wrap">
+
+<!-- ============ SAYFA 1: ANA SAYFA ============ -->
+<div id="page-home" class="page active">
+
+  <div class="hero no-print">
+    <div class="hero-logo">
+      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="3"  y="13" width="4" height="8" rx="1" fill="#9cc3e6"/>
+        <rect x="10" y="8"  width="4" height="13" rx="1" fill="#cfe0f0"/>
+        <rect x="17" y="4"  width="4" height="17" rx="1" fill="#c8a23a"/>
+      </svg>
+    </div>
+    <h2>Hisse ara, bilançoyu anında analiz et</h2>
+    <div class="hero-sub">ABD · Borsa İstanbul · Güney Kore · 15 Avrupa borsası — kodu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
+    <div class="hero-search">
+      <input id="homeTicker" placeholder="örn. NVDA, THYAO, SAP…" onkeydown="if(event.key==='Enter')homeSearch()">
+      <select id="homePeriod">
+        <option value="annual">Yıllık</option>
+        <option value="quarter">Çeyreklik</option>
+      </select>
+      <button class="primary" onclick="homeSearch()">Ara →</button>
+    </div>
+    <div class="hero-hint">Örnek: <b>NVDA</b> · <b>THYAO</b> · <b>NESN</b> (Nestlé) · <b>VOLV-B</b> (Volvo) · <b>005930</b> (Samsung) — aynı kod birden çok borsada varsa seçenekler listelenir.</div>
+  </div>
+
+  <!-- İZLEME LİSTESİ -->
+  <div class="card no-print hidden" id="watchCard">
+    <h2>İzleme Listem</h2>
+    <div class="sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
+    <div id="watchBody"><div class="hint">—</div></div>
+  </div>
+
+</div>
+
+<!-- ============ SAYFA 2: BİLANÇO ANALİZİ ============ -->
+<div id="page-stock" class="page">
 
   <!-- ŞİRKET ARAMA -->
   <div class="card no-print">
@@ -269,13 +367,6 @@
       <button id="watchStar" class="hidden" onclick="toggleWatch()" title="İzleme listesine ekle/çıkar">☆ Listeme Ekle</button>
       <span id="fetchStatus" class="hint"></span>
     </div>
-  </div>
-
-  <!-- İZLEME LİSTESİ -->
-  <div class="card no-print hidden" id="watchCard">
-    <h2>İzleme Listem</h2>
-    <div class="sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
-    <div id="watchBody"><div class="hint">—</div></div>
   </div>
 
   <!-- ŞİRKET KARŞILAŞTIRMA -->
@@ -403,24 +494,6 @@
       <div id="kapBody"><div class="hint">—</div></div>
     </div>
 
-    <div class="card hidden" id="econCard">
-      <h2 id="econTitle">Ekonomik Takvim</h2>
-      <div class="sub">Ekonomik veriler (saatler TSİ). Üstten dönemi, yandan önem düzeyini seç — ikisi birlikte filtreler. <b>★★★</b> = piyasayı en çok etkileyenler (enflasyon, faiz kararı, istihdam…). Açıklanan değer beklentiye göre olumluysa <span class="up">yeşil</span>, olumsuzsa <span class="down">kırmızı</span> gösterilir.</div>
-      <div class="toolbar" id="econTimeBtns" style="margin-bottom:8px">
-        <button data-t="dun" onclick="setEconTime('dun')">Dün</button>
-        <button data-t="bugun" onclick="setEconTime('bugun')">Bugün</button>
-        <button data-t="yarin" onclick="setEconTime('yarin')">Yarın</button>
-        <button data-t="buhafta" onclick="setEconTime('buhafta')">Bu Hafta</button>
-        <button data-t="gelecekhafta" onclick="setEconTime('gelecekhafta')">Gelecek Hafta</button>
-      </div>
-      <div class="toolbar" id="econBtns">
-        <button data-imp="-1" onclick="setEconImp(-1)">★ Düşük</button>
-        <button data-imp="0" onclick="setEconImp(0)">★★ Orta</button>
-        <button data-imp="1" onclick="setEconImp(1)">★★★ Yüksek</button>
-      </div>
-      <div id="econBody"><div class="hint">—</div></div>
-    </div>
-
     <div class="card hidden" id="targetCard">
       <h2>Analist Hedef Fiyatları</h2>
       <div class="sub">Hisseyi izleyen banka ve aracı kurumların konsensüs hedef fiyatı, genel tavsiye ve dağılım. ABD hisselerinde kaynak Finviz (kurum bazlı not geçmişiyle); BIST hisselerinde kaynak TradingView/Refinitiv (Türk ve uluslararası aracı kurum tahminlerinin konsensüsü: ortalama/en yüksek/en düşük hedef + Al-Tut-Sat dağılımı).</div>
@@ -485,6 +558,25 @@
     </div>
 
   </div>
+
+</div>
+
+<!-- ============ SAYFA 3: EKONOMİK TAKVİM ============ -->
+<div id="page-econ" class="page">
+
+  <div class="card no-print" style="margin-bottom:16px">
+    <h2>Ekonomik Takvim — 18 Ülke</h2>
+    <div class="sub">Soldan ülke kutusuna tıkla — o ülkenin ekonomik takvimi sağda açılır, <b>tekrar tıklayınca kapanır</b>. Aynı anda istediğin kadar ülke açık kalabilir; her panelin dönem (Dün/Bugün/Bu Hafta…) ve önem (★/★★/★★★) filtresi bağımsızdır. Saatler TSİ. Kaynak: Investing.com (yedek: TradingView).</div>
+  </div>
+
+  <div class="econ-layout">
+    <div class="econ-side no-print" id="econCountries"></div>
+    <div class="econ-main" id="econPanels">
+      <div class="hint" id="econEmptyHint" style="padding:26px 10px;text-align:center">Takvimini görmek istediğin ülkeyi soldan seç.</div>
+    </div>
+  </div>
+
+</div>
 
   <div class="footer">
     Bu araç finansal danışmanlık değildir; sonuçlar nitelikli bir analist tarafından gözden geçirilmelidir.<br>

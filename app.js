@@ -1,3 +1,22 @@
+/* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
+function switchPage(p){
+  ['home','stock','econ'].forEach(x=>{
+    document.getElementById('page-'+x)?.classList.toggle('active', x===p);
+    document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
+  });
+  if(p==='econ') initEconPage();   // ülke kutuları ilk girişte kurulur (tembel)
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+/* Ana sayfadaki büyük arama: değeri Bilanço sekmesindeki arama kutusuna taşıyıp orada aratır */
+function homeSearch(){
+  const v=(document.getElementById('homeTicker').value||'').trim();
+  if(!v) return;
+  document.getElementById('ticker').value=v;
+  document.getElementById('periodType').value=document.getElementById('homePeriod').value;
+  switchPage('stock');
+  fetchTicker();
+}
+
 /* ---------- Kalem kategorileri ---------- */
 const CATS = {
   asset_current:  "Dönen Varlık",
@@ -503,7 +522,6 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
     fetchTargetsBIST(sym, myGen);   // kurum bazlı hedef fiyatlar (Fintables; yedek TV konsensüsü)
     fetchKapFeed(sym, myGen);       // KAP bildirimleri (kısa özet + resmi KAP linki)
-    fetchEconCalendar(myGen, 'TR'); // Türkiye ekonomik takvimi (★/★★/★★★ filtreli)
     fetchNextEarnings(sym, 'BIST', myGen);
     fetchPriceChart(sym, sym+'.IS', myGen);
     fetchSectorComparison(sym, 'BIST', myGen);
@@ -839,7 +857,6 @@ async function fetchTickerEU(euInfo, mode, myGen){
     updateWatchStar();
     startEuExchangeClock(euInfo);   // sağ üstte borsanın bulunduğu şehrin canlı saati + seans durumu
     renderOwnershipEU(R.floatPct, R.floatShares, R.shares);   // halka açıklık pastası (TV free float)
-    fetchEconCalendar(myGen, euInfo.iso, euInfo.country);     // borsa ülkesinin ekonomik takvimi (TV)
     // KAP/İçeriden işlem: Avrupa'da anahtarsız kaynak yok (KAP=TR, Form 4=ABD) — kart gizlenir
     ['kapCard','insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }catch(e){
@@ -1006,7 +1023,6 @@ async function fetchTickerUS(sym, mode, myGen){
     fetchTargets(sym, myGen);
     fetchNextEarnings(sym, 'US', myGen);
     startNyClock();   // sağ üstte saniyelik canlı New York saati
-    fetchEconCalendar(myGen, 'US');   // ABD ekonomik takvimi (★/★★/★★★ filtreli)
     fetchPriceChart(sym, sym, myGen);
     fetchSectorComparison(sym, 'US', myGen);
     fetchExchangeTop10(sym, 'US', myGen);
@@ -1357,8 +1373,44 @@ async function renderWatchlist(){
    Investing sekmelerine (yesterday/today/tomorrow/thisWeek/nextWeek) 1:1 karşılık gelir.
    YEDEK: Investing (CF engeli vb) veri vermezse TradingView /econ + küratörlü ECON_MAP devreye
    girer (isim/önem tahminle; kart boş kalmasın diye). Renderda hangi kaynak kullanıldığı yazar. */
-let ECON_IMP=1, ECON_TIME='buhafta', ECON_MARKET='TR';
-/* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + 15 Avrupa borsa ülkesi) —
+/* Ekonomik Takvim sekmesi: her ülke bağımsız bir panel — ECON_PANELS[cc]={time,imp,gen}.
+   Ülke kutusuna tıklayınca panel açılır/kapanır; birden çok ülke aynı anda açık kalabilir. */
+/* Bayrak emojisi (🇹🇷 vb.) Windows Chrome'da renkli glif olarak gösterilmiyor — bölge
+   göstergesi harf çifti düz metin gibi ("TR","US") kalıyor. Çözüm: her ülke için küçük,
+   self-contained SVG bayrak (harici kaynak/CDN yok). viewBox 0 0 30 20 (3:2), sade/şematik
+   ama tanınabilir (İngiltere Union Jack, Türkiye ay-yıldız, Güney Kore taegeuk sadeleştirildi). */
+const FLAG_SVG={
+  TR:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#E30A17"/><circle cx="12" cy="10" r="5" fill="#fff"/><circle cx="13.3" cy="10" r="4" fill="#E30A17"/><path fill="#fff" d="M17.5 10l4.8-1.55-3 4.06.02-5.02-3 4.06 1.18-4.77z"/>`,
+  US:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/>${Array.from({length:7}).map((_,i)=>`<rect y="${i*20/13*2}" width="30" height="${20/13}" fill="#B22234"/>`).join('')}<rect width="14" height="10.8" fill="#3C3B6E"/>`,
+  GB:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#00247D"/><path d="M0 0L30 20M30 0L0 20" stroke="#fff" stroke-width="4"/><path d="M0 0L30 20M30 0L0 20" stroke="#CF142B" stroke-width="1.6"/><path d="M15 0V20M0 10H30" stroke="#fff" stroke-width="6.6"/><path d="M15 0V20M0 10H30" stroke="#CF142B" stroke-width="4"/>`,
+  DE:`<svg viewBox="0 0 30 20"><rect width="30" height="6.67" fill="#000"/><rect y="6.67" width="30" height="6.67" fill="#DD0000"/><rect y="13.33" width="30" height="6.67" fill="#FFCE00"/>`,
+  FR:`<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="#0055A4"/><rect x="10" width="10" height="20" fill="#fff"/><rect x="20" width="10" height="20" fill="#EF4135"/>`,
+  IT:`<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="#009246"/><rect x="10" width="10" height="20" fill="#fff"/><rect x="20" width="10" height="20" fill="#CE2B37"/>`,
+  ES:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#AA151B"/><rect y="5" width="30" height="10" fill="#F1BF00"/>`,
+  NL:`<svg viewBox="0 0 30 20"><rect width="30" height="6.67" fill="#AE1C28"/><rect y="6.67" width="30" height="6.67" fill="#fff"/><rect y="13.33" width="30" height="6.67" fill="#21468B"/>`,
+  BE:`<svg viewBox="0 0 30 20"><rect width="10" height="20" fill="#000"/><rect x="10" width="10" height="20" fill="#FAE042"/><rect x="20" width="10" height="20" fill="#ED2939"/>`,
+  PT:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#FF0000"/><rect width="12" height="20" fill="#046A38"/><circle cx="12" cy="10" r="3.2" fill="#FFCC00" stroke="#fff" stroke-width=".4"/>`,
+  CH:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#FF0000"/><rect x="12.5" y="5" width="5" height="10" fill="#fff"/><rect x="9.5" y="8" width="11" height="4" fill="#fff"/>`,
+  SE:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#005293"/><rect x="10" width="4" height="20" fill="#FECC00"/><rect y="8" width="30" height="4" fill="#FECC00"/>`,
+  DK:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#C60C30"/><rect x="10" width="4" height="20" fill="#fff"/><rect y="8" width="30" height="4" fill="#fff"/>`,
+  NO:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#EF2B2D"/><rect x="9" width="6" height="20" fill="#fff"/><rect y="7" width="30" height="6" fill="#fff"/><rect x="10.5" width="3" height="20" fill="#002868"/><rect y="8.5" width="30" height="3" fill="#002868"/>`,
+  FI:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect x="9" width="4" height="20" fill="#002F6C"/><rect y="8" width="30" height="4" fill="#002F6C"/>`,
+  AT:`<svg viewBox="0 0 30 20"><rect width="30" height="6.67" fill="#ED2939"/><rect y="6.67" width="30" height="6.67" fill="#fff"/><rect y="13.33" width="30" height="6.67" fill="#ED2939"/>`,
+  PL:`<svg viewBox="0 0 30 20"><rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#DC143C"/>`,
+  KR:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="4.5" fill="#CD2E3A"/><path d="M15 5.5a4.5 4.5 0 000 9 2.25 2.25 0 010-4.5 2.25 2.25 0 000-4.5z" fill="#0047A0"/>`,
+};
+function flagSpan(cc){ return `<span class="cfl" aria-hidden="true">${(FLAG_SVG[cc]||'')+'</svg>'}</span>`; }
+const ECON_COUNTRIES=[
+  ['TR','Türkiye'],   ['US','ABD'],       ['GB','İngiltere'],
+  ['DE','Almanya'],   ['FR','Fransa'],    ['IT','İtalya'],
+  ['ES','İspanya'],   ['NL','Hollanda'],  ['BE','Belçika'],
+  ['PT','Portekiz'],  ['CH','İsviçre'],   ['SE','İsveç'],
+  ['DK','Danimarka'], ['NO','Norveç'],    ['FI','Finlandiya'],
+  ['AT','Avusturya'], ['PL','Polonya'],   ['KR','Güney Kore'],
+];
+const ECON_PANELS={};
+let ECON_PAGE_INIT=false;
+/* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + 15 Avrupa + Güney Kore) —
    ISO→Investing ülke ID eşlemesi server.js /investcal rotasında */
 const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR'];
 const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
@@ -1529,22 +1581,20 @@ function parseInvestingCal(htmlData){
     return { name, imp, aStr, aClr, fStr:fStr||'—', pStr:pStr||'—', dateLbl, timeLbl };
   }).filter(Boolean);
 }
-/* YEDEK: TradingView /econ → seçili dönemin (tab) satırları (isim/önem küratörlü haritadan). */
-async function tvRowsForTab(myGen){
+/* YEDEK: TradingView /econ → seçili ülke+dönemin satırları (isim/önem küratörlü haritadan). */
+async function tvRowsForTab(cc, time){
   const from=new Date(Date.now()-3*86400000).toISOString();
   const to=new Date(Date.now()+16*86400000).toISOString();
-  const j=await fetch('/econ?countries='+ECON_MARKET+'&from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to)).then(r=>r.ok?r.json():null).catch(()=>null);
-  if(myGen!=null && myGen!==REQ_GEN) return null;
+  const j=await fetch('/econ?countries='+cc+'&from='+encodeURIComponent(from)+'&to='+encodeURIComponent(to)).then(r=>r.ok?r.json():null).catch(()=>null);
   let evs=((j&&j.result)||[]).map(e=>{
     const cls=econClassify(e.title||'');
     return { title:e.title||'', imp:cls.imp, mappedTr:cls.tr, period:econPeriodTR(e.period||''),
       d:new Date(e.date), aRaw:e.actualRaw, fRaw:e.forecastRaw, pRaw:e.previousRaw,
       aStr:econVal(e.actual,e), fStr:econVal(e.forecast,e), pStr:econVal(e.previous,e), dir:econDir(e.title) };
-  }).filter(e=>!isNaN(e.d) && econInTime(e,ECON_TIME)).sort((a,b)=>a.d-b.d);   // sadece bu döneme ait
+  }).filter(e=>!isNaN(e.d) && econInTime(e,time)).sort((a,b)=>a.d-b.d);   // sadece bu döneme ait
   const need=[...new Set(evs.filter(e=>!e.mappedTr).map(e=>e.title))];
   if(need.length){
     const tr=await translateTR(need);
-    if(myGen!=null && myGen!==REQ_GEN) return null;
     const tmap={}; need.forEach((t,i)=>tmap[t]=tr[i]||t);
     evs.forEach(e=>{ if(!e.mappedTr) e.trName=tmap[e.title]; });
   }
@@ -1559,62 +1609,93 @@ async function tvRowsForTab(myGen){
     return { name, imp:e.imp, aStr:e.aStr, aClr, fStr:e.fStr, pStr:e.pStr, dateLbl:fD.format(e.d), timeLbl:fT.format(e.d) };
   });
 }
-async function loadEconTab(myGen){
-  const box=document.getElementById('econBody');
-  const tab=ECON_TAB[ECON_TIME]||'thisWeek';
-  const key=ECON_MARKET+':'+tab;
+/* Ekonomik Takvim sayfası: sol ülke kutuları ilk girişte kurulur; Türkiye açık başlar. */
+function initEconPage(){
+  if(ECON_PAGE_INIT) return;
+  ECON_PAGE_INIT=true;
+  document.getElementById('econCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
+    `<button class="cbox" id="cbox-${cc}" onclick="toggleEconCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  toggleEconCountry('TR');
+}
+function toggleEconCountry(cc){
+  const box=document.getElementById('cbox-'+cc);
+  if(ECON_PANELS[cc]){
+    // Açık → kapat: paneli kaldır, kutunun işaretini sil
+    delete ECON_PANELS[cc];
+    document.getElementById('epanel-'+cc)?.remove();
+    box?.classList.remove('active');
+  }else{
+    // Kapalı → aç: panel oluştur (tıklama sırasına göre en alta eklenir), veriyi yükle
+    ECON_PANELS[cc]={ time:'buhafta', imp:1, gen:0 };
+    box?.classList.add('active');
+    const c=ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc];
+    const el=document.createElement('div');
+    el.className='card'; el.id='epanel-'+cc;
+    el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${flagSpan(cc)}${c[1]} Ekonomik Takvimi</h2>
+      <div class="toolbar" id="econTime-${cc}" style="margin:10px 0 6px">
+        ${[['dun','Dün'],['bugun','Bugün'],['yarin','Yarın'],['buhafta','Bu Hafta'],['gelecekhafta','Gelecek Hafta']]
+          .map(([t,l])=>`<button data-t="${t}" onclick="setEconTime('${cc}','${t}')">${l}</button>`).join('')}
+      </div>
+      <div class="toolbar" id="econImp-${cc}">
+        ${[[-1,'★ Düşük'],[0,'★★ Orta'],[1,'★★★ Yüksek']]
+          .map(([i,l])=>`<button data-imp="${i}" onclick="setEconImp('${cc}',${i})">${l}</button>`).join('')}
+      </div>
+      <div id="econBody-${cc}"><div class="hint">Ekonomik takvim yükleniyor…</div></div>`;
+    document.getElementById('econPanels').appendChild(el);
+    syncEconBtns(cc);
+    loadEconPanel(cc);
+  }
+  const hint=document.getElementById('econEmptyHint');
+  if(hint) hint.style.display=Object.keys(ECON_PANELS).length?'none':'';
+}
+function setEconTime(cc,t){ const st=ECON_PANELS[cc]; if(!st) return; st.time=t; syncEconBtns(cc); loadEconPanel(cc); }
+function setEconImp(cc,i){ const st=ECON_PANELS[cc]; if(!st) return; st.imp=i; renderEconPanel(cc); }
+function syncEconBtns(cc){
+  const st=ECON_PANELS[cc]; if(!st) return;
+  document.querySelectorAll('#econTime-'+cc+' button').forEach(b=>b.classList.toggle('primary', b.dataset.t===st.time));
+  document.querySelectorAll('#econImp-'+cc+' button').forEach(b=>b.classList.toggle('primary', Number(b.dataset.imp)===st.imp));
+}
+async function loadEconPanel(cc){
+  const st=ECON_PANELS[cc]; if(!st) return;
+  const tab=ECON_TAB[st.time]||'thisWeek';
+  const key=cc+':'+tab;
   const c=ECON_CACHE[key];
-  if(c && (Date.now()-c.ts)<30*60000){ renderEcon(); return; }
-  box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
+  if(c && (Date.now()-c.ts)<30*60000){ renderEconPanel(cc); return; }
+  const box=document.getElementById('econBody-'+cc);
+  if(box) box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
+  const myGen=++st.gen;   // panel kapatılıp açılırsa / dönem değişirse eski yanıt çöpe gider
   let rows=[], src='', investingOk=false;
-  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — ABD/TR + 15 Avrupa borsa
-  //    ülkesinin tamamı (ISO→Investing ülke ID haritası server.js /investcal içinde).
+  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — 18 ülkenin tamamı
+  //    (ISO→Investing ülke ID haritası server.js /investcal içinde).
   //    Geçerli JSON (data alanı string) → Investing ÇALIŞTI say (0 satır = o gün veri yok, normal).
   //    Yalnızca istek GERÇEKTEN başarısızsa (403/502/JSON değil) yedeğe düş.
-  if(INVESTING_MARKETS.includes(ECON_MARKET)){
-    try{
-      const r=await fetch('/investcal?c='+ECON_MARKET+'&tab='+tab);
-      if(myGen!=null && myGen!==REQ_GEN) return;
-      if(r.ok){ const j=await r.json(); if(j && typeof j.data==='string'){ investingOk=true; rows=parseInvestingCal(j.data); src='Investing.com'; } }
-    }catch(e){}
-  }
+  try{
+    const r=await fetch('/investcal?c='+cc+'&tab='+tab);
+    if(!ECON_PANELS[cc] || myGen!==ECON_PANELS[cc].gen) return;
+    if(r.ok){ const j=await r.json(); if(j && typeof j.data==='string'){ investingOk=true; rows=parseInvestingCal(j.data); src='Investing.com'; } }
+  }catch(e){}
   // 2) YEDEK: Investing gerçekten erişilemediyse TradingView
   if(!investingOk){
     try{
-      const tv=await tvRowsForTab(myGen);
-      if(myGen!=null && myGen!==REQ_GEN) return;
+      const tv=await tvRowsForTab(cc, st.time);
+      if(!ECON_PANELS[cc] || myGen!==ECON_PANELS[cc].gen) return;
       if(tv){ rows=tv; src='TradingView'; }
     }catch(e){}
   }
   ECON_CACHE[key]={ rows, src, ts:Date.now() };
-  renderEcon();
+  renderEconPanel(cc);
 }
-async function fetchEconCalendar(myGen, market, countryName){
-  const card=document.getElementById('econCard'), ttl=document.getElementById('econTitle');
-  if(!card) return;
-  ECON_MARKET=market||'TR';   // 'TR' | 'US' | Avrupa ISO kodu ('DE','GB','FR'…)
-  if(ttl) ttl.textContent = countryName ? countryName+' Ekonomik Takvimi'
-                          : (ECON_MARKET==='US' ? 'ABD Ekonomik Takvimi' : 'Türkiye Ekonomik Takvimi');
-  card.classList.remove('hidden');
-  syncEconBtns();
-  loadEconTab(myGen);
-}
-function setEconTime(t){ ECON_TIME=t; syncEconBtns(); loadEconTab(REQ_GEN); }   // sekme değişince yeniden çek
-function setEconImp(i){ ECON_IMP=i; renderEcon(); }                              // önem sadece filtreler
-function syncEconBtns(){
-  document.querySelectorAll('#econTimeBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.t===ECON_TIME));
-  document.querySelectorAll('#econBtns button').forEach(b=>b.classList.toggle('primary', Number(b.dataset.imp)===ECON_IMP));
-}
-function renderEcon(){
-  const box=document.getElementById('econBody');
-  if(!box) return;
-  syncEconBtns();
-  const c=ECON_CACHE[ECON_MARKET+':'+(ECON_TAB[ECON_TIME]||'thisWeek')];
+function renderEconPanel(cc){
+  const st=ECON_PANELS[cc];
+  const box=document.getElementById('econBody-'+cc);
+  if(!st || !box) return;
+  syncEconBtns(cc);
+  const c=ECON_CACHE[cc+':'+(ECON_TAB[st.time]||'thisWeek')];
   if(!c){ box.innerHTML='<div class="hint">—</div>'; return; }
-  const list=c.rows.filter(e=>e.imp===ECON_IMP);
+  const list=c.rows.filter(e=>e.imp===st.imp);
   if(!list.length){
-    const timeAd={dun:'dün',bugun:'bugün',yarin:'yarın',buhafta:'bu hafta',gelecekhafta:'gelecek hafta'}[ECON_TIME]||'';
-    const impAd={'-1':'düşük (★)','0':'orta (★★)','1':'yüksek (★★★)'}[String(ECON_IMP)];
+    const timeAd={dun:'dün',bugun:'bugün',yarin:'yarın',buhafta:'bu hafta',gelecekhafta:'gelecek hafta'}[st.time]||'';
+    const impAd={'-1':'düşük (★)','0':'orta (★★)','1':'yüksek (★★★)'}[String(st.imp)];
     box.innerHTML='<div class="hint">'+timeAd.charAt(0).toUpperCase()+timeAd.slice(1)+' için '+impAd+' önem düzeyinde veri yok. Farklı bir dönem veya önem düzeyi seçebilirsin.</div>';
     return;
   }
@@ -1627,10 +1708,8 @@ function renderEcon(){
   </tr>`).join('');
   const kaynak = c.src==='Investing.com'
     ? 'İsim, önem yıldızı ve renkler doğrudan <b>Investing.com</b> ekonomik takviminden alınır.'
-    : INVESTING_MARKETS.includes(ECON_MARKET)
-      ? 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).'
-      : 'Kaynak: <b>TradingView</b> ekonomik takvimi (isimler Türkçeleştirilir, önem yaklaşıktır).';
-  box.innerHTML=`<table><thead><tr><th>Tarih (TSİ)</th><th>Veri</th><th>Açıklanan</th><th>Beklenti</th><th>Önceki</th></tr></thead><tbody>${rows}</tbody></table>
+    : 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).';
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>Tarih (TSİ)</th><th>Veri</th><th>Açıklanan</th><th>Beklenti</th><th>Önceki</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span>/<span class="down">kırmızı</span> açıklanan değer, beklentiye göre olumlu/olumsuz demektir. "—" henüz açıklanmadı. ${kaynak}</div>`;
 }
 
@@ -2282,7 +2361,6 @@ function hidePriceUI(){
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
-  const ec=document.getElementById('econCard'); if(ec) ec.classList.add('hidden');
   ['chartCard','sectorCard','top10Card','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
@@ -2983,6 +3061,7 @@ function watchGo(sym, market){
   // Ek her zaman açıkça verilir (BIST → .IS, ABD → .US, EU kaydı eki zaten taşır) —
   // böylece izleme listesinden açarken borsa tespiti/çakışma sorusu atlanır.
   document.getElementById('ticker').value = market==='BIST' ? sym+'.IS' : (market==='US' ? sym+'.US' : sym);
+  switchPage('stock');   // izleme listesi Ana Sayfa'da — analiz Bilanço sekmesinde açılır
   fetchTicker();
   window.scrollTo({top:0,behavior:'smooth'});
 }
