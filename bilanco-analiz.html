@@ -93,6 +93,13 @@
   #page-econ .econ-layout,#page-top100 .econ-layout{gap:12px}
   #econCountries,#topCountries{flex:0 0 132px}
   .econ-main{flex:1;min-width:0}
+  /* Sektör seçici: kolon içeriğe (sabit buton genişliğine) göre büzülür ki
+     paneller sola doğru genişleyebilsin */
+  #page-sect .econ-layout{gap:12px}
+  #page-sect .econ-side{flex:0 0 auto;align-items:flex-start}
+  /* Tüm sektör butonları eşit genişlik: en uzun etiket "🚗 Otomobil Üreticileri"
+     (ikon + etiket + aktif ✓) tek satırda sığacak sabit genişlik. Kolon da bu ölçüye oturur. */
+  #sectSectors .cbox{width:208px;white-space:nowrap}
   /* Sektör Devleri: üst ülke şeridi (yatay sarmal) — kutu stili .cbox ile ortak */
   .sect-countries{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
   .sect-countries .cbox{width:auto;padding:8px 12px}
@@ -232,6 +239,8 @@
       -webkit-overflow-scrolling:touch}
     #econCountries,#topCountries{flex:0 0 auto;align-items:flex-start}
     .cbox{flex:0 0 auto;width:auto;white-space:nowrap}
+    /* Mobil: sektör butonları yine içeriğe göre daralıp yatay şeritte kayar (sabit 208px değil) */
+    #sectSectors .cbox{width:auto}
     /* Panel alanı asla ekrandan geniş olamasın (içindeki geniş tablo kendi içinde kayar) */
     .econ-main{width:100%;max-width:100%;min-width:0}
     .econ-main .card{max-width:100%}
@@ -332,7 +341,6 @@
     </div>
     <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div id="livePrice" class="live-price hidden"></div>
-      <span id="hdBadge" class="hd-badge">SEC EDGAR + Bing News</span>
       <div id="nyClock" class="hidden" style="font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:600"></div>
     </div>
   </div>
