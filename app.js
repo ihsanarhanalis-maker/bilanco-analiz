@@ -1,12 +1,13 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','econ','top100','sect'].forEach(x=>{
+  ['home','stock','econ','top100','sect','wnews'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
   if(p==='econ') initEconPage();       // ülke kutuları ilk girişte kurulur (tembel)
   if(p==='top100') initTop100Page();
   if(p==='sect') initSectPage();
+  if(p==='wnews') initWnewsPage();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 /* Ana sayfadaki büyük arama: değeri Bilanço sekmesindeki arama kutusuna taşıyıp orada aratır */
@@ -2552,6 +2553,107 @@ async function fetchNews(sym, myGen){
 }
 /* Haber başlığına tıklayınca özeti aç/kapat */
 function toggleNews(el){ el.classList.toggle('open'); }
+
+/* ---------- Dünya Haberleri sekmesi ----------
+   Şirket haberleri kartıyla AYNI makine (Bing News RSS köprüsü + parseNewsXML + istemci
+   tarafı Türkçe çeviri + .news kart işaretlemesi) — yalnızca sorgular şirket değil KONU
+   bazlı ve kaynak listesi dünya gündemi için genişletilmiş (BBC/AP/Guardian/NYT eklenir).
+   Sıralama güncellik öncelikli (dünya haberinde tazelik kaynak sırasından önemli),
+   kaynak-başına 3 sınırıyla çeşitlilik korunur. Konu başına 10 dk önbellek. */
+const WNEWS_SITES='(site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR site:wsj.com OR '+
+  'site:ft.com OR site:economist.com OR site:bbc.com OR site:apnews.com OR '+
+  'site:theguardian.com OR site:nytimes.com OR site:cnn.com OR site:finance.yahoo.com)';
+/* Her konu için İKİ ayrı premium-filtreli sorgu (farklı ifadeler → daha geniş havuz;
+   filtresiz "genel" sorgu KULLANILMAZ çünkü Bing'de kalitesiz/MSN kaynak sızdırıyor).
+   Sorgular tek tek test edildi — her biri ~12 ham haber döndürüyor. */
+const WNEWS_TOPICS=[
+  ['dunya',      '🌍 Dünya Gündemi',      'world news',                     'international breaking news'],
+  ['piyasa',     '💹 Piyasalar',          'stock market',                   'global markets'],
+  ['ekonomi',    '💼 Ekonomi',            'economy inflation',              'global economy'],
+  ['merkez',     '🏦 Merkez Bankaları',   'federal reserve interest rates', 'central bank policy'],
+  ['teknoloji',  '⚡ Teknoloji',          'technology',                     'artificial intelligence'],
+  ['enerji',     '🛢️ Enerji & Emtia',     'oil prices',                     'gold commodities'],
+  ['jeopolitik', '🌐 Jeopolitik',         'geopolitics',                    'diplomacy sanctions'],
+];
+let WNEWS_TOPIC='dunya', WNEWS_GEN=0, WNEWS_PAGE_INIT=false;
+const WNEWS_CACHE={};   // konu → { html, ts } (10 dk — çeviri maliyetli, hazır HTML saklanır)
+function initWnewsPage(){
+  if(WNEWS_PAGE_INIT){ return; }
+  WNEWS_PAGE_INIT=true;
+  document.getElementById('wnewsTopics').innerHTML=WNEWS_TOPICS.map(([id,label])=>
+    `<button data-t="${id}" onclick="setWnewsTopic('${id}')">${label}</button>`).join('');
+  setWnewsTopic('dunya');
+}
+function setWnewsTopic(id){
+  WNEWS_TOPIC=id;
+  document.querySelectorAll('#wnewsTopics button').forEach(b=>b.classList.toggle('primary', b.dataset.t===id));
+  loadWnews();
+}
+async function loadWnews(){
+  const box=document.getElementById('wnewsList');
+  const topic=WNEWS_TOPICS.find(t=>t[0]===WNEWS_TOPIC);
+  if(!box||!topic) return;
+  const cached=WNEWS_CACHE[topic[0]];
+  if(cached && (Date.now()-cached.ts)<10*60000){ box.innerHTML=cached.html; return; }
+  box.innerHTML='<div class="hint">Haberler yükleniyor ve Türkçe\'ye çevriliyor…</div>';
+  const myGen=++WNEWS_GEN;
+  try{
+    const [x1, x2]=await Promise.all([
+      fetch('/news?q='+encodeURIComponent(topic[2]+' '+WNEWS_SITES)).then(r=>r.text()).catch(()=>''),
+      fetch('/news?q='+encodeURIComponent(topic[3]+' '+WNEWS_SITES)).then(r=>r.text()).catch(()=>'')
+    ]);
+    if(myGen!==WNEWS_GEN || WNEWS_TOPIC!==topic[0]) return;
+    let items=[...parseNewsXML(x1), ...parseNewsXML(x2)];
+    items=items.filter(it=> !BLOCK_HOST.test(it.host||'') && !BLOCK_SRC.test(it.src||''));
+    // Güncellik: önce son 3 gün; yeterli haber yoksa 7 güne esnet (tarihsizler her durumda elenir)
+    const day=86400000;
+    let fresh=items.filter(it=> it.d && (Date.now()-it.d.getTime())<=3*day);
+    if(fresh.length<10) fresh=items.filter(it=> it.d && (Date.now()-it.d.getTime())<=7*day);
+    items=fresh;
+    // Tekrarları temizle (host+yol ya da başlık)
+    const seen=new Set();
+    items=items.filter(it=>{
+      let key=(it.title||'').slice(0,60).toLowerCase();
+      try{ const u=new URL(it.link); key=u.hostname.replace(/^www\./,'')+u.pathname; }catch(e){}
+      if(seen.has(key)) return false; seen.add(key); return true;
+    });
+    // En güncel üstte
+    items.sort((a,b)=>(b.d?b.d.getTime():0)-(a.d?a.d.getTime():0));
+    // Çeşitlilik: aynı kaynaktan en fazla 3 haber; en az 12'ye ulaşmak için gerekirse esnet
+    const MIN_ITEMS=12, MAX_ITEMS=18, CAP=3;
+    const included=new Array(items.length).fill(false);
+    const srcCount={};
+    let n=0;
+    items.forEach((it,i)=>{
+      if(n>=MAX_ITEMS) return;
+      const key=(it.src||it.host||'').toLowerCase();
+      const c=srcCount[key]||0;
+      if(c>=CAP) return;
+      srcCount[key]=c+1; included[i]=true; n++;
+    });
+    if(n<MIN_ITEMS){
+      items.forEach((it,i)=>{ if(n>=MIN_ITEMS || included[i]) return; included[i]=true; n++; });
+    }
+    items=items.filter((it,i)=>included[i]).slice(0,MAX_ITEMS);
+    if(!items.length){ box.innerHTML='<div class="hint">Bu konuda güncel haber bulunamadı — başka bir konu dene.</div>'; return; }
+    // Başlık + özetleri Türkçe'ye çevir (şirket haberleriyle aynı zincir: Google gtx → MyMemory)
+    const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
+    const tr=await translateTR(allTexts);
+    if(myGen!==WNEWS_GEN || WNEWS_TOPIC!==topic[0]) return;
+    const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
+    const html=items.map((it,idx)=>{
+      const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
+      const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
+      return `<div class="news" onclick="toggleNews(this)">
+        <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
+        <div class="news-m">${safeHTML(meta)}</div>
+        <div class="news-sum">${sum}<br><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Orijinal habere git (İng.) →</a></div>
+      </div>`;
+    }).join('');
+    WNEWS_CACHE[topic[0]]={ html, ts:Date.now() };
+    box.innerHTML=html;
+  }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
+}
 
 /* ---- Sağlam yükümlülük/özkaynak toplamları (eksik SEC etiketlerini telafi eder) ---- */
 const bsVal=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
