@@ -84,6 +84,14 @@
   .cfl{display:inline-flex;flex:0 0 auto;line-height:0}
   .cfl svg{width:22px;height:auto;border-radius:2.5px;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
   .cbox.active::after{content:"✓";margin-left:auto;font-weight:800;color:var(--accent-2)}
+  #econCountries .cbox,#topCountries .cbox,#sectCountries .cbox:not(#sbox-GLOBAL){
+    position:relative;width:132px;min-width:132px;max-width:132px;white-space:nowrap}
+  #econCountries .cbox.active::after,#topCountries .cbox.active::after,
+  #sectCountries .cbox:not(#sbox-GLOBAL).active::after{
+    position:absolute;left:28px;top:5px;width:13px;height:13px;margin:0;border-radius:50%;
+    display:grid;place-items:center;background:var(--accent);color:#07101f;font-size:9px;line-height:1}
+  #page-econ .econ-layout,#page-top100 .econ-layout{gap:12px}
+  #econCountries,#topCountries{flex:0 0 132px}
   .econ-main{flex:1;min-width:0}
   /* Sektör Devleri: üst ülke şeridi (yatay sarmal) — kutu stili .cbox ile ortak */
   .sect-countries{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
@@ -222,6 +230,7 @@
     .econ-layout{flex-direction:column}
     .econ-side{position:static;flex-direction:row;overflow-x:auto;width:100%;padding-bottom:6px;
       -webkit-overflow-scrolling:touch}
+    #econCountries,#topCountries{flex:0 0 auto;align-items:flex-start}
     .cbox{flex:0 0 auto;width:auto;white-space:nowrap}
     /* Panel alanı asla ekrandan geniş olamasın (içindeki geniş tablo kendi içinde kayar) */
     .econ-main{width:100%;max-width:100%;min-width:0}
