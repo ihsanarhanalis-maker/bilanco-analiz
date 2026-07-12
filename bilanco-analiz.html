@@ -209,62 +209,114 @@
 
   /* --- Mobil (telefon) uyumu --- */
   @media (max-width:600px){
-    .tabs-in{padding:0 8px}
-    .tab-btn{padding:11px 10px;font-size:12.5px;flex:1;text-align:center}
-    .hero{padding:30px 6px 24px}
-    .hero h2{font-size:21px}
-    .hero-search input{min-width:0;font-size:15px;padding:12px 14px}
-    .hero-search button{padding:12px 18px}
-    /* Ekonomik takvim: ülke kutuları üstte yatay kaydırmalı şerit olur */
-    .econ-layout{flex-direction:column}
-    .econ-side{position:static;flex-direction:row;overflow-x:auto;width:100%;padding-bottom:6px;
+    html,body{max-width:100%;overflow-x:hidden}
+    body{background-attachment:scroll}
+    .page,.card,.econ-main{min-width:0}
+    .card{width:100%;overflow-wrap:anywhere}
+    img,svg{max-width:100%}
+
+    /* Sekmeler okunaklı kalır; şerit parmakla yatay kaydırılır. */
+    .tabs-nav{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;
       -webkit-overflow-scrolling:touch}
-    .cbox{flex:0 0 auto;width:auto;white-space:nowrap}
+    .tabs-in{width:max-content;min-width:100%;padding:0 10px;gap:2px}
+    .tab-btn{flex:0 0 auto;min-height:44px;padding:11px 12px;font-size:12.5px;
+      text-align:center;white-space:nowrap}
+
     .hd-inner{padding:13px 14px;gap:10px;flex-wrap:wrap}
+    .hd-inner > div:nth-child(2){flex:1;min-width:0}
+    .hd-inner > div:last-child{flex:1 1 100%;min-width:0;margin-left:0 !important;
+      text-align:left !important;align-items:flex-start !important}
     header h1{font-size:18px}
-    header p{font-size:11px}
+    header p{font-size:11px;line-height:1.45}
+    .live-price{max-width:100%;flex-wrap:wrap;row-gap:2px}
     .live-price .lp-val{font-size:18px}
     .live-price .lp-chg{font-size:12px}
-    .hd-badge.mcap{font-size:12px;padding:5px 11px}
+    .hd-badge{max-width:100%;white-space:normal}
+    .hd-badge.mcap{font-size:12px;padding:5px 11px;flex-wrap:wrap}
     .hd-badge.mcap .mc-val{font-size:13px}
-    .wrap{padding:14px 12px 50px}
-    .card{padding:14px 13px;border-radius:13px;margin-bottom:13px}
-    .card h2{font-size:15px}
+
+    .wrap{width:100%;padding:14px 12px 50px}
+    .card{padding:15px 14px;border-radius:13px;margin-bottom:13px}
+    .card h2{font-size:15px;line-height:1.35}
     .card .sub{font-size:12px}
-    /* KPI kartları dar ekranda 2'li */
-    .grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
-    .kpi{padding:12px 13px}
-    .kpi .val{font-size:19px}
-    /* Tablolar yatay kaydırılabilir olsun (sıkışıp bozulmasın) */
-    .card > table, #cmpResult{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+    .hero{padding:30px 2px 24px}
+    .hero .hero-logo{width:62px;height:62px;border-radius:17px}
+    .hero h2{font-size:21px;line-height:1.25}
+    .hero .hero-sub br{display:none}
+    .hero-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(112px,.75fr);
+      width:100%;gap:10px}
+    .hero-search input{grid-column:1 / -1;width:100%;min-width:0;font-size:15px;padding:12px 14px}
+    .hero-search select,.hero-search button{width:100%;min-height:46px}
+    .hero-search button{padding:12px 16px}
+
+    /* Ekonomik takvim ve liste sayfalarında seçimler üstte kaydırılabilir şerit olur. */
+    .econ-layout{flex-direction:column;width:100%}
+    .econ-side{position:static;flex-direction:row;overflow-x:auto;width:100%;padding-bottom:7px;
+      overscroll-behavior-x:contain;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+    .cbox{flex:0 0 auto;width:auto;min-height:44px;white-space:nowrap;scroll-snap-align:start}
+    .sect-countries{flex-wrap:nowrap;overflow-x:auto;padding-bottom:5px;
+      overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+    .sect-countries .cbox{flex:0 0 auto}
+
+    /* KPI kartları simetrik iki sütun; ekran gerçekten daralırsa tek sütuna iner. */
+    .grid{grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px}
+    #trendCharts{grid-template-columns:minmax(0,1fr) !important}
+    .kpi,.tgt-box{min-width:0;padding:12px 13px}
+    .kpi .val,.tgt-box .big{font-size:clamp(18px,5.2vw,20px);line-height:1.2;
+      overflow-wrap:anywhere}
+
+    /* Yapısal olarak geniş veri tabloları kartı değil, kendi alanlarını kaydırır. */
+    .card > table,#cmpResult,#watchBody,#targetBody,#techBody,#sectorBody,
+    #insiderBody,#healthBody{display:block;max-width:100%;overflow-x:auto;
+      overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+    #cmpResult table{min-width:480px}
+    #watchBody table{min-width:420px}
+    #targetBody table{min-width:560px}
+    #techBody table{min-width:480px}
+    #sectorBody table{min-width:680px}
+    #insiderBody table{min-width:580px}
+    #healthBody table{min-width:420px}
     table{font-size:12px}
-    th,td{padding:7px 8px;white-space:nowrap}
+    th,td{padding:8px;white-space:nowrap}
     th:first-child,td:first-child{white-space:normal}
-    /* Bilanço Verisi giriş hücreleri daralsın */
-    input.cell{width:auto;max-width:100px}
-    td input.cell.cur, td input.cell.prev{width:82px}
+
+    /* Bilanço Verisi: mobilde her kalem alt alta kart (yatay kaydırma yok). */
+    input.cell{width:auto;max-width:100px;min-height:44px}
+    td input.cell.cur,td input.cell.prev{width:82px}
     input.name{font-size:12.5px}
-    /* Bilanço Verisi: mobilde her kalem ALT ALTA kart (yatay kaydırma yok) */
     #inputTable{min-width:0;overflow:visible}
-    #inputTable, #inputTable tbody{display:block}
+    #inputTable,#inputTable tbody{display:block}
     #inputTable thead{display:none}
-    #inputBody tr{display:grid;grid-template-columns:1fr 1fr;gap:9px 10px;
+    #inputBody tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px 10px;
       border:1px solid var(--line);border-radius:11px;background:var(--surface-2);
       padding:11px 12px;margin-bottom:10px}
-    #inputBody td{display:block;border:none;padding:0;text-align:left;white-space:normal}
-    #inputBody td:nth-child(1){grid-column:1 / -1}   /* kalem adı tam genişlik */
-    #inputBody td:nth-child(2){grid-column:1 / -1}   /* kategori tam genişlik */
-    #inputBody td:nth-child(5){grid-column:1 / -1;text-align:right}  /* sil */
+    #inputBody td{display:block;min-width:0;border:none;padding:0;text-align:left;white-space:normal}
+    #inputBody td:nth-child(1){grid-column:1 / -1}
+    #inputBody td:nth-child(2){grid-column:1 / -1}
+    #inputBody td:nth-child(5){grid-column:1 / -1;text-align:right}
     #inputBody td:nth-child(3)::before{content:"Cari Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
     #inputBody td:nth-child(4)::before{content:"Önceki Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
-    #inputBody input.name{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;font-weight:600}
-    #inputBody select.catsel{width:100%}
-    #inputBody td input.cell.cur, #inputBody td input.cell.prev{width:100%;max-width:none;text-align:right}
-    #inputBody .delrow{font-size:14px}
-    /* Butonlar parmakla rahat */
-    .toolbar{gap:8px}
-    button{padding:9px 13px;font-size:12.5px}
-    #ticker, #cmpTickers{width:100% !important}
+    #inputBody input.name{width:100%;min-height:44px;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;font-weight:600}
+    #inputBody select.catsel{width:100%;min-height:44px}
+    #inputBody td input.cell.cur,#inputBody td input.cell.prev{width:100%;max-width:none;text-align:right}
+    #inputBody .delrow{min-width:44px;min-height:44px;font-size:14px}
+
+    /* Arama ve eylem kontrolleri tam genişlikte, dokunmaya uygun şekilde sarılır. */
+    .toolbar{gap:8px;align-items:stretch}
+    button{min-height:44px;padding:10px 13px;font-size:12.5px}
+    input,select{font-size:16px !important}
+    #ticker,#cmpTickers{flex:1 1 100%;width:100% !important;max-width:none}
+    #periodType,#cmpPeriod{flex:1 1 120px;min-height:44px}
+    #ticker ~ button.primary,#cmpTickers ~ button.primary{flex:1 1 120px}
+    #watchStar{flex:1 1 100%}
+    #fetchStatus,#cmpStatus{flex:1 1 100%}
+
+    #ownerBody > div{justify-content:center !important;gap:18px !important}
+    #ownerBody svg{width:165px;height:165px}
+    #ownerBody > div > div{width:100%;min-width:0 !important}
+    .flag{padding:11px 12px}
+    .news{padding:12px}
   }
 
   /* Yazdırma / PDF — açık tema, gereksiz öğeler gizli */
