@@ -213,13 +213,19 @@
     .tab-btn{padding:11px 10px;font-size:12.5px;flex:1;text-align:center}
     .hero{padding:30px 6px 24px}
     .hero h2{font-size:21px}
-    .hero-search input{min-width:0;font-size:15px;padding:12px 14px}
-    .hero-search button{padding:12px 18px}
+    /* Arama kutusu kendi satırında tam genişlik olsun (flex-basis:100% wrap'i tetikler);
+       select+buton altta yan yana kalır, ikisi de sıkışmaz (flex:1) */
+    .hero-search input{min-width:0;flex-basis:100%;font-size:15px;padding:12px 14px}
+    .hero-search select{flex:1}
+    .hero-search button{flex:1;padding:12px 18px}
     /* Ekonomik takvim: ülke kutuları üstte yatay kaydırmalı şerit olur */
     .econ-layout{flex-direction:column}
     .econ-side{position:static;flex-direction:row;overflow-x:auto;width:100%;padding-bottom:6px;
       -webkit-overflow-scrolling:touch}
     .cbox{flex:0 0 auto;width:auto;white-space:nowrap}
+    /* Panel alanı asla ekrandan geniş olamasın (içindeki geniş tablo kendi içinde kayar) */
+    .econ-main{width:100%;max-width:100%;min-width:0}
+    .econ-main .card{max-width:100%}
     .hd-inner{padding:13px 14px;gap:10px;flex-wrap:wrap}
     header h1{font-size:18px}
     header p{font-size:11px}
@@ -235,13 +241,16 @@
     .grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
     .kpi{padding:12px 13px}
     .kpi .val{font-size:19px}
-    /* Tablolar yatay kaydırılabilir olsun (sıkışıp bozulmasın) */
-    .card > table, #cmpResult{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* Tablolar yatay kaydırılabilir olsun (sıkışıp bozulmasın) — yalnız doğrudan çocuk değil,
+       kart içindeki TÜM tablolar (sektör karşılaştırması, analist, teknik panel gibi iç
+       sarmalayıcı div'lerdekiler de ekranı taşırıyordu) */
+    .card table, #cmpResult{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}
     table{font-size:12px}
     th,td{padding:7px 8px;white-space:nowrap}
     th:first-child,td:first-child{white-space:normal}
-    /* Bilanço Verisi giriş hücreleri daralsın */
-    input.cell{width:auto;max-width:100px}
+    /* Bilanço Verisi giriş hücreleri daralsın (yalnız #inputBody içindekiler — #ticker/#cmpTickers
+       da .cell class'ını paylaştığından genel "input.cell" kuralı onları da sıkıştırıyordu) */
+    #inputBody input.cell{width:auto;max-width:100px}
     td input.cell.cur, td input.cell.prev{width:82px}
     input.name{font-size:12.5px}
     /* Bilanço Verisi: mobilde her kalem ALT ALTA kart (yatay kaydırma yok) */
@@ -264,7 +273,17 @@
     /* Butonlar parmakla rahat */
     .toolbar{gap:8px}
     button{padding:9px 13px;font-size:12.5px}
-    #ticker, #cmpTickers{width:100% !important}
+    /* Hisse Ara / Karşılaştırma kutuları kendi satırında tam genişlik olsun (flex-basis:100%
+       olmadan width:100% flex item'ı küçültüyordu — select+buton yanında sıkışıp kırpılıyordu) */
+    #ticker, #cmpTickers{width:100% !important;flex-basis:100%}
+    #periodType, #cmpPeriod{flex:1}
+    .toolbar button.primary{flex:1}
+    /* Sektör Devleri üst ülke şeridi + Ekonomik Takvim/İlk 100 ülke kutuları: yatay kaydırma */
+    .sect-countries{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    .sect-countries .cbox{flex:0 0 auto}
+    /* Dünya Haberleri konu butonları da yatay kaydırmalı tek şerit olsun */
+    #wnewsTopics{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    #wnewsTopics button{flex:0 0 auto;white-space:nowrap}
   }
 
   /* Yazdırma / PDF — açık tema, gereksiz öğeler gizli */
