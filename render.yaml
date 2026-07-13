@@ -1,0 +1,14 @@
+# Render ücretsiz Web Service — https://dashboard.render.com
+# New → Blueprint → bu GitHub reposunu seç
+services:
+  - type: web
+    name: bilanco-analiz
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: "npm install --omit=dev || true"
+    startCommand: "npm start"
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

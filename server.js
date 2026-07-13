@@ -13,7 +13,10 @@ const ROOT = __dirname;
 const UA = 'Bilanco Analiz Araci (kisisel kullanim; contact@example.com)';
 const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8',
-               '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8' };
+               '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8',
+               '.webmanifest':'application/manifest+json; charset=utf-8',
+               '.png':'image/png', '.svg':'image/svg+xml', '.ico':'image/x-icon',
+               '.webp':'image/webp' };
 
 /* Analist hedef fiyatları — Yahoo quoteSummary yerine Finviz'den kazınır.
    Neden: Yahoo'nun crumb doğrulaması bazı bulut sunucu IP'lerinde (Render, AWS vb.)
@@ -524,7 +527,7 @@ http.createServer((req, res) => {
     });
     res.end(data);
   });
-}).listen(PORT, () => {
+}).listen(PORT, '0.0.0.0', () => {
   console.log('===========================================');
   console.log('  Bilanco Analiz calisiyor (anahtarsiz).');
   console.log('  Adres: http://localhost:' + PORT);

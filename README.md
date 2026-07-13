@@ -13,6 +13,7 @@ ABD (SEC EDGAR) ve Borsa İstanbul (KAP / İş Yatırım) hisseleri için **anah
 - **Haberler:** Üst düzey kaynaklar (Bloomberg, CNBC, Reuters…), başlık + özet Türkçe
 - **BIST'e özel:** KAP bildirimleri + ekonomik takvim
 - **Dışa aktarma:** PDF / Excel (CSV) · koyu tema · mobil uyumlu
+- **PWA:** Ana ekrana / masaüstüne yüklenebilir uygulama (ikonla açılır)
 
 ## Kurulum & Çalıştırma
 
@@ -27,6 +28,27 @@ node server.js
 Sonra tarayıcıda: **http://localhost:8723**
 
 Windows'ta çift tıklamayla başlatmak için `Bilanco-Baslat.bat` kullanılabilir.
+
+### Uygulama olarak yükleme (PWA)
+
+1. `npm start` ile sunucuyu açın.
+2. Chrome / Edge’de adresi açın → başlıktaki **📲 Yükle** veya tarayıcı menüsünden **Uygulamayı yükle**.
+3. Telefonda (aynı Wi‑Fi): bilgisayarın yerel IP’si ile `http://192.168.x.x:8723` açın → **Ana ekrana ekle**.
+4. iPhone: **Safari** → Paylaş → **Ana Ekrana Ekle**.
+
+Not: Canlı veri için sunucunun çalışıyor olması gerekir. İnternetten her yerden açmak için aşağıdaki **Render (ücretsiz)** adımlarını izleyin.
+
+### İnternete yayınla (Render Free + PWA)
+
+1. Değişiklikler GitHub’da olsun (`main` dalı).
+2. [Render](https://render.com) → ücretsiz hesap (GitHub ile giriş).
+3. **New** → **Blueprint** → `ihsanarhanalis-maker/bilanco-analiz` reposunu seç → `render.yaml` ile oluştur.
+   - Alternatif: **New** → **Web Service** → aynı repo → **Build Command** boş veya `npm install`, **Start Command** `npm start`, **Instance type** Free.
+4. Deploy bitince size bir adres verir: `https://bilanco-analiz-xxxx.onrender.com`
+5. Telefonda / bilgisayarda bu HTTPS adresi açın → **📲 Yükle** / **Ana ekrana ekle**.
+6. Bundan sonra **ikonuna tıklayınca** uygulama açılır (sunucu Render’da çalışır).
+
+**Ücretsiz katman notu:** Uzun süre kullanılmazsa uyuyabilir; ilk açılış 30–60 sn sürebilir. Bu normaldir.
 
 ## Nasıl çalışır (mimari)
 

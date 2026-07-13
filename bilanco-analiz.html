@@ -2,7 +2,15 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0c1022">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bilanço">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-512.png">
 <title>Bilanço Analiz Aracı</title>
 <style>
   :root{
@@ -27,6 +35,10 @@
   .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(140deg,#1b2942,#101626);cursor:pointer;
     border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;
     box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  #pwaInstall{display:none;margin-left:8px;padding:7px 12px;border-radius:999px;font-size:12px;font-weight:700;
+    background:rgba(79,156,249,.16);border:1px solid rgba(79,156,249,.45);color:var(--accent-2);white-space:nowrap}
+  #pwaInstall.show{display:inline-flex;align-items:center;gap:6px}
+  #pwaInstall:hover{background:rgba(79,156,249,.28)}
   header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.2px;color:#fff}
   header p{margin:4px 0 0;color:var(--ink-2);font-size:12.5px}
   .hd-badge{font-size:11px;color:var(--accent-2);background:rgba(79,156,249,.10);
@@ -275,6 +287,7 @@
     #page-scan .scan-row.scan-inputs{flex-wrap:wrap;overflow:visible}
     #page-scan #scanBody{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
     #page-scan #scanPager{flex-wrap:wrap;justify-content:center;gap:8px}
+    #pwaInstall{margin-left:0;margin-top:6px}
     /* Sekme şeridi yatay kaydırılsın (Hisse Tarayıcı uzun adı) */
     .tabs-in{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
     .tab-btn{flex:0 0 auto}
@@ -376,7 +389,7 @@
       </svg>
     </div>
     <div>
-      <h1>Bilanço Analiz</h1>
+      <h1>Bilanço Analiz <button type="button" id="pwaInstall" class="no-print" onclick="installPwa()">📲 Yükle</button></h1>
       <p>ABD + Borsa İstanbul hisseleri · bilanço, oranlar ve güncel haberler</p>
     </div>
     <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">

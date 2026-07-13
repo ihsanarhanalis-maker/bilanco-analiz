@@ -3988,6 +3988,50 @@ function renderFlags(d,T){
      <div><div class="ttl">${f.ttl}</div><div class="body">${f.body}</div></div></div>`).join('');
 }
 
+/* ---------- PWA: service worker + Ana ekrana / uygulamaya yükle ---------- */
+let PWA_DEFERRED=null;
+function refreshPwaInstallBtn(){
+  const btn=document.getElementById('pwaInstall');
+  if(!btn) return;
+  const standalone=window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone===true;
+  if(standalone){ btn.classList.remove('show'); return; }
+  // Chromium: beforeinstallprompt geldiyse göster. iOS'ta manuel ekleme gerekir.
+  const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(PWA_DEFERRED || isIos) btn.classList.add('show');
+  else btn.classList.remove('show');
+  if(isIos && !PWA_DEFERRED) btn.title='Safari → Paylaş → Ana Ekrana Ekle';
+}
+async function installPwa(){
+  if(PWA_DEFERRED){
+    PWA_DEFERRED.prompt();
+    try{ await PWA_DEFERRED.userChoice; }catch(e){}
+    PWA_DEFERRED=null;
+    refreshPwaInstallBtn();
+    return;
+  }
+  const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(isIos){
+    alert('iPhone/iPad: Safari’de Paylaş (□↑) → “Ana Ekrana Ekle” ile yükleyin.');
+    return;
+  }
+  alert('Tarayıcı menüsünden “Uygulamayı yükle” / “Ana ekrana ekle” seçeneğini kullanın.');
+}
+function registerPwa(){
+  if(!('serviceWorker' in navigator)) return;
+  window.addEventListener('beforeinstallprompt', e=>{
+    e.preventDefault();
+    PWA_DEFERRED=e;
+    refreshPwaInstallBtn();
+  });
+  window.addEventListener('appinstalled', ()=>{
+    PWA_DEFERRED=null;
+    refreshPwaInstallBtn();
+  });
+  navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  refreshPwaInstallBtn();
+}
+
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
@@ -3996,4 +4040,5 @@ window.addEventListener('DOMContentLoaded',()=>{
   const body=document.getElementById('inputBody');
   body.addEventListener('input', colorInputRows);
   body.addEventListener('change', colorInputRows);
+  registerPwa();
 });
