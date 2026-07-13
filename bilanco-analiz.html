@@ -113,6 +113,8 @@
   .scan-inputs input:focus{outline:none;border-color:var(--accent)}
   @media (max-width:600px){
     #scanCountries .cbox{width:auto;min-width:0;max-width:none}
+    #page-scan .econ-side,#scanCountries{
+      flex:0 0 auto;width:100%;max-width:100%}
   }
   #econCountries,#topCountries,#scanCountries{flex:0 0 132px}
   .econ-main{flex:1;min-width:0}
@@ -260,7 +262,22 @@
     .econ-layout{flex-direction:column}
     .econ-side{position:static;flex-direction:row;overflow-x:auto;width:100%;padding-bottom:6px;
       -webkit-overflow-scrolling:touch}
-    #econCountries,#topCountries{flex:0 0 auto;align-items:flex-start}
+    #econCountries,#topCountries,#scanCountries{flex:0 0 auto;width:100%;max-width:100%;align-items:flex-start}
+    #page-scan .econ-side{flex:0 0 auto;width:100%;max-width:100%}
+    /* Hisse Tarayıcı: kontroller alt alta, chip'ler yatay kaydırma, tablo taşmasın */
+    #page-scan .card > div:first-child{flex-direction:column;align-items:stretch !important;gap:12px}
+    #page-scan .scan-inputs{width:100%;flex-direction:column;align-items:stretch}
+    #page-scan .scan-inputs label{width:100%;justify-content:space-between}
+    #page-scan #scanSearch,#page-scan #scanSort,#page-scan #scanPeMin{width:100% !important;max-width:none;box-sizing:border-box}
+    #page-scan .scan-row{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    #page-scan .scan-row .scan-lbl{flex:0 0 auto}
+    #page-scan .scan-chip{flex:0 0 auto}
+    #page-scan .scan-row.scan-inputs{flex-wrap:wrap;overflow:visible}
+    #page-scan #scanBody{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+    #page-scan #scanPager{flex-wrap:wrap;justify-content:center;gap:8px}
+    /* Sekme şeridi yatay kaydırılsın (Hisse Tarayıcı uzun adı) */
+    .tabs-in{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
+    .tab-btn{flex:0 0 auto}
     .cbox{flex:0 0 auto;width:auto;white-space:nowrap}
     /* Mobil: sektör butonları yine içeriğe göre daralıp yatay şeritte kayar (sabit 208px değil) */
     #sectSectors .cbox{width:auto}
