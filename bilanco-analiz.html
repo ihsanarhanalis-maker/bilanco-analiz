@@ -32,9 +32,10 @@
   header{background:linear-gradient(120deg,#0c1022 0%,#141a30 55%,#1a1f3d 100%);
     border-bottom:1px solid var(--line-2)}
   .hd-inner{max-width:1180px;margin:0 auto;padding:20px 28px;display:flex;align-items:center;gap:16px}
-  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(140deg,#1b2942,#101626);cursor:pointer;
-    border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;
-    box-shadow:0 4px 14px rgba(0,0,0,.4)}
+  .logo{width:44px;height:44px;border-radius:12px;cursor:pointer;overflow:hidden;
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+    box-shadow:0 4px 14px rgba(0,0,0,.4);padding:0;border:none;background:transparent}
+  .logo img{width:100%;height:100%;display:block;object-fit:cover}
   #pwaInstall{display:none;margin-left:8px;padding:7px 12px;border-radius:999px;font-size:12px;font-weight:700;
     background:rgba(79,156,249,.16);border:1px solid rgba(79,156,249,.45);color:var(--accent-2);white-space:nowrap}
   #pwaInstall.show{display:inline-flex;align-items:center;gap:6px}
@@ -69,9 +70,10 @@
 
   /* --- Ana sayfa: büyük arama --- */
   .hero{text-align:center;padding:52px 16px 40px}
-  .hero .hero-logo{display:inline-flex;width:72px;height:72px;border-radius:19px;margin-bottom:18px;
-    background:linear-gradient(140deg,#1b2942,#101626);border:1px solid var(--line-2);
-    align-items:center;justify-content:center;box-shadow:0 8px 26px rgba(0,0,0,.45)}
+  .hero .hero-logo{display:inline-flex;width:88px;height:88px;border-radius:22px;margin-bottom:18px;
+    overflow:hidden;align-items:center;justify-content:center;padding:0;border:none;background:transparent;
+    box-shadow:0 8px 26px rgba(0,0,0,.45)}
+  .hero .hero-logo img{width:100%;height:100%;display:block;object-fit:cover}
   .hero h2{margin:0 0 8px;font-size:27px;font-weight:800;color:#fff;letter-spacing:.2px}
   .hero .hero-sub{color:var(--ink-2);font-size:13.5px;margin-bottom:26px;line-height:1.6}
   .hero-search{display:flex;gap:10px;justify-content:center;align-items:stretch;flex-wrap:wrap;max-width:640px;margin:0 auto}
@@ -382,11 +384,7 @@
 <header>
   <div class="hd-inner">
     <div class="logo" role="button" tabindex="0" title="Ana Sayfa" onclick="switchPage('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('home')}">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="3"  y="13" width="4" height="8" rx="1" fill="#9cc3e6"/>
-        <rect x="10" y="8"  width="4" height="13" rx="1" fill="#cfe0f0"/>
-        <rect x="17" y="4"  width="4" height="17" rx="1" fill="#c8a23a"/>
-      </svg>
+      <img src="/icons/icon-192.png" width="44" height="44" alt="Bilanço Analiz">
     </div>
     <div>
       <h1>Bilanço Analiz <button type="button" id="pwaInstall" class="no-print" onclick="installPwa()">📲 Yükle</button></h1>
@@ -418,11 +416,7 @@
 
   <div class="hero no-print">
     <div class="hero-logo">
-      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="3"  y="13" width="4" height="8" rx="1" fill="#9cc3e6"/>
-        <rect x="10" y="8"  width="4" height="13" rx="1" fill="#cfe0f0"/>
-        <rect x="17" y="4"  width="4" height="17" rx="1" fill="#c8a23a"/>
-      </svg>
+      <img src="/icons/icon-512.png" width="88" height="88" alt="Bilanço Analiz">
     </div>
     <h2>Hisse ara, bilançoyu anında analiz et</h2>
     <div class="hero-sub">ABD · Borsa İstanbul · Güney Kore · 15 Avrupa borsası — kodu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
