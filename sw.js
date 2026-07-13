@@ -1,6 +1,6 @@
 /* Bilanço Analiz — PWA service worker
    Statik kabuğu önbelleğe alır; API köprüleri (/price, /bist, /sec…) her zaman ağdan gelir. */
-const CACHE = 'bilanco-shell-v7';
+const CACHE = 'bilanco-shell-v8';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
@@ -9,8 +9,7 @@ const SHELL = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/logo.png',
-  '/icons/logo.svg'
+  '/icons/logo.png'
 ];
 
 self.addEventListener('install', event => {
