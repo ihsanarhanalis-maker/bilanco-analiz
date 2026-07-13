@@ -24,7 +24,7 @@
   header{background:linear-gradient(120deg,#0c1022 0%,#141a30 55%,#1a1f3d 100%);
     border-bottom:1px solid var(--line-2)}
   .hd-inner{max-width:1180px;margin:0 auto;padding:20px 28px;display:flex;align-items:center;gap:16px}
-  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(140deg,#1b2942,#101626);
+  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(140deg,#1b2942,#101626);cursor:pointer;
     border:1px solid var(--line-2);display:flex;align-items:center;justify-content:center;flex:0 0 auto;
     box-shadow:0 4px 14px rgba(0,0,0,.4)}
   header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.2px;color:#fff}
@@ -90,8 +90,31 @@
   #sectCountries .cbox:not(#sbox-GLOBAL).active::after{
     position:absolute;left:28px;top:5px;width:13px;height:13px;margin:0;border-radius:50%;
     display:grid;place-items:center;background:var(--accent);color:#07101f;font-size:9px;line-height:1}
-  #page-econ .econ-layout,#page-top100 .econ-layout{gap:12px}
-  #econCountries,#topCountries{flex:0 0 132px}
+  #page-econ .econ-layout,#page-top100 .econ-layout,#page-scan .econ-layout{gap:12px}
+  #page-scan .econ-side,#scanCountries{
+    flex:0 0 132px;width:132px;max-width:132px;align-items:flex-start}
+  #scanCountries .cbox{
+    position:relative;width:132px;min-width:132px;max-width:132px;white-space:nowrap}
+  #scanCountries .cbox.active::after{
+    content:"✓";position:absolute;right:10px;margin:0;font-weight:800;color:var(--accent-2)}
+  .scan-filters{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+  .scan-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .scan-lbl{font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.4px;min-width:92px}
+  .scan-chip{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;
+    color:var(--ink-2);padding:7px 13px;font-size:12.5px;font-weight:700;cursor:pointer}
+  .scan-chip:hover{border-color:var(--accent);color:var(--ink)}
+  .scan-chip.active{background:rgba(79,156,249,.14);border-color:rgba(79,156,249,.5);color:var(--accent-2)}
+  .scan-chip:disabled{opacity:.35;cursor:default}
+  .scan-inputs{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+  .scan-inputs label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700;color:var(--muted)}
+  .scan-inputs input{width:88px;background:var(--surface);border:1px solid var(--line-2);color:var(--ink);
+    border-radius:9px;padding:8px 10px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+  .scan-inputs input:focus{outline:none;border-color:var(--accent)}
+  @media (max-width:600px){
+    #scanCountries .cbox{width:auto;min-width:0;max-width:none}
+  }
+  #econCountries,#topCountries,#scanCountries{flex:0 0 132px}
   .econ-main{flex:1;min-width:0}
   /* Sektör seçici: kolon içeriğe (sabit buton genişliğine) göre büzülür ki
      paneller sola doğru genişleyebilsin */
@@ -328,7 +351,7 @@
 <body>
 <header>
   <div class="hd-inner">
-    <div class="logo">
+    <div class="logo" role="button" tabindex="0" title="Ana Sayfa" onclick="switchPage('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('home')}">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="3"  y="13" width="4" height="8" rx="1" fill="#9cc3e6"/>
         <rect x="10" y="8"  width="4" height="13" rx="1" fill="#cfe0f0"/>
@@ -349,10 +372,10 @@
 <!-- SEKME ÇUBUĞU -->
 <nav class="tabs-nav no-print">
   <div class="tabs-in">
-    <button class="tab-btn active" id="tabbtn-home" onclick="switchPage('home')">🏠 Ana Sayfa</button>
     <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
     <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
     <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
+    <button class="tab-btn" id="tabbtn-scan" onclick="switchPage('scan')">🔎 Hisse Tarayıcı</button>
     <button class="tab-btn" id="tabbtn-sect" onclick="switchPage('sect')">🏭 Sektör Devleri</button>
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')">🌎 Dünya Haberleri</button>
   </div>
@@ -610,6 +633,68 @@
     <div class="econ-side no-print" id="topCountries"></div>
     <div class="econ-main" id="topPanels">
       <div class="hint" id="topEmptyHint" style="padding:26px 10px;text-align:center">İlk 100 listesini görmek istediğin ülkeyi soldan seç.</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ SAYFA: HİSSE TARAYICI ============ -->
+<div id="page-scan" class="page">
+
+  <div class="card no-print" style="margin-bottom:16px">
+    <h2>Hisse Tarayıcı — 18 Ülke Borsası</h2>
+    <div class="sub">TradingView Hisse Tarayıcısı gibi çalışır: soldan ülke seç → o borsadaki <b>tüm birincil hisse senetleri</b> canlı yüklenir.
+      Piyasa değeri dilimi ve F/K ile daralt; üstten isimle ara. <b>Satıra tıklayınca bilanço analizi açılır.</b></div>
+  </div>
+
+  <div class="econ-layout">
+    <div class="econ-side no-print" id="scanCountries"></div>
+    <div class="econ-main">
+      <div class="card">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h2 id="scanTitle" style="display:flex;align-items:center;gap:9px;margin:0">Sonuçlar</h2>
+          <div class="scan-inputs" style="margin:0">
+            <label style="flex-direction:row;align-items:center;gap:8px">Ara
+              <input id="scanSearch" type="search" placeholder="kod veya şirket…" style="width:180px" oninput="renderScanPage()">
+            </label>
+            <label style="flex-direction:row;align-items:center;gap:8px">Sırala
+              <select id="scanSort" onchange="renderScanPage()" style="background:var(--surface);border:1px solid var(--line-2);color:var(--ink);border-radius:9px;padding:8px 10px;font-size:13px;font-weight:700">
+                <option value="mcap-desc">Piyasa değeri ↓</option>
+                <option value="mcap-asc">Piyasa değeri ↑</option>
+                <option value="chg-desc">Günlük değişim ↓</option>
+                <option value="name-asc">Kod A→Z</option>
+                <option value="pe-asc">F/K ↑</option>
+                <option value="roe-desc">ROE ↓</option>
+                <option value="div-desc">Temettü ↓</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="scan-filters" style="margin:0 0 12px">
+          <div class="scan-row">
+            <span class="scan-lbl">Piyasa Değeri</span>
+            <button type="button" class="scan-chip active" data-cap="all" onclick="toggleScanCap(this)">Tümü</button>
+            <button type="button" class="scan-chip" data-cap="mega" onclick="toggleScanCap(this)">Mega</button>
+            <button type="button" class="scan-chip" data-cap="large" onclick="toggleScanCap(this)">Large</button>
+            <button type="button" class="scan-chip" data-cap="mid" onclick="toggleScanCap(this)">Mid</button>
+            <button type="button" class="scan-chip" data-cap="small" onclick="toggleScanCap(this)">Small</button>
+            <button type="button" class="scan-chip" data-cap="micro" onclick="toggleScanCap(this)">Micro</button>
+          </div>
+          <div class="scan-row scan-inputs">
+            <label style="flex-direction:row;align-items:center;gap:8px">F/K min
+              <input id="scanPeMin" type="number" step="0.1" placeholder="—" style="width:88px">
+            </label>
+            <button type="button" class="primary" onclick="applyScanFilters()">Filtrele</button>
+          </div>
+        </div>
+        <div class="sub" id="scanSub">Soldan bir ülke seç — o borsadaki tüm hisseler yüklenir.</div>
+        <div id="scanBody"><div class="hint" id="scanEmptyHint">Tarayıcıyı kullanmak için ülke seçin.</div></div>
+        <div id="scanPager" class="scan-row" style="margin-top:12px;justify-content:space-between;display:none">
+          <button type="button" class="scan-chip" id="scanPrev" onclick="scanChangePage(-1)">← Önceki</button>
+          <span id="scanPageInfo" style="font-size:12.5px;font-weight:700;color:var(--ink-2)"></span>
+          <button type="button" class="scan-chip" id="scanNext" onclick="scanChangePage(1)">Sonraki →</button>
+        </div>
+      </div>
     </div>
   </div>
 

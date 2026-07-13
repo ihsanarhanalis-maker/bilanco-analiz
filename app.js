@@ -1,11 +1,12 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','econ','top100','sect','wnews'].forEach(x=>{
+  ['home','stock','econ','top100','scan','sect','wnews'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
   if(p==='econ') initEconPage();       // ülke kutuları ilk girişte kurulur (tembel)
   if(p==='top100') initTop100Page();
+  if(p==='scan') initScanPage();
   if(p==='sect') initSectPage();
   if(p==='wnews') initWnewsPage();
   window.scrollTo({top:0,behavior:'smooth'});
@@ -1826,6 +1827,240 @@ function renderTop100Panel(cc, rows){
   }).join('');
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
     <tbody>${trRows}</tbody></table></div>`;
+}
+
+/* ---------- Hisse Tarayıcı (TradingView tarzı · 18 ülke · TÜM birincil hisseler) ----------
+   Ülke seçilince TradingView scanner sayfalanarak (range) tüm type=stock + is_primary listesi
+   çekilir; cap/oran/arama istemcide uygulanır. Sayfalama UI: 100 satır/sayfa. */
+const SCAN_CAP_BANDS={
+  US:{mega:[200e9,null], large:[10e9,200e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+  TR:{mega:[500e9,null], large:[50e9,500e9], mid:[10e9,50e9], small:[2e9,10e9], micro:[0,2e9]},
+  KR:{mega:[100e12,null], large:[10e12,100e12], mid:[1e12,10e12], small:[100e9,1e12], micro:[0,100e9]},
+  GB:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+  CH:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+  NORDIC:{mega:[500e9,null], large:[50e9,500e9], mid:[10e9,50e9], small:[2e9,10e9], micro:[0,2e9]},
+  PL:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+  EU:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+};
+const SCAN_PAGE_SIZE=100;
+const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
+const SCAN_COLS=['name','description','market_cap_basic','close','change',
+  'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector'];
+function scanCapTable(cc){
+  if(cc==='US') return SCAN_CAP_BANDS.US;
+  if(cc==='TR') return SCAN_CAP_BANDS.TR;
+  if(cc==='KR') return SCAN_CAP_BANDS.KR;
+  if(cc==='GB') return SCAN_CAP_BANDS.GB;
+  if(cc==='CH') return SCAN_CAP_BANDS.CH;
+  if(cc==='PL') return SCAN_CAP_BANDS.PL;
+  if(['SE','DK','NO'].includes(cc)) return SCAN_CAP_BANDS.NORDIC;
+  return SCAN_CAP_BANDS.EU;
+}
+let SCAN_CC='TR', SCAN_CAPS=new Set(['all']), SCAN_GEN=0, SCAN_PAGE_INIT=false;
+let SCAN_RAW=[], SCAN_VIEW=[], SCAN_PAGE=0;
+const SCAN_CACHE={};   // cc → { rows, ts, total }
+function initScanPage(){
+  if(SCAN_PAGE_INIT) return;
+  SCAN_PAGE_INIT=true;
+  document.getElementById('scanCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
+    `<button class="cbox" id="scanbox-${cc}" onclick="selectScanCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  selectScanCountry('TR');
+}
+function selectScanCountry(cc){
+  document.getElementById('scanbox-'+SCAN_CC)?.classList.remove('active');
+  SCAN_CC=cc;
+  document.getElementById('scanbox-'+cc)?.classList.add('active');
+  loadScanMarket(cc);
+}
+function toggleScanCap(btn){
+  const cap=btn.dataset.cap;
+  if(cap==='all'){
+    SCAN_CAPS=new Set(['all']);
+    document.querySelectorAll('#page-scan .scan-chip[data-cap]').forEach(b=>b.classList.toggle('active', b.dataset.cap==='all'));
+  }else{
+    SCAN_CAPS.delete('all');
+    document.querySelector('#page-scan .scan-chip[data-cap="all"]')?.classList.remove('active');
+    if(SCAN_CAPS.has(cap)){ SCAN_CAPS.delete(cap); btn.classList.remove('active'); }
+    else { SCAN_CAPS.add(cap); btn.classList.add('active'); }
+    if(!SCAN_CAPS.size){
+      SCAN_CAPS.add('all');
+      document.querySelector('#page-scan .scan-chip[data-cap="all"]')?.classList.add('active');
+    }
+  }
+  applyScanFilters();
+}
+function scanNum(id){
+  const el=document.getElementById(id);
+  if(!el || el.value==='' || el.value==null) return null;
+  const n=Number(el.value);
+  return Number.isFinite(n)?n:null;
+}
+function scanMcapInBands(mcap, cc){
+  if(SCAN_CAPS.has('all') || !SCAN_CAPS.size) return true;
+  if(mcap==null) return false;
+  const bands=scanCapTable(cc);
+  for(const k of SCAN_CAPS){
+    const b=bands[k]; if(!b) continue;
+    const a=b[0]==null?0:b[0], z=b[1]==null?Number.POSITIVE_INFINITY:b[1];
+    if(mcap>=a && (z===Number.POSITIVE_INFINITY ? true : mcap<z)) return true;
+  }
+  return false;
+}
+async function loadScanMarket(cc){
+  const m=TOP100_MARKETS[cc];
+  const box=document.getElementById('scanBody');
+  const title=document.getElementById('scanTitle');
+  const sub=document.getElementById('scanSub');
+  if(!m || !box) return;
+  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  if(title) title.innerHTML=`${flagSpan(cc)}${cName} — Hisse Tarayıcı`;
+  const cached=SCAN_CACHE[cc];
+  if(cached && (Date.now()-cached.ts)<10*60000){
+    SCAN_RAW=cached.rows;
+    applyScanFilters();
+    return;
+  }
+  const myGen=++SCAN_GEN;
+  SCAN_RAW=[]; SCAN_VIEW=[]; SCAN_PAGE=0;
+  box.innerHTML='<div class="hint">TradingView’den tüm hisseler yükleniyor…</div>';
+  if(sub) sub.textContent='Sayfalar halinde çekiliyor (type=stock · birincil kotasyon)';
+  document.getElementById('scanPager').style.display='none';
+  try{
+    const filter=[
+      {left:'type',operation:'equal',right:'stock'},
+      {left:'is_primary',operation:'equal',right:true},
+    ];
+    if(m.ex) filter.push({left:'exchange',operation:'equal',right:m.ex});
+    const all=[];
+    let start=0, total=null;
+    while(true){
+      if(myGen!==SCAN_GEN) return;
+      const end=start+SCAN_FETCH_SIZE;
+      const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
+        columns:SCAN_COLS, filter,
+        sort:{sortBy:'market_cap_basic',sortOrder:'desc'},
+        range:[start, end]
+      })});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j=await r.json();
+      if(myGen!==SCAN_GEN) return;
+      if(total==null) total=j.totalCount||0;
+      const chunk=(j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
+      all.push(...chunk);
+      if(sub) sub.textContent=`Yükleniyor… ${all.length}${total?(' / '+total):''} hisse`;
+      box.innerHTML=`<div class="hint">Yükleniyor… <b>${all.length}</b>${total?(' / <b>'+total+'</b>'):''} hisse</div>`;
+      if(!chunk.length || all.length>=total || chunk.length<SCAN_FETCH_SIZE) break;
+      start=end;
+      // güvenlik: aşırı büyük pazarlarda (ABD) yine de tamamını çek — üst sınır yok, TV totalCount kadar
+      if(start>20000) break;
+    }
+    if(myGen!==SCAN_GEN) return;
+    SCAN_CACHE[cc]={ rows:all, ts:Date.now(), total:total||all.length };
+    SCAN_RAW=all;
+    applyScanFilters();
+  }catch(e){
+    if(myGen===SCAN_GEN){
+      box.innerHTML='<div class="hint">Liste alınamadı: '+safeHTML(e.message)+'</div>';
+      if(sub) sub.textContent='Hata';
+    }
+  }
+}
+function applyScanFilters(){
+  const peMin=scanNum('scanPeMin');
+  SCAN_VIEW=SCAN_RAW.filter(d=>{
+    if(!scanMcapInBands(d[2], SCAN_CC)) return false;
+    if(peMin!=null && (d[5]==null || d[5]<peMin)) return false;
+    return true;
+  });
+  SCAN_PAGE=0;
+  renderScanPage();
+}
+function scanSortedView(){
+  const q=((document.getElementById('scanSearch')||{}).value||'').trim().toLowerCase();
+  let rows=SCAN_VIEW;
+  if(q) rows=rows.filter(d=>
+    String(d[0]||'').toLowerCase().includes(q) ||
+    String(d[1]||'').toLowerCase().includes(q) ||
+    String(d[10]||'').toLowerCase().includes(q));
+  const sort=(document.getElementById('scanSort')||{}).value||'mcap-desc';
+  const [key,dir]=sort.split('-');
+  const idx={mcap:2,chg:4,name:0,pe:5,roe:7,div:9}[key]??2;
+  const mul=dir==='asc'?1:-1;
+  return rows.slice().sort((a,b)=>{
+    let va=a[idx], vb=b[idx];
+    if(key==='name'){
+      va=String(va||''); vb=String(vb||'');
+      return mul*va.localeCompare(vb,'tr');
+    }
+    if(va==null && vb==null) return 0;
+    if(va==null) return 1;
+    if(vb==null) return -1;
+    return mul*(va-vb);
+  });
+}
+function scanChangePage(delta){
+  const sorted=scanSortedView();
+  const pages=Math.max(1, Math.ceil(sorted.length/SCAN_PAGE_SIZE));
+  SCAN_PAGE=Math.max(0, Math.min(pages-1, SCAN_PAGE+delta));
+  renderScanPage();
+}
+function renderScanPage(){
+  const cc=SCAN_CC;
+  const m=TOP100_MARKETS[cc];
+  const box=document.getElementById('scanBody');
+  const sub=document.getElementById('scanSub');
+  const pager=document.getElementById('scanPager');
+  if(!m || !box) return;
+  const sorted=scanSortedView();
+  const pages=Math.max(1, Math.ceil(sorted.length/SCAN_PAGE_SIZE)||1);
+  if(SCAN_PAGE>=pages) SCAN_PAGE=pages-1;
+  const slice=sorted.slice(SCAN_PAGE*SCAN_PAGE_SIZE, (SCAN_PAGE+1)*SCAN_PAGE_SIZE);
+  if(sub){
+    const capNote=SCAN_CAPS.has('all')?'tüm dilimler':[...SCAN_CAPS].join('+');
+    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView canlı · <b>satıra tıkla → analiz</b>`;
+  }
+  if(!sorted.length){
+    box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';
+    if(pager) pager.style.display='none';
+    return;
+  }
+  // TV: ROE/net_margin yüzde puan; dividend_yield_recent kesir; change yüzde puan
+  const pp=v=>v==null?'—':v.toFixed(1)+'%';
+  const dy=v=>v==null?'—':(v*100).toFixed(1)+'%';
+  const xx=v=>v==null?'—':v.toFixed(1)+'x';
+  const chg=v=>{
+    if(v==null) return '—';
+    const cls=v>0?'up':(v<0?'down':'neutral');
+    return `<span class="${cls}">${(v>0?'+':'')+v.toFixed(2)}%</span>`;
+  };
+  const trRows=slice.map((d,i)=>{
+    const code=m.click(String(d[0]).replace(/_/g,'-'));
+    const n=SCAN_PAGE*SCAN_PAGE_SIZE+i+1;
+    return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
+      <td style="color:var(--muted)">${n}</td>
+      <td><b>${safeHTML(String(d[0]).replace(/_/g,'-'))}</b></td>
+      <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+      <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
+      <td>${d[3]==null?'—':m.sym+Number(d[3]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
+      <td>${chg(d[4])}</td>
+      <td>${xx(d[5])}</td>
+      <td>${xx(d[6])}</td>
+      <td>${pp(d[7])}</td>
+      <td>${pp(d[8])}</td>
+      <td>${dy(d[9])}</td>
+      <td style="color:var(--muted);font-size:12px">${safeHTML(d[10]||'—')}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+    <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
+    <th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Temettü</th><th>Sektör</th>
+  </tr></thead><tbody>${trRows}</tbody></table></div>`;
+  if(pager){
+    pager.style.display='flex';
+    document.getElementById('scanPageInfo').textContent=`Sayfa ${SCAN_PAGE+1} / ${pages} · ${slice.length} satır`;
+    document.getElementById('scanPrev').disabled=SCAN_PAGE<=0;
+    document.getElementById('scanNext').disabled=SCAN_PAGE>=pages-1;
+  }
 }
 
 /* ---------- Sektör Devleri sayfası (companiesmarketcap.com kategori sıralaması karşılığı) ----------
