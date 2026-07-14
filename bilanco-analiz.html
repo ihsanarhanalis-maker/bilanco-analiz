@@ -58,7 +58,29 @@
   .pwa-sheet-actions button{flex:1;min-width:120px;padding:11px 14px;border-radius:12px;font-weight:700}
   .pwa-sheet-actions .ok{background:rgba(79,156,249,.22);border-color:rgba(79,156,249,.5);color:var(--accent-2)}
   header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.2px;color:#fff}
-  header p{margin:4px 0 0;color:var(--ink-2);font-size:12.5px}
+  .market-tape{position:relative;overflow:hidden;border-top:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(10,16,28,.95),rgba(8,12,22,.98));height:34px}
+  .market-tape::before,.market-tape::after{content:'';position:absolute;top:0;bottom:0;width:48px;z-index:2;pointer-events:none}
+  .market-tape::before{left:0;background:linear-gradient(90deg,rgba(8,12,22,1),rgba(8,12,22,0))}
+  .market-tape::after{right:0;background:linear-gradient(270deg,rgba(8,12,22,1),rgba(8,12,22,0))}
+  .market-tape-track{display:inline-flex;align-items:center;gap:0;white-space:nowrap;height:100%;
+    will-change:transform;animation:tape-scroll 90s linear infinite}
+  .market-tape:hover .market-tape-track{animation-play-state:paused}
+  @keyframes tape-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .tape-item{display:inline-flex;align-items:center;gap:7px;padding:0 18px;height:100%;
+    border-right:1px solid rgba(255,255,255,.06);font-size:12px;font-variant-numeric:tabular-nums}
+  .tape-item .t-name{color:var(--ink-2);font-weight:700;letter-spacing:.2px}
+  .tape-item .t-price{color:var(--ink);font-weight:700}
+  .tape-item .t-chg{font-weight:700;font-size:11.5px}
+  .tape-item .t-chg.up{color:var(--good)}
+  .tape-item .t-chg.down{color:var(--bad)}
+  .tape-item .t-chg.flat{color:var(--muted)}
+  .tape-item .cfl{width:16px;height:11px;border-radius:2px;overflow:hidden;flex:0 0 auto}
+  .tape-item .cfl svg{display:block;width:16px;height:11px}
+  .tape-item .tape-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .tape-item .tape-dot.gold{background:#d4a017}
+  .tape-item .tape-dot.oil{background:#5b8fa8}
+  .tape-item .tape-dot.fx{background:#6b8cae}
   .hd-badge{font-size:11px;color:var(--accent-2);background:rgba(79,156,249,.10);
     border:1px solid rgba(79,156,249,.3);padding:5px 12px;border-radius:999px;white-space:nowrap;font-weight:600}
   /* Piyasa değeri rozeti — okunaklı: etiket beyaz, değer yeşil */
@@ -316,6 +338,8 @@
     .econ-main{width:100%;max-width:100%;min-width:0}
     .econ-main .card{max-width:100%}
     .hd-inner{padding:13px 14px;gap:10px;flex-wrap:wrap}
+    .market-tape{height:30px}
+    .tape-item{padding:0 12px;font-size:11px}
     header h1{font-size:18px}
     header p{font-size:11px}
     .live-price .lp-val{font-size:18px}
@@ -404,12 +428,14 @@
     </div>
     <div>
       <h1>Bilanço Analiz <button type="button" id="pwaInstall" class="no-print" onclick="installPwa()">📲 Yükle</button></h1>
-      <p>ABD + Borsa İstanbul hisseleri · bilanço, oranlar ve güncel haberler</p>
     </div>
     <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div id="livePrice" class="live-price hidden"></div>
       <div id="nyClock" class="hidden" style="font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:600"></div>
     </div>
+  </div>
+  <div class="market-tape no-print" id="marketTape" aria-label="Canlı piyasa şeridi">
+    <div class="market-tape-track" id="marketTapeTrack"><span class="tape-item"><span class="t-name">Piyasa verisi yükleniyor…</span></span></div>
   </div>
 </header>
 
@@ -698,7 +724,7 @@
               <input id="scanSearch" type="search" placeholder="kod veya şirket…" style="width:180px" oninput="renderScanPage()">
             </label>
             <label style="flex-direction:row;align-items:center;gap:8px">Sırala
-              <select id="scanSort" onchange="renderScanPage()" style="background:var(--surface);border:1px solid var(--line-2);color:var(--ink);border-radius:9px;padding:8px 10px;font-size:13px;font-weight:700">
+              <select id="scanSort" onchange="onScanSortChange()" style="background:var(--surface);border:1px solid var(--line-2);color:var(--ink);border-radius:9px;padding:8px 10px;font-size:13px;font-weight:700">
                 <option value="mcap-desc">Piyasa değeri ↓</option>
                 <option value="mcap-asc">Piyasa değeri ↑</option>
                 <option value="chg-desc">Günlük değişim ↓</option>
@@ -706,6 +732,7 @@
                 <option value="pe-asc">F/K ↑</option>
                 <option value="roe-desc">ROE ↓</option>
                 <option value="div-desc">Temettü ↓</option>
+                <option value="earn-asc">Yaklaşan kazanç tarihi</option>
               </select>
             </label>
           </div>

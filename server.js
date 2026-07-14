@@ -298,6 +298,49 @@ http.createServer((req, res) => {
     return;
   }
 
+  // --- Toplu canlı kotasyon (Yahoo spark, anahtarsız) — piyasa şeridi için ---
+  //     ?s=SYM1,SYM2,... (en fazla 40). Yanıt: { quotes:[{symbol,price,prev,changePct}] }
+  if (urlPath === '/quotes') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const raw = (qs.get('s') || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 40);
+    if (!raw.length) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ quotes: [] }));
+      return;
+    }
+    const YUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    const chunkSize = 10;
+    const chunks = [];
+    for (let i = 0; i < raw.length; i += chunkSize) chunks.push(raw.slice(i, i + chunkSize));
+    const fetchChunk = (syms) => new Promise((resolve) => {
+      const enc = syms.map(s => encodeURIComponent(s)).join(',');
+      const yurl = 'https://query1.finance.yahoo.com/v7/finance/spark?symbols=' + enc + '&range=1d&interval=1d';
+      https.get(yurl, { headers: { 'User-Agent': YUA } }, pr => {
+        let body = '';
+        pr.on('data', c => body += c);
+        pr.on('end', () => {
+          try {
+            const j = JSON.parse(body);
+            const rows = (j.spark && j.spark.result) || [];
+            resolve(rows.map(item => {
+              const meta = item.response && item.response[0] && item.response[0].meta;
+              const price = meta && meta.regularMarketPrice != null ? meta.regularMarketPrice : null;
+              const prev = meta && meta.chartPreviousClose != null ? meta.chartPreviousClose : null;
+              const changePct = (price != null && prev) ? (price - prev) / prev * 100 : null;
+              return { symbol: item.symbol, price, prev, changePct };
+            }));
+          } catch (e) { resolve([]); }
+        });
+      }).on('error', () => resolve([]));
+    });
+    Promise.all(chunks.map(fetchChunk)).then(parts => {
+      const quotes = [].concat(...parts);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ quotes }));
+    });
+    return;
+  }
+
   // --- Yahoo yıllık finansallar köprüsü (fundamentals-timeseries, anahtarsız/crumb'sız) ---
   //     Almanya/İsviçre gibi filings.xbrl.org kapsamı olmayan Avrupa borsaları için çok-yıllı
   //     bilanço/gelir/nakit-akış yedeği. Yahoo CORS göndermez → proxy şart (aynı /price gibi).

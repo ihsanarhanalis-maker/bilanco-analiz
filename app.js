@@ -4,6 +4,7 @@ function switchPage(p){
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
+  document.getElementById('marketTape')?.classList.toggle('hidden', p!=='home');
   if(p==='econ') initEconPage();       // ülke kutuları ilk girişte kurulur (tembel)
   if(p==='top100') initTop100Page();
   if(p==='scan') initScanPage();
@@ -1962,6 +1963,17 @@ const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
   'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
   'SMA50','SMA200'];
+const SCAN_COLS_EARN=SCAN_COLS.concat(['earnings_release_next_date']);
+const SCAN_TV_SORT={
+  'mcap-desc':{sortBy:'market_cap_basic',sortOrder:'desc'},
+  'mcap-asc':{sortBy:'market_cap_basic',sortOrder:'asc'},
+  'chg-desc':{sortBy:'change',sortOrder:'desc'},
+  'name-asc':{sortBy:'name',sortOrder:'asc'},
+  'pe-asc':{sortBy:'price_earnings_ttm',sortOrder:'asc'},
+  'roe-desc':{sortBy:'return_on_equity',sortOrder:'desc'},
+  'div-desc':{sortBy:'dividend_yield_recent',sortOrder:'desc'},
+  'earn-asc':{sortBy:'earnings_release_next_date',sortOrder:'asc'},
+};
 function scanCapTable(cc){
   if(cc==='US') return SCAN_CAP_BANDS.US;
   if(cc==='TR') return SCAN_CAP_BANDS.TR;
@@ -1981,7 +1993,8 @@ function scanCapTable(cc){
 }
 let SCAN_CC='TR', SCAN_CAPS=new Set(['all']), SCAN_MA=new Set(), SCAN_GEN=0, SCAN_PAGE_INIT=false;
 let SCAN_RAW=[], SCAN_VIEW=[], SCAN_PAGE=0;
-const SCAN_CACHE={};   // cc → { rows, ts, total }
+let SCAN_MODE='mcap';   // 'mcap' | 'earn' — TV’den hangi sıralamayla çekildiği
+const SCAN_CACHE={};   // cc|mode → { rows, ts, total }
 function initScanPage(){
   if(SCAN_PAGE_INIT) return;
   SCAN_PAGE_INIT=true;
@@ -2044,17 +2057,28 @@ async function loadScanMarket(cc){
   if(!m || !box) return;
   const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
   if(title) title.innerHTML=`${flagSpan(cc)}${cName} — Hisse Tarayıcı`;
-  const cached=SCAN_CACHE[cc];
+  const sortVal=(document.getElementById('scanSort')||{}).value||'mcap-desc';
+  const mode=sortVal==='earn-asc'?'earn':'mcap';
+  SCAN_MODE=mode;
+  const cacheKey=cc+'|'+mode;
+  const cols=mode==='earn'?SCAN_COLS_EARN:SCAN_COLS;
+  const tvSort=SCAN_TV_SORT[sortVal]||SCAN_TV_SORT['mcap-desc'];
+  const needLen=cols.length;
+  const cached=SCAN_CACHE[cacheKey];
   // SMA sütunları eklendi — eski önbellekte d[11]/d[12] yoksa yeniden çek
-  if(cached && (Date.now()-cached.ts)<10*60000 && cached.rows && cached.rows[0] && cached.rows[0].length>=13){
+  if(cached && (Date.now()-cached.ts)<10*60000 && cached.rows && cached.rows[0] && cached.rows[0].length>=needLen){
     SCAN_RAW=cached.rows;
     applyScanFilters();
     return;
   }
   const myGen=++SCAN_GEN;
   SCAN_RAW=[]; SCAN_VIEW=[]; SCAN_PAGE=0;
-  box.innerHTML='<div class="hint">TradingView’den tüm hisseler yükleniyor…</div>';
-  if(sub) sub.textContent='Sayfalar halinde çekiliyor (type=stock · birincil kotasyon)';
+  box.innerHTML=mode==='earn'
+    ? '<div class="hint">TradingView — yaklaşan kazanç tarihine göre sıralanıyor…</div>'
+    : '<div class="hint">TradingView’den tüm hisseler yükleniyor…</div>';
+  if(sub) sub.textContent=mode==='earn'
+    ? 'sortBy=earnings_release_next_date (TradingView)'
+    : 'Sayfalar halinde çekiliyor (type=stock · birincil kotasyon)';
   document.getElementById('scanPager').style.display='none';
   try{
     const filter=[
@@ -2068,8 +2092,8 @@ async function loadScanMarket(cc){
       if(myGen!==SCAN_GEN) return;
       const end=start+SCAN_FETCH_SIZE;
       const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
-        columns:SCAN_COLS, filter,
-        sort:{sortBy:'market_cap_basic',sortOrder:'desc'},
+        columns:cols, filter,
+        sort:tvSort,
         range:[start, end]
       })});
       if(!r.ok) throw new Error('HTTP '+r.status);
@@ -2086,7 +2110,7 @@ async function loadScanMarket(cc){
       if(start>20000) break;
     }
     if(myGen!==SCAN_GEN) return;
-    SCAN_CACHE[cc]={ rows:all, ts:Date.now(), total:total||all.length };
+    SCAN_CACHE[cacheKey]={ rows:all, ts:Date.now(), total:total||all.length };
     SCAN_RAW=all;
     applyScanFilters();
   }catch(e){
@@ -2095,6 +2119,16 @@ async function loadScanMarket(cc){
       if(sub) sub.textContent='Hata';
     }
   }
+}
+function onScanSortChange(){
+  const sortVal=(document.getElementById('scanSort')||{}).value||'mcap-desc';
+  const nextMode=sortVal==='earn-asc'?'earn':'mcap';
+  // Kazanç ↔ diğer: TradingView’den yeniden sıralı çek (istemci sıralaması değil)
+  if(nextMode!==SCAN_MODE || nextMode==='earn'){
+    loadScanMarket(SCAN_CC);
+    return;
+  }
+  renderScanPage();
 }
 function applyScanFilters(){
   const peMin=scanNum('scanPeMin');
@@ -2116,6 +2150,8 @@ function scanSortedView(){
     String(d[0]||'').toLowerCase().includes(q) ||
     String(d[1]||'').toLowerCase().includes(q) ||
     String(d[10]||'').toLowerCase().includes(q));
+  // Yaklaşan kazanç: sıra TradingView’den geldi — istemcide yeniden sıralama
+  if(SCAN_MODE==='earn') return rows.slice();
   const sort=(document.getElementById('scanSort')||{}).value||'mcap-desc';
   const [key,dir]=sort.split('-');
   const idx={mcap:2,chg:4,name:0,pe:5,roe:7,div:9}[key]??2;
@@ -2168,6 +2204,11 @@ function renderScanPage(){
     const cls=v>0?'up':(v<0?'down':'neutral');
     return `<span class="${cls}">${(v>0?'+':'')+v.toFixed(2)}%</span>`;
   };
+  const showEarn=SCAN_MODE==='earn';
+  const earnCell=ts=>{
+    if(ts==null || !Number.isFinite(ts)) return '—';
+    return new Date(ts*1000).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+  };
   const trRows=slice.map((d,i)=>{
     const code=m.click(String(d[0]).replace(/_/g,'-'));
     const n=SCAN_PAGE*SCAN_PAGE_SIZE+i+1;
@@ -2178,6 +2219,7 @@ function renderScanPage(){
       <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
       <td>${d[3]==null?'—':m.sym+Number(d[3]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
       <td>${chg(d[4])}</td>
+      ${showEarn?`<td style="white-space:nowrap">${earnCell(d[13])}</td>`:''}
       <td>${xx(d[5])}</td>
       <td>${xx(d[6])}</td>
       <td>${pp(d[7])}</td>
@@ -2188,6 +2230,7 @@ function renderScanPage(){
   }).join('');
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
     <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
+    ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
     <th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Temettü</th><th>Sektör</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
@@ -4236,6 +4279,85 @@ function registerPwa(){
   refreshPwaInstallBtn();
 }
 
+/* ---------- Canlı piyasa şeridi (25 ülke ana endeksi + altın/Brent/USDTRY/EURTRY) ---------- */
+const MARKET_TAPE=[
+  {s:'XU100.IS',  name:'BIST 100',  cc:'TR', dig:2},
+  {s:'^GSPC',     name:'S&P 500',   cc:'US', dig:2},
+  {s:'^IXIC',     name:'Nasdaq',    cc:'US', dig:2},
+  {s:'^FTSE',     name:'FTSE 100',  cc:'GB', dig:2},
+  {s:'^GDAXI',    name:'DAX',       cc:'DE', dig:2},
+  {s:'^FCHI',     name:'CAC 40',    cc:'FR', dig:2},
+  {s:'FTSEMIB.MI',name:'FTSE MIB',  cc:'IT', dig:2},
+  {s:'^IBEX',     name:'IBEX 35',   cc:'ES', dig:2},
+  {s:'^AEX',      name:'AEX',       cc:'NL', dig:2},
+  {s:'^BFX',      name:'BEL 20',    cc:'BE', dig:2},
+  {s:'PSI20.LS',  name:'PSI 20',    cc:'PT', dig:2},
+  {s:'^SSMI',     name:'SMI',       cc:'CH', dig:2},
+  {s:'^OMX',      name:'OMX 30',    cc:'SE', dig:2},
+  {s:'^OMXC25',   name:'OMXC 25',   cc:'DK', dig:2},
+  {s:'OBX.OL',    name:'OBX',       cc:'NO', dig:2},
+  {s:'^OMXH25',   name:'OMXH 25',   cc:'FI', dig:2},
+  {s:'^ATX',      name:'ATX',       cc:'AT', dig:2},
+  {s:'WIG20.WA',  name:'WIG20',     cc:'PL', dig:2},
+  {s:'^KS11',     name:'KOSPI',     cc:'KR', dig:2},
+  {s:'^N225',     name:'Nikkei 225',cc:'JP', dig:2},
+  {s:'000001.SS', name:'Şanghay',   cc:'CN', dig:2},
+  {s:'^HSI',      name:'Hang Seng', cc:'HK', dig:2},
+  {s:'^TWII',     name:'TAIEX',     cc:'TW', dig:2},
+  {s:'^GSPTSE',   name:'TSX',       cc:'CA', dig:2},
+  {s:'^AXJO',     name:'ASX 200',   cc:'AU', dig:2},
+  {s:'^STI',      name:'STI',       cc:'SG', dig:2},
+  {s:'GC=F',      name:'Ons Altın', cc:null, dig:2},
+  {s:'BZ=F',      name:'Brent',     cc:null, dig:2},
+  {s:'TRY=X',     name:'USD/TRY',   cc:null, dig:4},
+  {s:'EURTRY=X',  name:'EUR/TRY',   cc:null, dig:4},
+];
+let MARKET_TAPE_TIMER=null;
+function fmtTapePrice(n, dig){
+  if(n==null || !Number.isFinite(n)) return '—';
+  return n.toLocaleString('tr-TR',{minimumFractionDigits:dig,maximumFractionDigits:dig});
+}
+function tapeItemHTML(def, q){
+  const price=q&&q.price!=null?q.price:null;
+  const chg=q&&q.changePct!=null?q.changePct:null;
+  const cls=chg==null?'flat':(chg>0.005?'up':(chg<-0.005?'down':'flat'));
+  const chgTxt=chg==null?'—':((chg>0?'+':'')+chg.toFixed(2)+'%');
+  const icon=def.cc?flagSpan(def.cc):`<span class="tape-dot ${def.s==='GC=F'?'gold':(def.s==='BZ=F'?'oil':'fx')}" aria-hidden="true"></span>`;
+  return `<span class="tape-item">${icon}<span class="t-name">${safeHTML(def.name)}</span>`+
+    `<span class="t-price">${fmtTapePrice(price, def.dig)}</span>`+
+    `<span class="t-chg ${cls}">${chgTxt}</span></span>`;
+}
+function renderMarketTape(map){
+  const track=document.getElementById('marketTapeTrack');
+  if(!track) return;
+  const html=MARKET_TAPE.map(d=>tapeItemHTML(d, map[d.s])).join('');
+  // Sonsuz kaydırma için içeriği iki kez yaz (animasyon -50%)
+  track.innerHTML=html+html;
+  const n=MARKET_TAPE.length;
+  track.style.animationDuration=Math.max(60, n*3.2)+'s';
+}
+async function loadMarketTape(){
+  const track=document.getElementById('marketTapeTrack');
+  if(!track || location.protocol==='file:') return;
+  try{
+    const syms=MARKET_TAPE.map(d=>d.s).join(',');
+    const r=await fetch('/quotes?s='+encodeURIComponent(syms));
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    const map={};
+    (j.quotes||[]).forEach(q=>{ if(q&&q.symbol) map[q.symbol]=q; });
+    renderMarketTape(map);
+  }catch(e){
+    if(!track.dataset.ready) track.innerHTML='<span class="tape-item"><span class="t-name">Piyasa verisi alınamadı</span></span>';
+  }
+  track.dataset.ready='1';
+}
+function initMarketTape(){
+  loadMarketTape();
+  if(MARKET_TAPE_TIMER) clearInterval(MARKET_TAPE_TIMER);
+  MARKET_TAPE_TIMER=setInterval(loadMarketTape, 60000);
+}
+
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
@@ -4245,4 +4367,5 @@ window.addEventListener('DOMContentLoaded',()=>{
   body.addEventListener('input', colorInputRows);
   body.addEventListener('change', colorInputRows);
   registerPwa();
+  initMarketTape();
 });
