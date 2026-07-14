@@ -573,6 +573,9 @@ const EU_EXCHANGES={
   // fetchTickerEU içinde /yfsearch ile ayrıca çözümlenir (bkz. o fonksiyondaki not).
   KS: {tv:'KRX',      scan:'korea',       country:'Güney Kore', ccy:'KRW', sym:'₩',    city:'Seul',      tz:'Asia/Seoul',        open:540, close:930,  flag:'🇰🇷', iso:'KR'},
   KQ: {tv:'KRX',      scan:'korea',       country:'Güney Kore', ccy:'KRW', sym:'₩',    city:'Seul',      tz:'Asia/Seoul',        open:540, close:930,  flag:'🇰🇷', iso:'KR'},   // KOSDAQ — .KS ile aynı, kullanıcı isterse açıkça yazabilir
+  // Tokyo Borsası (Prime/Standard/Growth) — Yahoo eki .T, TradingView öneki TSE.
+  // Çok yıllı veri: IFRS/ESEF Japonya'yı kapsamaz → Yahoo fundamentals (KR ile aynı yedek zinciri).
+  T:  {tv:'TSE',      scan:'japan',       country:'Japonya',    ccy:'JPY', sym:'¥',    city:'Tokyo',     tz:'Asia/Tokyo',        open:540, close:900,  flag:'🇯🇵', iso:'JP'},
 };
 /* "SIE.DE" → {base:'SIE', suffix:'DE', ...EU_EXCHANGES.DE}; eşleşmezse null */
 function parseEUSymbol(sym){
@@ -869,10 +872,10 @@ async function fetchTickerEU(euInfo, mode, myGen){
 /* ---------- Bare kod → borsa tespiti ----------
    Kullanıcı ülke eki YAZMADAN arayabilsin diye: kod eksiz girildiğinde hangi borsalarda
    birincil kotasyonu olduğu tek bir TradingView global scan çağrısıyla bulunur
-   (BIST + 13 benzersiz Avrupa/Kore borsa öneki tek istekte; EURONEXT 4 ülkeyi kapsadığından
+   (BIST + Avrupa/Kore/Japonya borsa önekleri tek istekte; EURONEXT 4 ülkeyi kapsadığından
    ülke sütunuyla ayrıştırılır). ABD tespiti yerel CIK haritasından (istek gerekmez).
    Tek borsada bulunduysa otomatik oraya yönlenir; birden fazlaysa tıklanabilir
-   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .DE / .AS / .KS …). */
+   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .DE / .AS / .KS / .T …). */
 const EURONEXT_COUNTRY_SUFFIX={ 'France':'PA', 'Netherlands':'AS', 'Belgium':'BR', 'Portugal':'LS' };
 async function detectBareMarkets(sym){
   const map=window.CIK_MAP||{};
@@ -964,7 +967,7 @@ async function fetchTicker(){
       else fetchTickerBIST(sym, mode, myGen);
       return;
     }
-    setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · 15 Avrupa borsası tarandı).','bad');
+    setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · Avrupa · Kore · Japonya tarandı).','bad');
     return;
   }
   if(cands.length>1){ renderMarketChoices(sym, cands); return; }
@@ -1400,6 +1403,7 @@ const FLAG_SVG={
   AT:`<svg viewBox="0 0 30 20"><rect width="30" height="6.67" fill="#ED2939"/><rect y="6.67" width="30" height="6.67" fill="#fff"/><rect y="13.33" width="30" height="6.67" fill="#ED2939"/>`,
   PL:`<svg viewBox="0 0 30 20"><rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#DC143C"/>`,
   KR:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="4.5" fill="#CD2E3A"/><path d="M15 5.5a4.5 4.5 0 000 9 2.25 2.25 0 010-4.5 2.25 2.25 0 000-4.5z" fill="#0047A0"/>`,
+  JP:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="5.5" fill="#BC002D"/>`,
 };
 function flagSpan(cc){ return `<span class="cfl" aria-hidden="true">${(FLAG_SVG[cc]||'')+'</svg>'}</span>`; }
 const ECON_COUNTRIES=[
@@ -1409,12 +1413,13 @@ const ECON_COUNTRIES=[
   ['PT','Portekiz'],  ['CH','İsviçre'],   ['SE','İsveç'],
   ['DK','Danimarka'], ['NO','Norveç'],    ['FI','Finlandiya'],
   ['AT','Avusturya'], ['PL','Polonya'],   ['KR','Güney Kore'],
+  ['JP','Japonya'],
 ];
 const ECON_PANELS={};
 let ECON_PAGE_INIT=false;
-/* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + 15 Avrupa + Güney Kore) —
+/* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + Avrupa + Kore + Japonya) —
    ISO→Investing ülke ID eşlemesi server.js /investcal rotasında */
-const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR'];
+const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP'];
 const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
 const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
 const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
@@ -1667,7 +1672,7 @@ async function loadEconPanel(cc){
   if(box) box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
   const myGen=++st.gen;   // panel kapatılıp açılırsa / dönem değişirse eski yanıt çöpe gider
   let rows=[], src='', investingOk=false;
-  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — 18 ülkenin tamamı
+  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — 19 ülkenin tamamı
   //    (ISO→Investing ülke ID haritası server.js /investcal içinde).
   //    Geçerli JSON (data alanı string) → Investing ÇALIŞTI say (0 satır = o gün veri yok, normal).
   //    Yalnızca istek GERÇEKTEN başarısızsa (403/502/JSON değil) yedeğe düş.
@@ -1724,6 +1729,7 @@ const TOP100_MARKETS={
   TR:{scan:'turkey',                     sym:'₺',    click:c=>c+'.IS'},
   US:{scan:'america',                    sym:'$',    click:c=>c+'.US'},
   KR:{scan:'korea',                      sym:'₩',    click:c=>c},        // sayısal kodlar tekil — otomatik borsa tespiti .KS/.KQ'yu doğru çözer
+  JP:{scan:'japan',       ex:'TSE',      sym:'¥',    click:c=>c+'.T'},
   GB:{scan:'uk',          ex:'LSE',      sym:'£',    click:c=>c+'.L'},
   DE:{scan:'germany',     ex:'XETR',     sym:'€',    click:c=>c+'.DE'},
   FR:{scan:'france',      ex:'EURONEXT', sym:'€',    click:c=>c+'.PA'},
@@ -1829,13 +1835,15 @@ function renderTop100Panel(cc, rows){
     <tbody>${trRows}</tbody></table></div>`;
 }
 
-/* ---------- Hisse Tarayıcı (TradingView tarzı · 18 ülke · TÜM birincil hisseler) ----------
+/* ---------- Hisse Tarayıcı (TradingView tarzı · 19 ülke · TÜM birincil hisseler) ----------
    Ülke seçilince TradingView scanner sayfalanarak (range) tüm type=stock + is_primary listesi
    çekilir; cap/oran/arama istemcide uygulanır. Sayfalama UI: 100 satır/sayfa. */
 const SCAN_CAP_BANDS={
   US:{mega:[200e9,null], large:[10e9,200e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
   TR:{mega:[500e9,null], large:[50e9,500e9], mid:[10e9,50e9], small:[2e9,10e9], micro:[0,2e9]},
   KR:{mega:[100e12,null], large:[10e12,100e12], mid:[1e12,10e12], small:[100e9,1e12], micro:[0,100e9]},
+  // JPY: Toyota ~50–80T ¥ bandında; mega eşiği KR ile aynı büyüklük mertebesinde
+  JP:{mega:[50e12,null], large:[5e12,50e12], mid:[500e9,5e12], small:[50e9,500e9], micro:[0,50e9]},
   GB:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
   CH:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
   NORDIC:{mega:[500e9,null], large:[50e9,500e9], mid:[10e9,50e9], small:[2e9,10e9], micro:[0,2e9]},
@@ -1850,6 +1858,7 @@ function scanCapTable(cc){
   if(cc==='US') return SCAN_CAP_BANDS.US;
   if(cc==='TR') return SCAN_CAP_BANDS.TR;
   if(cc==='KR') return SCAN_CAP_BANDS.KR;
+  if(cc==='JP') return SCAN_CAP_BANDS.JP;
   if(cc==='GB') return SCAN_CAP_BANDS.GB;
   if(cc==='CH') return SCAN_CAP_BANDS.CH;
   if(cc==='PL') return SCAN_CAP_BANDS.PL;
@@ -2064,7 +2073,7 @@ function renderScanPage(){
 }
 
 /* ---------- Sektör Devleri sayfası (companiesmarketcap.com kategori sıralaması karşılığı) ----------
-   Üstte ülke seçici (🌍 dünya + 18 ülke, radyo mantığı), solda 20 sektör kutusu (aç/kapa).
+   Üstte ülke seçici (🌍 dünya + 19 ülke, radyo mantığı), solda 20 sektör kutusu (aç/kapa).
    Veri: TradingView scanner — ülke seçiliyse o ülkenin scan bölgesi (İlk 100 ile aynı harita),
    🌍'de 'global' scan (piyasa değerleri TV tarafından USD'ye normalize edilir, sıralama doğru —
    curl ile doğrulandı: Toyota/Tencent/Nintendo USD değerle döner). Sektörler TV'nin FactSet
@@ -2093,7 +2102,7 @@ const SECT_SECTORS=[
   ['teknoloji',  '🖥️','Teknoloji',            {sec:['Technology Services','Electronic Technology']}],
   ['ai',         '🤖','Yapay Zeka',           {curated:'AI'}],
 ];
-/* Küratörlü listeler: [TV kodu, ülke]. Ülkesi 18'lik listede olmayanlar (JP/CN/TW/SG…)
+/* Küratörlü listeler: [TV kodu, ülke]. Ülkesi 19'luk listede olmayanlar (CN/TW/SG…)
    yalnız 🌍 görünümünde çıkar. Değerler canlı çekilir, piyasa değerine göre istemcide sıralanır. */
 const SECT_CURATED={
   GAMES:[
@@ -2113,11 +2122,12 @@ const SECT_CURATED={
   ],
 };
 /* TV borsa öneki → uygulamanın arama eki (satır tıklaması için). Haritada olmayan borsalar
-   (TSE/HKEX/TWSE…) uygulamada analiz desteklenmediğinden tıklanamaz bırakılır.
+   (HKEX/TWSE…) uygulamada analiz desteklenmediğinden tıklanamaz bırakılır.
    EURONEXT önekinden ülke eki türetilemez (FR/NL/BE/PT ortak) → yalın kod gönderilir,
-   mevcut otomatik borsa tespiti (/yfsearch) doğru eki kendisi çözer. */
+   mevcut otomatik borsa tespiti doğru eki kendisi çözer. */
 const TV_EX2CODE={
   NASDAQ:c=>c+'.US', NYSE:c=>c+'.US', AMEX:c=>c+'.US', BIST:c=>c+'.IS', KRX:c=>c,
+  TSE:c=>c+'.T',
   LSE:c=>c+'.L', XETR:c=>c+'.DE', MIL:c=>c+'.MI', BME:c=>c+'.MC', SIX:c=>c+'.SW',
   OMXSTO:c=>c+'.ST', OMXCOP:c=>c+'.CO', OSL:c=>c+'.OL', OMXHEX:c=>c+'.HE',
   VIE:c=>c+'.VI', GPW:c=>c+'.WA', EURONEXT:c=>c,
@@ -2712,7 +2722,7 @@ async function fetchNews(sym, myGen){
       const isEU = FIN && FIN.market==='EU';
       let q=sym;
       if(isEU && FIN.companyName){
-        q=FIN.companyName.replace(/\b(AG|SE|PLC|NV|N\.V\.|SA|S\.A\.|S\.p\.A\.|AB|A\/S|ASA|Ltd\.?|Limited|Inc\.?|Group|Aktiengesellschaft|Public Limited Company|Holding)\b\.?/gi,' ')
+        q=FIN.companyName.replace(/\b(AG|SE|PLC|NV|N\.V\.|SA|S\.A\.|S\.p\.A\.|AB|A\/S|ASA|Ltd\.?|Limited|Inc\.?|Corp\.?|Corporation|Co\.?|Group|Aktiengesellschaft|Public Limited Company|Holding|Kabushiki Kaisha|\bKK\b)\b\.?/gi,' ')
           .replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' ') || sym;
       }
       const [xPrem, xGen]=await Promise.all([
@@ -3084,9 +3094,14 @@ function analyze(){
   // Rapor başlığı (dışa aktarmada da kullanılır)
   const rt=document.getElementById('reportTitle');
   if(rt){
-    rt.textContent = FIN
-      ? `${FIN.ticker} · ${FIN.market==='BIST'?'BIST':'ABD'} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${FIN.market==='BIST'?'TL':'USD'}`
-      : 'Elle girilen veri';
+    if(!FIN) rt.textContent='Elle girilen veri';
+    else{
+      const mkt = FIN.market==='BIST' ? 'BIST'
+                : FIN.market==='EU' && FIN.euInfo ? FIN.euInfo.country
+                : 'ABD';
+      const curLbl = FIN.market==='BIST' ? 'TL' : (FIN.cur || (FIN.market==='EU'?'—':'USD'));
+      rt.textContent = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
+    }
   }
   // Dönem notu: bildirilme tarihi + yıllık veride gecikme açıklaması
   const pn=document.getElementById('periodNote');
@@ -3096,6 +3111,13 @@ function analyze(){
       pn.innerHTML = (FIN.mode==='annual'
         ? `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel tamamlanmış mali yıl. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
         : `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel açıklanan çeyrek.`) + bankTxt;
+    }else if(FIN && FIN.market==='EU'){
+      const via = FIN.ifrsSource
+        ? (FIN.mode==='quarter'
+            ? 'Çeyreklik veri Yahoo Finance üzerinden.'
+            : 'Çok yıllı veri Yahoo Finance / IFRS kaynaklarından.')
+        : 'TradingView tek dönem özeti (çok yıllı veri bu şirket için bulunamadı).';
+      pn.innerHTML = `📅 ${FIN.euInfo?FIN.euInfo.country+' borsası — ':''}${via}${FIN.mode==='annual'?' Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.':''}`;
     }else if(FIN){
       const filedTxt = FIN.filedD0 ? `📅 SEC'e bildirilme: ${fmtDate(FIN.filedD0)}.` : '';
       const lagTxt = FIN.mode==='annual'
@@ -3599,7 +3621,8 @@ function toggleWatch(){
   if(list.some(key)) list=list.filter(w=>!key(w));
   else list.unshift({ sym:mySym, market:FIN.market,
     ysym: FIN.market==='BIST'?FIN.ticker+'.IS':(FIN.market==='EU'?mySym:FIN.ticker),
-    ccySym: FIN.market==='EU'?CURSYM:undefined });
+    ccySym: FIN.market==='EU'?CURSYM:undefined,
+    country: FIN.market==='EU'&&FIN.euInfo?FIN.euInfo.country:undefined });
   saveWatchlist(list.slice(0,20));
   updateWatchStar();
   renderWatchlist();
@@ -3622,10 +3645,11 @@ async function renderWatchlist(){
   }));
   const ccy=w=> w.ccySym!=null ? w.ccySym : (w.market==='BIST'?'₺':'$');
   const marketLbl={BIST:'BIST', US:'ABD', EU:'Avrupa'};
+  const mkt=w=> w.country||marketLbl[w.market]||w.market;
   box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Pazar</th><th>Fiyat</th><th>Günlük</th><th></th></tr></thead><tbody>
     ${rows.map(w=>`<tr>
       <td style="cursor:pointer" onclick="watchGo('${w.sym}','${w.market}')"><b>${safeHTML(w.sym)}</b></td>
-      <td class="ratio-formula">${marketLbl[w.market]||w.market}</td>
+      <td class="ratio-formula">${safeHTML(mkt(w))}</td>
       <td>${w.live!=null?ccy(w)+w.live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
       <td class="${w.ch==null?'neutral':w.ch>0?'up':'down'}">${w.ch==null?'—':(w.ch>0?'▲ ':'▼ ')+pct(w.ch)}</td>
       <td class="row-actions"><button class="delrow" onclick="event.stopPropagation();removeWatch('${w.sym}','${w.market}')" title="Kaldır">✕</button></td>

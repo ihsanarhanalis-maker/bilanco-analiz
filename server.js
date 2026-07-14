@@ -395,8 +395,8 @@ http.createServer((req, res) => {
     const q = new URLSearchParams(req.url.split('?')[1] || '');
     const from = encodeURIComponent(q.get('from') || new Date(Date.now() - 86400000).toISOString());
     const to = encodeURIComponent(q.get('to') || new Date(Date.now() + 30 * 86400000).toISOString());
-    // ABD/TR + 15 Avrupa borsa ülkesi (beyaz liste — keyfi girdi upstream'e geçmesin)
-    const OKC = ['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL'];
+    // ABD/TR + Avrupa + Kore + Japonya (beyaz liste — keyfi girdi upstream'e geçmesin)
+    const OKC = ['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP'];
     const country = OKC.includes(q.get('countries')) ? q.get('countries') : 'TR';
     const eUrl = 'https://economic-calendar.tradingview.com/events?from=' + from + '&to=' + to + '&countries=' + country;
     https.get(eUrl, { headers: { 'User-Agent': BUA, 'Origin': 'https://tr.tradingview.com', 'Accept': 'application/json' } }, pr => {
@@ -413,14 +413,14 @@ http.createServer((req, res) => {
   // --- Investing.com TAM ekonomik takvim köprüsü (Türkçe isim + Investing'in kendi önem
   //     yıldızları + kendi olumlu/olumsuz renk sınıfları). Investing'in sayfa AJAX ucu;
   //     X-Requested-With + Referer başlıkları ŞART, tarayıcıdan CORS ile çağrılamaz →
-  //     sunucu köprüsü. c=ISO ülke kodu (ABD/TR + 15 Avrupa borsa ülkesi, aşağıdaki harita);
+  //     sunucu köprüsü. c=ISO ülke kodu (ABD/TR + Avrupa + Kore + Japonya, aşağıdaki harita);
   //     tab=today/tomorrow/yesterday/thisWeek/nextWeek.
   //     timeZone=63 (İstanbul) → saatler ve tarihler doğrudan TSİ. ---
   if (urlPath === '/investcal') {
     const q = new URLSearchParams(req.url.split('?')[1] || '');
-    // ISO → Investing.com ülke ID'si (investpy tablosu; DE/GB/CH/PL/FI/AT/DK/KR curl ile doğrulandı)
+    // ISO → Investing.com ülke ID'si (investpy tablosu; DE/GB/CH/PL/FI/AT/DK/KR/JP curl ile doğrulandı)
     const INVESTING_COUNTRY = { US:'5', TR:'63', GB:'4', DE:'17', FR:'22', NL:'21', BE:'34', PT:'38',
-      IT:'10', ES:'26', CH:'12', SE:'9', DK:'24', NO:'60', FI:'71', AT:'54', PL:'53', KR:'11' };
+      IT:'10', ES:'26', CH:'12', SE:'9', DK:'24', NO:'60', FI:'71', AT:'54', PL:'53', KR:'11', JP:'35' };
     const country = INVESTING_COUNTRY[q.get('c')] || '63';
     const tabs = { yesterday:'yesterday', today:'today', tomorrow:'tomorrow', thisWeek:'thisWeek', nextWeek:'nextWeek' };
     const tab = tabs[q.get('tab')] || 'thisWeek';
