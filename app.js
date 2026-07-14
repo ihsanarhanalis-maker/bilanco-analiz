@@ -3990,17 +3990,41 @@ function renderFlags(d,T){
 
 /* ---------- PWA: service worker + Ana ekrana / uygulamaya yükle ---------- */
 let PWA_DEFERRED=null;
+function isIosDevice(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+}
+function isSafariBrowser(){
+  const ua=navigator.userAgent;
+  // iOS Chrome/Firefox/Edge = CriOS/FxiOS/EdgiOS; gerçek Safari'de Version/ + Safari var, CriOS yok
+  return /safari/i.test(ua) && !/crios|fxios|edgios|opr\//i.test(ua);
+}
+function closePwaSheet(){
+  const el=document.getElementById('pwaSheet');
+  if(el) el.classList.remove('show');
+}
+function openPwaSheet(title, desc, steps){
+  const sheet=document.getElementById('pwaSheet');
+  const t=document.getElementById('pwaSheetTitle');
+  const d=document.getElementById('pwaSheetDesc');
+  const ol=document.getElementById('pwaSheetSteps');
+  if(!sheet||!ol){ alert(desc+'\n\n'+steps.map((s,i)=>(i+1)+') '+s).join('\n')); return; }
+  if(t) t.textContent=title;
+  if(d) d.textContent=desc;
+  ol.innerHTML=steps.map((s,i)=>`<li><b>${i+1}</b><span>${s}</span></li>`).join('');
+  sheet.classList.add('show');
+}
 function refreshPwaInstallBtn(){
   const btn=document.getElementById('pwaInstall');
   if(!btn) return;
   const standalone=window.matchMedia('(display-mode: standalone)').matches
     || window.navigator.standalone===true;
   if(standalone){ btn.classList.remove('show'); return; }
-  // Chromium: beforeinstallprompt geldiyse göster. iOS'ta manuel ekleme gerekir.
-  const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  if(PWA_DEFERRED || isIos) btn.classList.add('show');
+  // Chromium: beforeinstallprompt. iOS: her zaman göster (manuel ekleme).
+  const ios=isIosDevice();
+  if(PWA_DEFERRED || ios) btn.classList.add('show');
   else btn.classList.remove('show');
-  if(isIos && !PWA_DEFERRED) btn.title='Safari → Paylaş → Ana Ekrana Ekle';
+  if(ios && !PWA_DEFERRED) btn.title='Safari → Paylaş → Ana Ekrana Ekle';
 }
 async function installPwa(){
   if(PWA_DEFERRED){
@@ -4010,12 +4034,40 @@ async function installPwa(){
     refreshPwaInstallBtn();
     return;
   }
-  const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  if(isIos){
-    alert('iPhone/iPad: Safari’de Paylaş (□↑) → “Ana Ekrana Ekle” ile yükleyin.');
+  if(isIosDevice()){
+    if(!isSafariBrowser()){
+      openPwaSheet(
+        'Safari ile aç',
+        'iPhone’da uygulama yalnızca Safari’den ana ekrana eklenir. Chrome / Instagram / WhatsApp içi tarayıcıda “Yükle” çalışmaz.',
+        [
+          'Bu linki kopyala: bilanco-analiz-4sjg.onrender.com',
+          'Safari uygulamasını aç',
+          'Adres çubuğuna yapıştırıp siteyi aç',
+          'Alttaki Paylaş (□↑) → <b>Ana Ekrana Ekle</b> → Ekle'
+        ]
+      );
+      return;
+    }
+    openPwaSheet(
+      'iPhone’a yükle',
+      'App Store yok — siteyi ana ekrana ekleyince uygulama gibi açılır.',
+      [
+        'Alttaki <b>Paylaş</b> düğmesine dokun (□↑)',
+        'Listeden <b>Ana Ekrana Ekle</b> seç',
+        '<b>Ekle</b>’ye bas — ikon ana ekranda çıkar'
+      ]
+    );
     return;
   }
-  alert('Tarayıcı menüsünden “Uygulamayı yükle” / “Ana ekrana ekle” seçeneğini kullanın.');
+  openPwaSheet(
+    'Uygulamayı yükle',
+    'Tarayıcı menüsünden ana ekrana / uygulamaya ekleyebilirsin.',
+    [
+      'Menüyü aç (⋮ veya ⋯)',
+      '<b>Uygulamayı yükle</b> veya <b>Ana ekrana ekle</b> seç',
+      'Onayla — ikon telefonunda belirir'
+    ]
+  );
 }
 function registerPwa(){
   if(!('serviceWorker' in navigator)) return;
