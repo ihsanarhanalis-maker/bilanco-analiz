@@ -1962,7 +1962,7 @@ const SCAN_PAGE_SIZE=100;
 const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
   'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
-  'SMA50','SMA200'];
+  'SMA50','SMA200','RSI'];
 const SCAN_COLS_EARN=SCAN_COLS.concat(['earnings_release_next_date']);
 const SCAN_TV_SORT={
   'mcap-desc':{sortBy:'market_cap_basic',sortOrder:'desc'},
@@ -1972,6 +1972,8 @@ const SCAN_TV_SORT={
   'pe-asc':{sortBy:'price_earnings_ttm',sortOrder:'asc'},
   'roe-desc':{sortBy:'return_on_equity',sortOrder:'desc'},
   'div-desc':{sortBy:'dividend_yield_recent',sortOrder:'desc'},
+  'rsi-desc':{sortBy:'RSI',sortOrder:'desc'},
+  'rsi-asc':{sortBy:'RSI',sortOrder:'asc'},
   'earn-asc':{sortBy:'earnings_release_next_date',sortOrder:'asc'},
 };
 function scanCapTable(cc){
@@ -2065,7 +2067,7 @@ async function loadScanMarket(cc){
   const tvSort=SCAN_TV_SORT[sortVal]||SCAN_TV_SORT['mcap-desc'];
   const needLen=cols.length;
   const cached=SCAN_CACHE[cacheKey];
-  // SMA sütunları eklendi — eski önbellekte d[11]/d[12] yoksa yeniden çek
+  // RSI dâhil güncel kolonlar yoksa eski önbelleği kullanma
   if(cached && (Date.now()-cached.ts)<10*60000 && cached.rows && cached.rows[0] && cached.rows[0].length>=needLen){
     SCAN_RAW=cached.rows;
     applyScanFilters();
@@ -2154,7 +2156,7 @@ function scanSortedView(){
   if(SCAN_MODE==='earn') return rows.slice();
   const sort=(document.getElementById('scanSort')||{}).value||'mcap-desc';
   const [key,dir]=sort.split('-');
-  const idx={mcap:2,chg:4,name:0,pe:5,roe:7,div:9}[key]??2;
+  const idx={mcap:2,chg:4,name:0,pe:5,roe:7,div:9,rsi:13}[key]??2;
   const mul=dir==='asc'?1:-1;
   return rows.slice().sort((a,b)=>{
     let va=a[idx], vb=b[idx];
@@ -2204,6 +2206,11 @@ function renderScanPage(){
     const cls=v>0?'up':(v<0?'down':'neutral');
     return `<span class="${cls}">${(v>0?'+':'')+v.toFixed(2)}%</span>`;
   };
+  const rsi=v=>{
+    if(v==null) return '—';
+    const cls=v>=70?'down':(v<=30?'up':'neutral');
+    return `<span class="${cls}">${Number(v).toFixed(1)}</span>`;
+  };
   const showEarn=SCAN_MODE==='earn';
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
@@ -2219,7 +2226,8 @@ function renderScanPage(){
       <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
       <td>${d[3]==null?'—':m.sym+Number(d[3]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
       <td>${chg(d[4])}</td>
-      ${showEarn?`<td style="white-space:nowrap">${earnCell(d[13])}</td>`:''}
+      ${showEarn?`<td style="white-space:nowrap">${earnCell(d[14])}</td>`:''}
+      <td>${rsi(d[13])}</td>
       <td>${xx(d[5])}</td>
       <td>${xx(d[6])}</td>
       <td>${pp(d[7])}</td>
@@ -2231,7 +2239,7 @@ function renderScanPage(){
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
     <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
     ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
-    <th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Temettü</th><th>Sektör</th>
+    <th>RSI</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Temettü</th><th>Sektör</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
     pager.style.display='flex';
