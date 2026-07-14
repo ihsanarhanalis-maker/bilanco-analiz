@@ -1960,7 +1960,8 @@ const SCAN_CAP_BANDS={
 const SCAN_PAGE_SIZE=100;
 const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
-  'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector'];
+  'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
+  'SMA50','SMA200'];
 function scanCapTable(cc){
   if(cc==='US') return SCAN_CAP_BANDS.US;
   if(cc==='TR') return SCAN_CAP_BANDS.TR;
@@ -1978,7 +1979,7 @@ function scanCapTable(cc){
   if(['SE','DK','NO'].includes(cc)) return SCAN_CAP_BANDS.NORDIC;
   return SCAN_CAP_BANDS.EU;
 }
-let SCAN_CC='TR', SCAN_CAPS=new Set(['all']), SCAN_GEN=0, SCAN_PAGE_INIT=false;
+let SCAN_CC='TR', SCAN_CAPS=new Set(['all']), SCAN_MA=new Set(), SCAN_GEN=0, SCAN_PAGE_INIT=false;
 let SCAN_RAW=[], SCAN_VIEW=[], SCAN_PAGE=0;
 const SCAN_CACHE={};   // cc → { rows, ts, total }
 function initScanPage(){
@@ -2011,6 +2012,13 @@ function toggleScanCap(btn){
   }
   applyScanFilters();
 }
+function toggleScanMa(btn){
+  const ma=btn.dataset.ma;
+  if(!ma) return;
+  if(SCAN_MA.has(ma)){ SCAN_MA.delete(ma); btn.classList.remove('active'); }
+  else { SCAN_MA.add(ma); btn.classList.add('active'); }
+  applyScanFilters();
+}
 function scanNum(id){
   const el=document.getElementById(id);
   if(!el || el.value==='' || el.value==null) return null;
@@ -2037,7 +2045,8 @@ async function loadScanMarket(cc){
   const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
   if(title) title.innerHTML=`${flagSpan(cc)}${cName} — Hisse Tarayıcı`;
   const cached=SCAN_CACHE[cc];
-  if(cached && (Date.now()-cached.ts)<10*60000){
+  // SMA sütunları eklendi — eski önbellekte d[11]/d[12] yoksa yeniden çek
+  if(cached && (Date.now()-cached.ts)<10*60000 && cached.rows && cached.rows[0] && cached.rows[0].length>=13){
     SCAN_RAW=cached.rows;
     applyScanFilters();
     return;
@@ -2092,6 +2101,9 @@ function applyScanFilters(){
   SCAN_VIEW=SCAN_RAW.filter(d=>{
     if(!scanMcapInBands(d[2], SCAN_CC)) return false;
     if(peMin!=null && (d[5]==null || d[5]<peMin)) return false;
+    const close=d[3], sma50=d[11], sma200=d[12];
+    if(SCAN_MA.has('sma50') && (close==null || sma50==null || close<=sma50)) return false;
+    if(SCAN_MA.has('sma200') && (close==null || sma200==null || close<=sma200)) return false;
     return true;
   });
   SCAN_PAGE=0;
@@ -2139,7 +2151,8 @@ function renderScanPage(){
   const slice=sorted.slice(SCAN_PAGE*SCAN_PAGE_SIZE, (SCAN_PAGE+1)*SCAN_PAGE_SIZE);
   if(sub){
     const capNote=SCAN_CAPS.has('all')?'tüm dilimler':[...SCAN_CAPS].join('+');
-    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView canlı · <b>satıra tıkla → analiz</b>`;
+    const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend filtresi yok';
+    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView canlı · <b>satıra tıkla → analiz</b>`;
   }
   if(!sorted.length){
     box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';

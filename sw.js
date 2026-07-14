@@ -1,6 +1,6 @@
 /* Bilanço Analiz — PWA service worker
    Statik kabuğu önbelleğe alır; API köprüleri (/price, /bist, /sec…) her zaman ağdan gelir. */
-const CACHE = 'bilanco-shell-v26';
+const CACHE = 'bilanco-shell-v27';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
