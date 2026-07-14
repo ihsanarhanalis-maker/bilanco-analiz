@@ -436,9 +436,9 @@
       <img src="/icons/icon-512.png" width="88" height="88" alt="Bilanço Analiz">
     </div>
     <h2>Hisse ara, bilançoyu anında analiz et</h2>
-    <div class="hero-sub">ABD · Borsa İstanbul · Güney Kore · Japonya · 15 Avrupa borsası — kodu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
+    <div class="hero-sub"><b>25 ülke</b>, yaklaşık <b>32.000 şirket</b> — bilanço ve finansal veriyi tek yerden gör.<br>ABD · BIST · Asya-Pasifik · Kanada · Avustralya · Singapur · 15 Avrupa — kodu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
     <div class="hero-search">
-      <input id="homeTicker" placeholder="örn. NVDA, THYAO, 7203…" onkeydown="if(event.key==='Enter')homeSearch()">
+      <input id="homeTicker" placeholder="örn. NVDA, D05, BHP, SHOP…" onkeydown="if(event.key==='Enter')homeSearch()">
       <select id="homePeriod">
         <option value="annual">Yıllık</option>
         <option value="quarter">Çeyreklik</option>
@@ -463,7 +463,7 @@
   <!-- ŞİRKET ARAMA -->
   <div class="card no-print">
     <h2>Hisse Ara</h2>
-    <div class="sub">Hisse kodunu yaz, <b>Ara</b>'ya bas — borsa otomatik bulunur (ABD · Borsa İstanbul · Güney Kore · Japonya · 15 Avrupa borsası: İngiltere, Almanya, Fransa, Hollanda, Belçika, Portekiz, İtalya, İspanya, İsviçre, İsveç, Danimarka, Norveç, Finlandiya, Avusturya, Polonya). Örnek: <b>NVDA</b>, <b>THYAO</b>, <b>NESN</b>, <b>VOLV-B</b>, <b>005930</b> (Samsung), <b>7203</b> (Toyota). Aynı kod birden fazla borsada varsa seçenekler listelenir; oradan tıkla ya da eki elle yaz (SAP<b>.DE</b>, ASML<b>.AS</b>, SASA<b>.IS</b>, AAPL<b>.US</b>, 005930<b>.KS</b>, 7203<b>.T</b> gibi).</div>
+    <div class="sub">Hisse kodunu yaz, <b>Ara</b>'ya bas — borsa otomatik bulunur (25 ülke). Örnek: <b>NVDA</b>, <b>THYAO</b>, <b>2330</b> (TSMC), <b>SHOP</b>, <b>BHP</b>, <b>D05</b> (DBS). Ekler: <b>.US .IS .T .HK .TW .TO .AX .SI</b> ve diğerleri.</div>
     <div class="toolbar" style="align-items:center">
       <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()">
       <select id="periodType" class="cell" style="width:auto">
@@ -479,7 +479,7 @@
   <!-- ŞİRKET KARŞILAŞTIRMA -->
   <div class="card no-print">
     <h2>Şirket Karşılaştırma</h2>
-    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (ABD + BIST + Avrupa + Kore + Japonya karışık olabilir), oranlarını yan yana karşılaştır. Örnek: <b>AAPL, MSFT, GOOGL</b> veya <b>THYAO, PGSUS</b> veya <b>SIE.DE, SAP.DE, ASML.AS</b> veya <b>7203.T, 6758.T</b>. Not: farklı pazar karışımında mutlak tutarlar farklı para birimindedir; oranlara (marj, ROE, borçluluk) bakın.</div>
+    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (farklı ülkeler karışık olabilir). Örnek: <b>AAPL, D05.SI, BHP.AX</b> veya <b>2330.TW, SHOP.TO</b>. Not: farklı para birimlerinde mutlak tutarları değil oranları (marj, ROE) karşılaştırın.</div>
     <div class="toolbar" style="align-items:center">
       <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
       <select id="cmpPeriod" class="cell" style="width:auto">
@@ -790,7 +790,7 @@
 
   <div class="footer">
     Bu araç finansal danışmanlık değildir; sonuçlar nitelikli bir analist tarafından gözden geçirilmelidir.<br>
-    Bilanço verisi: SEC EDGAR (ABD) · KAP/İş Yatırım (BIST) · TradingView + Yahoo (Avrupa / Kore / Japonya) · Haberler: Bing News · Hesaplamalar tarayıcınızda yapılır.
+    Bilanço verisi: SEC EDGAR (ABD) · KAP/İş Yatırım (BIST) · TradingView + Yahoo (Avrupa / Asya-Pasifik / Kanada / Avustralya / Singapur) · Haberler: Bing News · Hesaplamalar tarayıcınızda yapılır.
   </div>
 </div>
 

@@ -245,12 +245,15 @@ async function fetchMetrics(sym, mode){
   let D,I;
   const euInfoM=parseEUSymbol(sym);
   if(euInfoM){
-    // Avrupa: Yahoo çok-yıllı seri → yoksa TV tek-dönem özeti (tekli analizle aynı zincirin kısası)
+    // Avrupa/Asya: Yahoo çok-yıllı seri → yoksa TV tek-dönem özeti (tekli analizle aynı zincirin kısası)
     let s=null;
-    try{ s=await fetchYahooFundSeries(euInfoM.base+'.'+euInfoM.suffix, mode); }catch(e){}
+    try{
+      const ysym=await resolveYahooForEu({...euInfoM});
+      s=await fetchYahooFundSeries(ysym, mode);
+    }catch(e){}
     if(!s){
       try{
-        const tvTicker=euInfoM.tv+':'+euInfoM.base.replace(/-/g,'_');
+        const tvTicker=euInfoM.tv+':'+euTvBase(euInfoM);
         const r=await fetch('https://scanner.tradingview.com/'+euInfoM.scan+'/scan',
           {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})});
         const j=r.ok?await r.json():null;
@@ -576,10 +579,24 @@ const EU_EXCHANGES={
   // Tokyo Borsası (Prime/Standard/Growth) — Yahoo eki .T, TradingView öneki TSE.
   // Çok yıllı veri: IFRS/ESEF Japonya'yı kapsamaz → Yahoo fundamentals (KR ile aynı yedek zinciri).
   T:  {tv:'TSE',      scan:'japan',       country:'Japonya',    ccy:'JPY', sym:'¥',    city:'Tokyo',     tz:'Asia/Tokyo',        open:540, close:900,  flag:'🇯🇵', iso:'JP'},
+  // Çin: anakara A-hisseleri (SSE/SZSE) + Hong Kong (HKEX). IFRS yok → Yahoo yedek.
+  // Yahoo HK kodları sıfır dolgulu (0700.HK); TV ise 700 — resolveCnYahooSymbol / tvBaseCn.
+  SS: {tv:'SSE',      scan:'china',       country:'Çin (Şanghay)', ccy:'CNY', sym:'¥', city:'Şanghay',   tz:'Asia/Shanghai',     open:570, close:900,  flag:'🇨🇳', iso:'CN'},
+  SZ: {tv:'SZSE',     scan:'china',       country:'Çin (Şenzhen)', ccy:'CNY', sym:'¥', city:'Şenzhen',   tz:'Asia/Shanghai',     open:570, close:900,  flag:'🇨🇳', iso:'CN'},
+  HK: {tv:'HKEX',     scan:'hongkong',    country:'Hong Kong',  ccy:'HKD', sym:'HK$',  city:'Hong Kong', tz:'Asia/Hong_Kong',    open:570, close:960,  flag:'🇭🇰', iso:'HK'},
+  // Tayvan: TWSE (Yahoo .TW) + TPEx (Yahoo .TWO). Seans 09:00–13:30 Taipei.
+  TW: {tv:'TWSE',     scan:'taiwan',      country:'Tayvan',     ccy:'TWD', sym:'NT$',  city:'Taipei',    tz:'Asia/Taipei',      open:540, close:810,  flag:'🇹🇼', iso:'TW'},
+  TWO:{tv:'TPEX',     scan:'taiwan',      country:'Tayvan (TPEx)', ccy:'TWD', sym:'NT$', city:'Taipei',  tz:'Asia/Taipei',      open:540, close:810,  flag:'🇹🇼', iso:'TW'},
+  // Kanada: TSX (.TO) + TSXV (.V). Avustralya: ASX (.AX). Singapur: SGX (.SI).
+  TO: {tv:'TSX',      scan:'canada',      country:'Kanada',     ccy:'CAD', sym:'C$',   city:'Toronto',  tz:'America/Toronto',  open:570, close:960,  flag:'🇨🇦', iso:'CA'},
+  V:  {tv:'TSXV',     scan:'canada',      country:'Kanada (TSXV)', ccy:'CAD', sym:'C$', city:'Toronto', tz:'America/Toronto',  open:570, close:960,  flag:'🇨🇦', iso:'CA'},
+  AX: {tv:'ASX',      scan:'australia',   country:'Avustralya', ccy:'AUD', sym:'A$',   city:'Sidney',   tz:'Australia/Sydney', open:600, close:960,  flag:'🇦🇺', iso:'AU'},
+  SI: {tv:'SGX',      scan:'singapore',   country:'Singapur',   ccy:'SGD', sym:'S$',   city:'Singapur', tz:'Asia/Singapore',   open:540, close:1020, flag:'🇸🇬', iso:'SG'},
 };
-/* "SIE.DE" → {base:'SIE', suffix:'DE', ...EU_EXCHANGES.DE}; eşleşmezse null */
+/* "SIE.DE" → {base:'SIE', suffix:'DE', ...}; "6488.TWO" → TPEx. Eşleşmezse null.
+   Suffix 1–3 harf: Avrupa/Asya iki harfli ekler + Tayvan TPEx (.TWO). */
 function parseEUSymbol(sym){
-  const m=/^([A-Z0-9]+(?:[.\-][A-Z0-9]+)?)\.([A-Z]{1,2})$/.exec(sym);
+  const m=/^([A-Z0-9]+(?:[.\-][A-Z0-9]+)?)\.([A-Z]{1,3})$/.exec(sym);
   if(!m) return null;
   const info=EU_EXCHANGES[m[2]];
   return info ? { base:m[1], suffix:m[2], ...info } : null;
@@ -781,18 +798,89 @@ async function resolveKrYahooSymbol(code){
     return hit?hit.symbol:null;
   }catch(e){ return null; }
 }
-async function fetchTickerEU(euInfo, mode, myGen){
-  const tvTicker=euInfo.tv+':'+euInfo.base.replace(/-/g,'_');
+/* Çin / Hong Kong Yahoo eki: .SS (Şanghay) · .SZ (Şenzhen) · .HK (Hong Kong).
+   HK'de TV "700", Yahoo "0700.HK" — sıfır dolgusu şart (curl: 700.HK → 404). */
+async function resolveCnYahooSymbol(code, suffix){
+  try{
+    const r=await fetch('/yfsearch?q='+encodeURIComponent(code));
+    if(r.ok){
+      const j=await r.json();
+      const re = suffix==='HK' ? /\.HK$/ : (suffix==='SS' ? /\.SS$/ : /\.SZ$/);
+      const hit=(j.quotes||[]).find(q=>q.quoteType==='EQUITY' && re.test(q.symbol||''));
+      if(hit) return hit.symbol;
+      // Yanlış ek verilmiş olabilir (600519.SZ) → herhangi bir CN/HK equity kabul et
+      const any=(j.quotes||[]).find(q=>q.quoteType==='EQUITY' && /\.(SS|SZ|HK)$/.test(q.symbol||''));
+      if(any) return any.symbol;
+    }
+  }catch(e){}
+  if(suffix==='HK'){
+    const digits=String(code).replace(/\D/g,'');
+    if(digits) return digits.padStart(4,'0')+'.HK';
+  }
+  return code+'.'+suffix;
+}
+/* Tayvan: kullanıcı .TW yazar; TPEx hisselerinde gerçek Yahoo eki .TWO olabilir (KR KS/KQ gibi). */
+async function resolveTwYahooSymbol(code){
+  try{
+    const r=await fetch('/yfsearch?q='+encodeURIComponent(code));
+    if(!r.ok) return null;
+    const j=await r.json();
+    const hit=(j.quotes||[]).find(q=>q.quoteType==='EQUITY' && /\.(TW|TWO)$/.test(q.symbol||''));
+    return hit?hit.symbol:null;
+  }catch(e){ return null; }
+}
+/* Kanada: TSX=.TO · TSXV=.V — yanlış ekte Yahoo boş dönebilir. */
+async function resolveCaYahooSymbol(code){
+  try{
+    const r=await fetch('/yfsearch?q='+encodeURIComponent(code));
+    if(!r.ok) return null;
+    const j=await r.json();
+    const hit=(j.quotes||[]).find(q=>q.quoteType==='EQUITY' && /\.(TO|V)$/.test(q.symbol||'') && (q.exchDisp||'').match(/Toronto|TSX|Venture/i));
+    if(hit) return hit.symbol;
+    const any=(j.quotes||[]).find(q=>q.quoteType==='EQUITY' && /\.(TO|V)$/.test(q.symbol||''));
+    return any?any.symbol:null;
+  }catch(e){ return null; }
+}
+/* TradingView HKEX kodları öndeki sıfırları taşımaz (HKEX:700); Yahoo ise 0700.HK ister. */
+function euTvBase(euInfo){
+  let b=String(euInfo.base).replace(/-/g,'_');
+  if(euInfo.suffix==='HK') b=b.replace(/^0+/,'')||'0';
+  return b;
+}
+async function resolveYahooForEu(euInfo){
   let ysym=euInfo.base+'.'+euInfo.suffix;
-  const sym=euInfo.base;
   if(euInfo.suffix==='KS'||euInfo.suffix==='KQ'){
     const resolved=await resolveKrYahooSymbol(euInfo.base);
-    if(myGen!==REQ_GEN) return;
     if(resolved){
       ysym=resolved;
-      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);   // ekran etiketi de gerçek borsayı (.KS/.KQ) yansıtsın
+      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
+    }
+  }else if(euInfo.suffix==='HK'||euInfo.suffix==='SS'||euInfo.suffix==='SZ'){
+    const resolved=await resolveCnYahooSymbol(euInfo.base, euInfo.suffix);
+    if(resolved){
+      ysym=resolved;
+      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
+    }
+  }else if(euInfo.suffix==='TW'||euInfo.suffix==='TWO'){
+    const resolved=await resolveTwYahooSymbol(euInfo.base);
+    if(resolved){
+      ysym=resolved;
+      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
+    }
+  }else if(euInfo.suffix==='TO'||euInfo.suffix==='V'){
+    const resolved=await resolveCaYahooSymbol(euInfo.base);
+    if(resolved){
+      ysym=resolved;
+      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
     }
   }
+  return ysym;
+}
+async function fetchTickerEU(euInfo, mode, myGen){
+  const tvTicker=euInfo.tv+':'+euTvBase(euInfo);
+  let ysym=await resolveYahooForEu(euInfo);
+  if(myGen!==REQ_GEN) return;
+  const sym=euInfo.base;
   try{
     const r=await fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
       {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})});
@@ -875,7 +963,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
    (BIST + Avrupa/Kore/Japonya borsa önekleri tek istekte; EURONEXT 4 ülkeyi kapsadığından
    ülke sütunuyla ayrıştırılır). ABD tespiti yerel CIK haritasından (istek gerekmez).
    Tek borsada bulunduysa otomatik oraya yönlenir; birden fazlaysa tıklanabilir
-   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .DE / .AS / .KS / .T …). */
+   seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .T / .HK / .TW / .TO / .AX / .SI …). */
 const EURONEXT_COUNTRY_SUFFIX={ 'France':'PA', 'Netherlands':'AS', 'Belgium':'BR', 'Portugal':'LS' };
 async function detectBareMarkets(sym){
   const map=window.CIK_MAP||{};
@@ -967,7 +1055,7 @@ async function fetchTicker(){
       else fetchTickerBIST(sym, mode, myGen);
       return;
     }
-    setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · Avrupa · Kore · Japonya tarandı).','bad');
+    setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · Avrupa · Asya-Pasifik · Kanada tarandı).','bad');
     return;
   }
   if(cands.length>1){ renderMarketChoices(sym, cands); return; }
@@ -1404,6 +1492,12 @@ const FLAG_SVG={
   PL:`<svg viewBox="0 0 30 20"><rect width="30" height="10" fill="#fff"/><rect y="10" width="30" height="10" fill="#DC143C"/>`,
   KR:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="4.5" fill="#CD2E3A"/><path d="M15 5.5a4.5 4.5 0 000 9 2.25 2.25 0 010-4.5 2.25 2.25 0 000-4.5z" fill="#0047A0"/>`,
   JP:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><circle cx="15" cy="10" r="5.5" fill="#BC002D"/>`,
+  CN:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#DE2910"/><polygon points="5,3 6.5,7.5 2.5,4.5 7.5,4.5 3.5,7.5" fill="#FFDE00"/><circle cx="10.5" cy="2.8" r="0.7" fill="#FFDE00"/><circle cx="12.2" cy="4.2" r="0.7" fill="#FFDE00"/><circle cx="12.2" cy="6.2" r="0.7" fill="#FFDE00"/><circle cx="10.5" cy="7.6" r="0.7" fill="#FFDE00"/>`,
+  HK:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#DE2910"/><g fill="#fff" transform="translate(15,10)"><path d="M0,-4.2 C1.2,-1.5 1.2,1.5 0,4.2 C-1.2,1.5 -1.2,-1.5 0,-4.2Z"/><path d="M0,-4.2 C1.2,-1.5 1.2,1.5 0,4.2 C-1.2,1.5 -1.2,-1.5 0,-4.2Z" transform="rotate(72)"/><path d="M0,-4.2 C1.2,-1.5 1.2,1.5 0,4.2 C-1.2,1.5 -1.2,-1.5 0,-4.2Z" transform="rotate(144)"/><path d="M0,-4.2 C1.2,-1.5 1.2,1.5 0,4.2 C-1.2,1.5 -1.2,-1.5 0,-4.2Z" transform="rotate(216)"/><path d="M0,-4.2 C1.2,-1.5 1.2,1.5 0,4.2 C-1.2,1.5 -1.2,-1.5 0,-4.2Z" transform="rotate(288)"/><circle r="1.1"/></g>`,
+  TW:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#FE0000"/><rect width="15" height="10" fill="#000095"/><circle cx="7.5" cy="5" r="2.8" fill="#fff"/><circle cx="7.5" cy="5" r="1.7" fill="#000095"/><g fill="#fff" transform="translate(7.5,5)">${[0,30,60,90,120,150,180,210,240,270,300,330].map(a=>`<path d="M0,-3.6 L0.45,-1.8 -0.45,-1.8Z" transform="rotate(${a})"/>`).join('')}</g>`,
+  CA:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect width="7" height="20" fill="#FF0000"/><rect x="23" width="7" height="20" fill="#FF0000"/><path fill="#FF0000" d="M15 3.5l1.1 3.2 3.4-.2-2.6 2.2 1 3.2L15 10.2l-2.9 1.7 1-3.2-2.6-2.2 3.4.2z"/>`,
+  AU:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#00008B"/><path d="M0 0L12 8M12 0L0 8" stroke="#fff" stroke-width="1.6"/><path d="M0 0L12 8M12 0L0 8" stroke="#FF0000" stroke-width=".7"/><path d="M6 0V8M0 4H12" stroke="#fff" stroke-width="2.4"/><path d="M6 0V8M0 4H12" stroke="#FF0000" stroke-width="1.2"/><g fill="#fff"><path d="M22 4.5l.5 1.4 1.5.1-1.1.9.4 1.4-1.3-.8-1.3.8.4-1.4-1.1-.9 1.5-.1z"/><path d="M25 9l.35 1 1 .05-.75.65.25 1-.9-.55-.9.55.25-1-.75-.65 1-.05z"/><path d="M20 11l.35 1 1 .05-.75.65.25 1-.9-.55-.9.55.25-1-.75-.65 1-.05z"/><path d="M23.5 14l.4 1.15 1.2.05-.9.75.3 1.15-1-.65-1 .65.3-1.15-.9-.75 1.2-.05z"/><path d="M18 7.5l.25.7.7.05-.55.45.2.7-.6-.4-.6.4.2-.7-.55-.45.7-.05z"/></g>`,
+  SG:`<svg viewBox="0 0 30 20"><rect width="30" height="10" fill="#ED2939"/><rect y="10" width="30" height="10" fill="#fff"/><circle cx="7" cy="5" r="3.2" fill="#fff"/><circle cx="8.2" cy="5" r="2.6" fill="#ED2939"/><g fill="#fff"><circle cx="12.2" cy="3.2" r=".55"/><circle cx="13.5" cy="4.5" r=".55"/><circle cx="13.5" cy="6.2" r=".55"/><circle cx="12.2" cy="7.5" r=".55"/><circle cx="10.9" cy="5.35" r=".55"/></g>`,
 };
 function flagSpan(cc){ return `<span class="cfl" aria-hidden="true">${(FLAG_SVG[cc]||'')+'</svg>'}</span>`; }
 const ECON_COUNTRIES=[
@@ -1413,13 +1507,15 @@ const ECON_COUNTRIES=[
   ['PT','Portekiz'],  ['CH','İsviçre'],   ['SE','İsveç'],
   ['DK','Danimarka'], ['NO','Norveç'],    ['FI','Finlandiya'],
   ['AT','Avusturya'], ['PL','Polonya'],   ['KR','Güney Kore'],
-  ['JP','Japonya'],
+  ['JP','Japonya'],   ['CN','Çin'],       ['HK','Hong Kong'],
+  ['TW','Tayvan'],    ['CA','Kanada'],    ['AU','Avustralya'],
+  ['SG','Singapur'],
 ];
 const ECON_PANELS={};
 let ECON_PAGE_INIT=false;
-/* Investing.com'dan takvimi çekilebilen pazarlar (ABD/TR + Avrupa + Kore + Japonya) —
+/* Investing.com'dan takvimi çekilebilen pazarlar —
    ISO→Investing ülke ID eşlemesi server.js /investcal rotasında */
-const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP'];
+const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP','CN','HK','TW','CA','AU','SG'];
 const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
 const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
 const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
@@ -1672,7 +1768,7 @@ async function loadEconPanel(cc){
   if(box) box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
   const myGen=++st.gen;   // panel kapatılıp açılırsa / dönem değişirse eski yanıt çöpe gider
   let rows=[], src='', investingOk=false;
-  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — 19 ülkenin tamamı
+  // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — 25 ülkenin tamamı
   //    (ISO→Investing ülke ID haritası server.js /investcal içinde).
   //    Geçerli JSON (data alanı string) → Investing ÇALIŞTI say (0 satır = o gün veri yok, normal).
   //    Yalnızca istek GERÇEKTEN başarısızsa (403/502/JSON değil) yedeğe düş.
@@ -1730,6 +1826,12 @@ const TOP100_MARKETS={
   US:{scan:'america',                    sym:'$',    click:c=>c+'.US'},
   KR:{scan:'korea',                      sym:'₩',    click:c=>c},        // sayısal kodlar tekil — otomatik borsa tespiti .KS/.KQ'yu doğru çözer
   JP:{scan:'japan',       ex:'TSE',      sym:'¥',    click:c=>c+'.T'},
+  CN:{scan:'china',                      sym:'¥',    click:c=>c},        // SSE/SZSE — otomatik borsa tespiti .SS/.SZ çözer
+  HK:{scan:'hongkong',    ex:'HKEX',     sym:'HK$',  click:c=>c+'.HK'},
+  TW:{scan:'taiwan',                     sym:'NT$',  click:c=>c},        // TWSE/TPEx — otomatik .TW/.TWO
+  CA:{scan:'canada',                     sym:'C$',   click:c=>c},        // TSX/TSXV — otomatik .TO/.V
+  AU:{scan:'australia',   ex:'ASX',      sym:'A$',   click:c=>c+'.AX'},
+  SG:{scan:'singapore',   ex:'SGX',      sym:'S$',   click:c=>c+'.SI'},
   GB:{scan:'uk',          ex:'LSE',      sym:'£',    click:c=>c+'.L'},
   DE:{scan:'germany',     ex:'XETR',     sym:'€',    click:c=>c+'.DE'},
   FR:{scan:'france',      ex:'EURONEXT', sym:'€',    click:c=>c+'.PA'},
@@ -1835,15 +1937,20 @@ function renderTop100Panel(cc, rows){
     <tbody>${trRows}</tbody></table></div>`;
 }
 
-/* ---------- Hisse Tarayıcı (TradingView tarzı · 19 ülke · TÜM birincil hisseler) ----------
+/* ---------- Hisse Tarayıcı (TradingView tarzı · 25 ülke · TÜM birincil hisseler) ----------
    Ülke seçilince TradingView scanner sayfalanarak (range) tüm type=stock + is_primary listesi
    çekilir; cap/oran/arama istemcide uygulanır. Sayfalama UI: 100 satır/sayfa. */
 const SCAN_CAP_BANDS={
   US:{mega:[200e9,null], large:[10e9,200e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
   TR:{mega:[500e9,null], large:[50e9,500e9], mid:[10e9,50e9], small:[2e9,10e9], micro:[0,2e9]},
   KR:{mega:[100e12,null], large:[10e12,100e12], mid:[1e12,10e12], small:[100e9,1e12], micro:[0,100e9]},
-  // JPY: Toyota ~50–80T ¥ bandında; mega eşiği KR ile aynı büyüklük mertebesinde
   JP:{mega:[50e12,null], large:[5e12,50e12], mid:[500e9,5e12], small:[50e9,500e9], micro:[0,50e9]},
+  CN:{mega:[1e12,null], large:[100e9,1e12], mid:[20e9,100e9], small:[2e9,20e9], micro:[0,2e9]},
+  HK:{mega:[1e12,null], large:[100e9,1e12], mid:[20e9,100e9], small:[2e9,20e9], micro:[0,2e9]},
+  TW:{mega:[5e12,null], large:[500e9,5e12], mid:[50e9,500e9], small:[5e9,50e9], micro:[0,5e9]},
+  CA:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+  AU:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
+  SG:{mega:[50e9,null], large:[5e9,50e9], mid:[1e9,5e9], small:[200e6,1e9], micro:[0,200e6]},
   GB:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
   CH:{mega:[100e9,null], large:[10e9,100e9], mid:[2e9,10e9], small:[300e6,2e9], micro:[0,300e6]},
   NORDIC:{mega:[500e9,null], large:[50e9,500e9], mid:[10e9,50e9], small:[2e9,10e9], micro:[0,2e9]},
@@ -1859,6 +1966,12 @@ function scanCapTable(cc){
   if(cc==='TR') return SCAN_CAP_BANDS.TR;
   if(cc==='KR') return SCAN_CAP_BANDS.KR;
   if(cc==='JP') return SCAN_CAP_BANDS.JP;
+  if(cc==='CN') return SCAN_CAP_BANDS.CN;
+  if(cc==='HK') return SCAN_CAP_BANDS.HK;
+  if(cc==='TW') return SCAN_CAP_BANDS.TW;
+  if(cc==='CA') return SCAN_CAP_BANDS.CA;
+  if(cc==='AU') return SCAN_CAP_BANDS.AU;
+  if(cc==='SG') return SCAN_CAP_BANDS.SG;
   if(cc==='GB') return SCAN_CAP_BANDS.GB;
   if(cc==='CH') return SCAN_CAP_BANDS.CH;
   if(cc==='PL') return SCAN_CAP_BANDS.PL;
@@ -2073,7 +2186,7 @@ function renderScanPage(){
 }
 
 /* ---------- Sektör Devleri sayfası (companiesmarketcap.com kategori sıralaması karşılığı) ----------
-   Üstte ülke seçici (🌍 dünya + 19 ülke, radyo mantığı), solda 20 sektör kutusu (aç/kapa).
+   Üstte ülke seçici (🌍 dünya + 25 ülke, radyo mantığı), solda 20 sektör kutusu (aç/kapa).
    Veri: TradingView scanner — ülke seçiliyse o ülkenin scan bölgesi (İlk 100 ile aynı harita),
    🌍'de 'global' scan (piyasa değerleri TV tarafından USD'ye normalize edilir, sıralama doğru —
    curl ile doğrulandı: Toyota/Tencent/Nintendo USD değerle döner). Sektörler TV'nin FactSet
@@ -2102,7 +2215,7 @@ const SECT_SECTORS=[
   ['teknoloji',  '🖥️','Teknoloji',            {sec:['Technology Services','Electronic Technology']}],
   ['ai',         '🤖','Yapay Zeka',           {curated:'AI'}],
 ];
-/* Küratörlü listeler: [TV kodu, ülke]. Ülkesi 19'luk listede olmayanlar (CN/TW/SG…)
+/* Küratörlü listeler: [TV kodu, ülke]. Ülkesi 25'lik listede olmayanlar
    yalnız 🌍 görünümünde çıkar. Değerler canlı çekilir, piyasa değerine göre istemcide sıralanır. */
 const SECT_CURATED={
   GAMES:[
@@ -2122,12 +2235,14 @@ const SECT_CURATED={
   ],
 };
 /* TV borsa öneki → uygulamanın arama eki (satır tıklaması için). Haritada olmayan borsalar
-   (HKEX/TWSE…) uygulamada analiz desteklenmediğinden tıklanamaz bırakılır.
+   uygulamada analiz desteklenmediğinden tıklanamaz bırakılır.
    EURONEXT önekinden ülke eki türetilemez (FR/NL/BE/PT ortak) → yalın kod gönderilir,
    mevcut otomatik borsa tespiti doğru eki kendisi çözer. */
 const TV_EX2CODE={
   NASDAQ:c=>c+'.US', NYSE:c=>c+'.US', AMEX:c=>c+'.US', BIST:c=>c+'.IS', KRX:c=>c,
-  TSE:c=>c+'.T',
+  TSE:c=>c+'.T', HKEX:c=>c+'.HK', SSE:c=>c+'.SS', SZSE:c=>c+'.SZ',
+  TWSE:c=>c+'.TW', TPEX:c=>c+'.TWO', TSX:c=>c+'.TO', TSXV:c=>c+'.V', ASX:c=>c+'.AX',
+  SGX:c=>c+'.SI',
   LSE:c=>c+'.L', XETR:c=>c+'.DE', MIL:c=>c+'.MI', BME:c=>c+'.MC', SIX:c=>c+'.SW',
   OMXSTO:c=>c+'.ST', OMXCOP:c=>c+'.CO', OSL:c=>c+'.OL', OMXHEX:c=>c+'.HE',
   VIE:c=>c+'.VI', GPW:c=>c+'.WA', EURONEXT:c=>c,
@@ -2722,7 +2837,7 @@ async function fetchNews(sym, myGen){
       const isEU = FIN && FIN.market==='EU';
       let q=sym;
       if(isEU && FIN.companyName){
-        q=FIN.companyName.replace(/\b(AG|SE|PLC|NV|N\.V\.|SA|S\.A\.|S\.p\.A\.|AB|A\/S|ASA|Ltd\.?|Limited|Inc\.?|Corp\.?|Corporation|Co\.?|Group|Aktiengesellschaft|Public Limited Company|Holding|Kabushiki Kaisha|\bKK\b)\b\.?/gi,' ')
+        q=FIN.companyName.replace(/\b(AG|SE|PLC|NV|N\.V\.|SA|S\.A\.|S\.p\.A\.|AB|A\/S|ASA|Ltd\.?|Limited|Inc\.?|Corp\.?|Corporation|Co\.?|Group|Aktiengesellschaft|Public Limited Company|Holding|Kabushiki Kaisha|\bKK\b|Company Limited|Holdings)\b\.?/gi,' ')
           .replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' ') || sym;
       }
       const [xPrem, xGen]=await Promise.all([
