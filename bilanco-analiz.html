@@ -28,10 +28,16 @@
   *{box-sizing:border-box}
   body{margin:0;font-family:"Plus Jakarta Sans",system-ui,Arial,sans-serif;background:var(--bg);color:var(--ink);
     font-size:14px;-webkit-font-smoothing:antialiased;background-attachment:fixed;
+    --mx:50%;--my:30%;
     background-image:
       radial-gradient(800px 600px at 50% 15%, rgba(79,156,249,.15), transparent 60%),
       radial-gradient(1000px 560px at 88% -12%, rgba(124,92,255,.18), transparent 60%),
       radial-gradient(820px 480px at 2% 2%, rgba(56,150,255,.12), transparent 58%);}
+  /* Fareyi takip eden soft spotlight */
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:radial-gradient(520px circle at var(--mx) var(--my),rgba(79,156,249,.11),transparent 42%);
+    transition:background .08s linear}
+  body > *{position:relative;z-index:1}
 
   /* Üst bant */
   header{background:linear-gradient(120deg,#0c1022 0%,#141a30 55%,#1a1f3d 100%);
@@ -101,11 +107,16 @@
   /* --- Sekme çubuğu (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) --- */
   .tabs-nav{background:rgba(12,16,34,.92);border-bottom:1px solid var(--line-2);
     position:sticky;top:0;z-index:50;backdrop-filter:blur(8px)}
-  .tabs-in{max-width:1180px;margin:0 auto;padding:0 28px;display:flex;gap:6px}
+  .tabs-in{max-width:1180px;margin:0 auto;padding:0 28px;display:flex;gap:6px;position:relative}
+  .tab-pill{position:absolute;bottom:0;left:0;height:2.5px;width:0;border-radius:3px;
+    background:linear-gradient(90deg,#4f9cf9,#a78bfa);box-shadow:0 0 12px rgba(79,156,249,.55);
+    transition:left .35s cubic-bezier(.16,1,.3,1),width .35s cubic-bezier(.16,1,.3,1),opacity .25s;
+    opacity:0;pointer-events:none}
+  .tab-pill.show{opacity:1}
   .tab-btn{background:none;border:none;border-radius:0;color:var(--muted);font-size:13.5px;font-weight:700;
-    padding:13px 16px;border-bottom:2.5px solid transparent;transition:.15s}
-  .tab-btn:hover{color:var(--ink);background:none;border-color:var(--line-2)}
-  .tab-btn.active{color:var(--accent-2);border-bottom-color:var(--accent)}
+    padding:13px 16px;border-bottom:2.5px solid transparent;transition:.15s;position:relative;z-index:1}
+  .tab-btn:hover{color:var(--ink);background:none;border-color:transparent}
+  .tab-btn.active{color:var(--accent-2);border-bottom-color:transparent}
   .page{display:none}
   .page.active{display:block}
 
@@ -129,29 +140,40 @@
     clip-path:inset(0 105% 0 0);-webkit-clip-path:inset(0 105% 0 0)}
   .hero .hero-sub{color:var(--ink-2);font-size:13.5px;font-weight:400;margin:0 auto 26px;line-height:1.65;
     max-width:720px;text-wrap:pretty;opacity:0;transform:translateY(18px)}
-  .hero-search{display:flex;gap:10px;justify-content:center;align-items:stretch;flex-wrap:wrap;max-width:640px;margin:0 auto;
-    opacity:0;transform:translateY(18px)}
+  .hero-search-shell{max-width:640px;margin:0 auto;padding:1.5px;border-radius:16px;position:relative;
+    opacity:0;transform:translateY(18px);
+    background:linear-gradient(120deg,#4f9cf9,#7c5cff,#d6ad45,#4f9cf9);
+    background-size:300% 300%;animation:auroraBorder 5s linear infinite}
+  .hero-search-shell::before{content:"";position:absolute;inset:-8px;border-radius:20px;z-index:-1;
+    background:radial-gradient(circle at 50% 50%,rgba(79,156,249,.22),transparent 70%);
+    filter:blur(10px);opacity:.7;pointer-events:none}
+  @keyframes auroraBorder{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+  .hero-search{display:flex;gap:10px;justify-content:center;align-items:stretch;flex-wrap:wrap;
+    max-width:none;margin:0;padding:8px;border-radius:14.5px;background:rgba(10,13,26,.96);
+    backdrop-filter:blur(8px)}
   .hero-search input{flex:1;min-width:230px;background:var(--surface);border:1px solid var(--line-2);color:var(--ink);
-    padding:16px 18px;border-radius:14px;font-size:16px;font-weight:700;text-transform:uppercase;
+    padding:16px 18px;border-radius:12px;font-size:16px;font-weight:700;text-transform:uppercase;
     box-shadow:var(--shadow);transition:all .2s ease}
   .hero-search input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(79,156,249,.15),0 0 20px rgba(79,156,249,.2)}
   .hero-search select{background:var(--surface);border:1px solid var(--line-2);color:var(--ink);
-    padding:0 14px;border-radius:14px;font-size:14px;font-weight:600}
-  .hero-search button{padding:16px 28px;border-radius:14px;font-size:15.5px}
+    padding:0 14px;border-radius:12px;font-size:14px;font-weight:600}
+  .hero-search button{padding:16px 28px;border-radius:12px;font-size:15.5px}
   .hero .hero-hint{color:var(--muted);font-size:12px;margin-top:16px;opacity:0;transform:translateY(14px)}
   .hero .hero-hint b{color:var(--ink-2)}
   /* Üst düzey giriş sekansı */
   .hero.is-in .hero-logo{animation:heroRise .75s cubic-bezier(.16,1,.3,1) .05s forwards}
   .hero.is-in h2{animation:heroTitleReveal .95s cubic-bezier(.16,1,.3,1) .18s forwards}
   .hero.is-in .hero-sub{animation:heroRise .7s cubic-bezier(.16,1,.3,1) .38s forwards}
-  .hero.is-in .hero-search{animation:heroRise .7s cubic-bezier(.16,1,.3,1) .52s forwards}
+  .hero.is-in .hero-search-shell{animation:heroRise .7s cubic-bezier(.16,1,.3,1) .52s forwards}
   .hero.is-in .hero-hint{animation:heroRise .65s cubic-bezier(.16,1,.3,1) .66s forwards}
   @keyframes heroRise{to{opacity:1;transform:translateY(0) scale(1)}}
   @keyframes heroTitleReveal{to{opacity:1;transform:translateY(0);clip-path:inset(0 0 0 0);-webkit-clip-path:inset(0 0 0 0)}}
   @media (prefers-reduced-motion: reduce){
-    .hero .hero-logo::after{animation:none}
-    .hero .hero-logo,.hero h2,.hero .hero-sub,.hero-search,.hero .hero-hint{
+    .hero .hero-logo::after,.hero-search-shell{animation:none}
+    body::before{display:none}
+    .hero .hero-logo,.hero h2,.hero .hero-sub,.hero-search-shell,.hero .hero-hint{
       opacity:1!important;transform:none!important;clip-path:none!important;-webkit-clip-path:none!important;animation:none!important}
+    .tab-pill{transition:none}
   }
 
   /* --- Ekonomik takvim sayfası: solda ülke kutuları, sağda açık paneller --- */
@@ -238,8 +260,13 @@
   button:hover{border-color:var(--accent);color:var(--accent-2);background:var(--surface-3);
     transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}
   button.primary{background:linear-gradient(135deg,#4f9cf9,#2f6fd0);border-color:transparent;color:#fff;
-    box-shadow:0 4px 14px rgba(47,111,208,.4)}
+    box-shadow:0 4px 14px rgba(47,111,208,.4);position:relative;overflow:hidden;isolation:isolate}
+  button.primary::after{content:"";position:absolute;top:-40%;left:-60%;width:40%;height:180%;
+    background:linear-gradient(105deg,transparent,rgba(255,255,255,.35),transparent);
+    transform:skewX(-18deg);transition:left .55s ease;pointer-events:none}
   button.primary:hover{filter:brightness(1.08);color:#fff}
+  button.primary:hover::after{left:130%}
+  button.primary.magnetic{transition:transform .15s ease-out,filter .2s ease,box-shadow .2s ease}
 
   table{width:100%;border-collapse:collapse}
   th,td{padding:9px 11px;text-align:right;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}
@@ -483,6 +510,7 @@
 <!-- SEKME ÇUBUĞU -->
 <nav class="tabs-nav no-print">
   <div class="tabs-in">
+    <span class="tab-pill" id="tabPill" aria-hidden="true"></span>
     <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
     <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
     <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
@@ -503,13 +531,15 @@
     </div>
     <h2>Hisse ara, bilançoyu anında analiz et</h2>
     <div class="hero-sub">25 ülke, 32.000 şirketin bilanço ve finansal verisini tek yerden gör.<br>Türkiye, ABD, Kanada, İngiltere, Güney Kore, Japonya, Çin, Hong Kong, Tayvan, Singapur, Avustralya, Almanya, Fransa, İtalya, İspanya, Hollanda, Belçika, Portekiz, İsviçre, İsveç, Danimarka, Norveç, Finlandiya, Avusturya, Polonya — şirketin kodunu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
+    <div class="hero-search-shell">
     <div class="hero-search">
       <input id="homeTicker" placeholder="örn. NVDA, THYAO, SIE, RR, AIR…" onkeydown="if(event.key==='Enter')homeSearch()">
       <select id="homePeriod">
         <option value="annual">Yıllık</option>
         <option value="quarter">Çeyreklik</option>
       </select>
-      <button class="primary" onclick="homeSearch()">Ara →</button>
+      <button class="primary magnetic" id="homeSearchBtn" onclick="homeSearch()">Ara →</button>
+    </div>
     </div>
     <div class="hero-hint">Örnek: <b>NVDA</b> · <b>THYAO</b> · <b>NESN</b> (Nestlé) · <b>VOLV-B</b> (Volvo) · <b>005930</b> (Samsung) — aynı kod birden çok borsada varsa seçenekler listelenir.</div>
   </div>

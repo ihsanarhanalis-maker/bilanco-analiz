@@ -10,6 +10,7 @@ function switchPage(p){
   if(p==='scan') initScanPage();
   if(p==='sect') initSectPage();
   if(p==='wnews') initWnewsPage();
+  updateTabPill();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 /* Ana sayfadaki büyük arama: değeri Bilanço sekmesindeki arama kutusuna taşıyıp orada aratır */
@@ -4414,6 +4415,52 @@ function initHeroPremium(){
   });
 }
 
+/* Fareyi takip eden soft spotlight */
+function initCursorSpotlight(){
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return;
+  let raf=0, x=50, y=30;
+  window.addEventListener('pointermove', e=>{
+    x=(e.clientX/window.innerWidth)*100;
+    y=(e.clientY/window.innerHeight)*100;
+    if(raf) return;
+    raf=requestAnimationFrame(()=>{
+      document.body.style.setProperty('--mx', x+'%');
+      document.body.style.setProperty('--my', y+'%');
+      raf=0;
+    });
+  }, {passive:true});
+}
+
+/* Sekme altında kayan neon çizgi */
+function updateTabPill(){
+  const pill=document.getElementById('tabPill');
+  const active=document.querySelector('.tabs-in .tab-btn.active');
+  const wrap=document.querySelector('.tabs-in');
+  if(!pill || !wrap) return;
+  if(!active){ pill.classList.remove('show'); return; }
+  const wr=wrap.getBoundingClientRect();
+  const ar=active.getBoundingClientRect();
+  pill.style.left=(ar.left-wr.left+wrap.scrollLeft)+'px';
+  pill.style.width=ar.width+'px';
+  pill.classList.add('show');
+}
+
+/* Ara butonu: manyetik çekim */
+function initMagneticButton(){
+  const btn=document.getElementById('homeSearchBtn');
+  if(!btn) return;
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return;
+  btn.addEventListener('pointermove', e=>{
+    const r=btn.getBoundingClientRect();
+    const dx=(e.clientX-(r.left+r.width/2))/(r.width/2);
+    const dy=(e.clientY-(r.top+r.height/2))/(r.height/2);
+    btn.style.transform=`translate(${dx*6}px, ${dy*4}px)`;
+  });
+  btn.addEventListener('pointerleave', ()=>{ btn.style.transform=''; });
+}
+
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
@@ -4425,4 +4472,8 @@ window.addEventListener('DOMContentLoaded',()=>{
   initMarketTape();
   startHeroTypewriter();
   initHeroPremium();
+  initCursorSpotlight();
+  initMagneticButton();
+  updateTabPill();
+  window.addEventListener('resize', updateTabPill);
 });
