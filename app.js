@@ -4385,6 +4385,35 @@ function startHeroTypewriter(){
   })();
 }
 
+/* Üst düzey hero: sıralı giriş + logoda hafif 3D fare eğimi */
+function initHeroPremium(){
+  const hero=document.querySelector('#page-home .hero');
+  if(!hero) return;
+  const reduce=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>hero.classList.add('is-in')));
+  if(reduce) return;
+  const logo=hero.querySelector('.hero-logo');
+  if(!logo) return;
+  let raf=0, tx=0, ty=0, cx=0, cy=0;
+  const tick=()=>{
+    cx+=(tx-cx)*.12; cy+=(ty-cy)*.12;
+    logo.style.transform=`perspective(720px) rotateY(${cx}deg) rotateX(${cy}deg) translateZ(0)`;
+    if(Math.abs(tx-cx)>0.05 || Math.abs(ty-cy)>0.05) raf=requestAnimationFrame(tick);
+    else{ logo.style.transform=`perspective(720px) rotateY(${cx}deg) rotateX(${cy}deg)`; raf=0; }
+  };
+  hero.addEventListener('mousemove', e=>{
+    const r=hero.getBoundingClientRect();
+    const nx=((e.clientX-r.left)/r.width-0.5)*2;
+    const ny=((e.clientY-r.top)/r.height-0.5)*2;
+    tx=nx*10; ty=-ny*8;
+    if(!raf) raf=requestAnimationFrame(tick);
+  });
+  hero.addEventListener('mouseleave', ()=>{
+    tx=0; ty=0;
+    if(!raf) raf=requestAnimationFrame(tick);
+  });
+}
+
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
@@ -4395,4 +4424,5 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerPwa();
   initMarketTape();
   startHeroTypewriter();
+  initHeroPremium();
 });
