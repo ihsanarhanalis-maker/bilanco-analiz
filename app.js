@@ -4446,19 +4446,26 @@ function updateTabPill(){
   pill.classList.add('show');
 }
 
-/* Ara butonu: manyetik çekim */
+/* Ara / primary butonlar: manyetik çekim */
 function initMagneticButton(){
-  const btn=document.getElementById('homeSearchBtn');
-  if(!btn) return;
   if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return;
-  btn.addEventListener('pointermove', e=>{
-    const r=btn.getBoundingClientRect();
-    const dx=(e.clientX-(r.left+r.width/2))/(r.width/2);
-    const dy=(e.clientY-(r.top+r.height/2))/(r.height/2);
-    btn.style.transform=`translate(${dx*6}px, ${dy*4}px)`;
-  });
-  btn.addEventListener('pointerleave', ()=>{ btn.style.transform=''; });
+  const bind=btn=>{
+    if(!btn || btn.dataset.magneticBound) return;
+    btn.dataset.magneticBound='1';
+    btn.classList.add('magnetic');
+    btn.addEventListener('pointermove', e=>{
+      const r=btn.getBoundingClientRect();
+      const dx=(e.clientX-(r.left+r.width/2))/(r.width/2);
+      const dy=(e.clientY-(r.top+r.height/2))/(r.height/2);
+      btn.style.transform=`translate(${dx*6}px, ${dy*4}px)`;
+    });
+    btn.addEventListener('pointerleave', ()=>{ btn.style.transform=''; });
+  };
+  document.querySelectorAll('button.primary').forEach(bind);
+  // Sonradan eklenen primary butonlar için (dinamik DOM yoksa da zararsız)
+  const mo=new MutationObserver(()=>document.querySelectorAll('button.primary').forEach(bind));
+  mo.observe(document.body,{childList:true,subtree:true});
 }
 
 window.addEventListener('DOMContentLoaded',()=>{
