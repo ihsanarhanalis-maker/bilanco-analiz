@@ -1,6 +1,6 @@
-/* Bilanço Analiz — PWA service worker
-   Statik kabuğu önbelleğe alır; API köprüleri (/price, /bist, /sec…) her zaman ağdan gelir. */
-const CACHE = 'bilanco-shell-v33';
+﻿/* Bilan├ğo Analiz ÔÇö PWA service worker
+   Statik kabu─şu ├Ânbelle─şe al─▒r; API k├Âpr├╝leri (/price, /bist, /secÔÇĞ) her zaman a─şdan gelir. */
+const CACHE = 'bilanco-shell-v34';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
@@ -33,7 +33,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // API / köprü istekleri: ağa öncelik, önbelleğe alma
+  // API / k├Âpr├╝ istekleri: a─şa ├Âncelik, ├Ânbelle─şe alma
   const isApi = /^\/(sec|secw|bist|bistown|price|quotes|news|tr|targets|tvt|econ|investcal|ifrs|yfin|yfsearch)(\/|\?|$)/.test(url.pathname);
   if (isApi) {
     event.respondWith(fetch(req).catch(() => new Response(JSON.stringify({ error: 'offline' }), {
@@ -43,7 +43,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Kabuk: önce ağ (güncel HTML/JS), yoksa önbellek
+  // Kabuk: ├Ânce a─ş (g├╝ncel HTML/JS), yoksa ├Ânbellek
   event.respondWith(
     fetch(req).then(res => {
       const copy = res.clone();

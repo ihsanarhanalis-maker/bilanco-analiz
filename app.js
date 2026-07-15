@@ -10,7 +10,6 @@ function switchPage(p){
   if(p==='scan') initScanPage();
   if(p==='sect') initSectPage();
   if(p==='wnews') initWnewsPage();
-  updateTabPill();
   window.scrollTo({top:0,behavior:'smooth'});
 }
 /* Ana sayfadaki büyük arama: değeri Bilanço sekmesindeki arama kutusuna taşıyıp orada aratır */
@@ -4368,106 +4367,6 @@ function initMarketTape(){
 }
 
 /* başlangıç */
-/* Ana sayfa arama kutusu: placeholder daktilo animasyonu */
-function startHeroTypewriter(){
-  const inp=document.getElementById('homeTicker');
-  if(!inp) return;
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const words=['NVDA','THYAO','SIE','RR','AIR','005930','ASML','VOLV-B'];
-  let wi=0, ci=0, del=false;
-  (function tick(){
-    const w=words[wi];
-    ci+=del?-1:1;
-    inp.setAttribute('placeholder','örn. '+w.slice(0,ci)+(ci<w.length?'▎':''));
-    let wait=del?50:115;
-    if(!del && ci===w.length){ wait=1700; del=true; }
-    else if(del && ci===0){ del=false; wi=(wi+1)%words.length; wait=380; }
-    setTimeout(tick, wait);
-  })();
-}
-
-/* Üst düzey hero: sıralı giriş + logoda hafif 3D fare eğimi */
-function initHeroPremium(){
-  const hero=document.querySelector('#page-home .hero');
-  if(!hero) return;
-  const reduce=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  requestAnimationFrame(()=>requestAnimationFrame(()=>hero.classList.add('is-in')));
-  if(reduce) return;
-  const logo=hero.querySelector('.hero-logo');
-  if(!logo) return;
-  let raf=0, tx=0, ty=0, cx=0, cy=0;
-  const tick=()=>{
-    cx+=(tx-cx)*.12; cy+=(ty-cy)*.12;
-    logo.style.transform=`perspective(720px) rotateY(${cx}deg) rotateX(${cy}deg) translateZ(0)`;
-    if(Math.abs(tx-cx)>0.05 || Math.abs(ty-cy)>0.05) raf=requestAnimationFrame(tick);
-    else{ logo.style.transform=`perspective(720px) rotateY(${cx}deg) rotateX(${cy}deg)`; raf=0; }
-  };
-  hero.addEventListener('mousemove', e=>{
-    const r=hero.getBoundingClientRect();
-    const nx=((e.clientX-r.left)/r.width-0.5)*2;
-    const ny=((e.clientY-r.top)/r.height-0.5)*2;
-    tx=nx*10; ty=-ny*8;
-    if(!raf) raf=requestAnimationFrame(tick);
-  });
-  hero.addEventListener('mouseleave', ()=>{
-    tx=0; ty=0;
-    if(!raf) raf=requestAnimationFrame(tick);
-  });
-}
-
-/* Fareyi takip eden soft spotlight */
-function initCursorSpotlight(){
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return;
-  let raf=0, x=50, y=30;
-  window.addEventListener('pointermove', e=>{
-    x=(e.clientX/window.innerWidth)*100;
-    y=(e.clientY/window.innerHeight)*100;
-    if(raf) return;
-    raf=requestAnimationFrame(()=>{
-      document.body.style.setProperty('--mx', x+'%');
-      document.body.style.setProperty('--my', y+'%');
-      raf=0;
-    });
-  }, {passive:true});
-}
-
-/* Sekme altında kayan neon çizgi */
-function updateTabPill(){
-  const pill=document.getElementById('tabPill');
-  const active=document.querySelector('.tabs-in .tab-btn.active');
-  const wrap=document.querySelector('.tabs-in');
-  if(!pill || !wrap) return;
-  if(!active){ pill.classList.remove('show'); return; }
-  const wr=wrap.getBoundingClientRect();
-  const ar=active.getBoundingClientRect();
-  pill.style.left=(ar.left-wr.left+wrap.scrollLeft)+'px';
-  pill.style.width=ar.width+'px';
-  pill.classList.add('show');
-}
-
-/* Ara / primary butonlar: manyetik çekim */
-function initMagneticButton(){
-  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  if(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return;
-  const bind=btn=>{
-    if(!btn || btn.dataset.magneticBound) return;
-    btn.dataset.magneticBound='1';
-    btn.classList.add('magnetic');
-    btn.addEventListener('pointermove', e=>{
-      const r=btn.getBoundingClientRect();
-      const dx=(e.clientX-(r.left+r.width/2))/(r.width/2);
-      const dy=(e.clientY-(r.top+r.height/2))/(r.height/2);
-      btn.style.transform=`translate(${dx*6}px, ${dy*4}px)`;
-    });
-    btn.addEventListener('pointerleave', ()=>{ btn.style.transform=''; });
-  };
-  document.querySelectorAll('button.primary').forEach(bind);
-  // Sonradan eklenen primary butonlar için (dinamik DOM yoksa da zararsız)
-  const mo=new MutationObserver(()=>document.querySelectorAll('button.primary').forEach(bind));
-  mo.observe(document.body,{childList:true,subtree:true});
-}
-
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
@@ -4477,10 +4376,4 @@ window.addEventListener('DOMContentLoaded',()=>{
   body.addEventListener('change', colorInputRows);
   registerPwa();
   initMarketTape();
-  startHeroTypewriter();
-  initHeroPremium();
-  initCursorSpotlight();
-  initMagneticButton();
-  updateTabPill();
-  window.addEventListener('resize', updateTabPill);
 });
