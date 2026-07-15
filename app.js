@@ -4367,6 +4367,24 @@ function initMarketTape(){
 }
 
 /* başlangıç */
+/* Ana sayfa arama kutusu: placeholder daktilo animasyonu */
+function startHeroTypewriter(){
+  const inp=document.getElementById('homeTicker');
+  if(!inp) return;
+  if(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const words=['NVDA','THYAO','SIE','RR','AIR','005930','ASML','VOLV-B'];
+  let wi=0, ci=0, del=false;
+  (function tick(){
+    const w=words[wi];
+    ci+=del?-1:1;
+    inp.setAttribute('placeholder','örn. '+w.slice(0,ci)+(ci<w.length?'▎':''));
+    let wait=del?50:115;
+    if(!del && ci===w.length){ wait=1700; del=true; }
+    else if(del && ci===0){ del=false; wi=(wi+1)%words.length; wait=380; }
+    setTimeout(tick, wait);
+  })();
+}
+
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
@@ -4376,4 +4394,5 @@ window.addEventListener('DOMContentLoaded',()=>{
   body.addEventListener('change', colorInputRows);
   registerPwa();
   initMarketTape();
+  startHeroTypewriter();
 });
