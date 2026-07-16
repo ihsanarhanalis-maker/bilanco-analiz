@@ -800,21 +800,12 @@
             <button type="button" class="scan-chip" data-qf="rsi_os" onclick="toggleScanQ(this)">RSI ≤ 30</button>
             <button type="button" class="scan-chip" data-qf="rsi_ob" onclick="toggleScanQ(this)">RSI ≥ 70</button>
             <button type="button" class="scan-chip" data-qf="mom" onclick="toggleScanQ(this)">Momentum+</button>
+          </div>
+          <div class="scan-row scan-inputs">
             <button type="button" class="scan-chip" data-qf="value" onclick="toggleScanQ(this)">Value</button>
             <button type="button" class="scan-chip" data-qf="quality" onclick="toggleScanQ(this)">Quality</button>
             <button type="button" class="scan-chip" data-qf="relvol" onclick="toggleScanQ(this)">Hacim ↑</button>
             <button type="button" class="scan-chip" data-qf="lowvol" onclick="toggleScanQ(this)">Düşük vol</button>
-          </div>
-          <div class="scan-row scan-inputs">
-            <label style="flex-direction:row;align-items:center;gap:8px">F/K min
-              <input id="scanPeMin" type="number" step="0.1" placeholder="—" style="width:88px">
-            </label>
-            <label style="flex-direction:row;align-items:center;gap:8px">F/K max
-              <input id="scanPeMax" type="number" step="0.1" placeholder="—" style="width:88px">
-            </label>
-            <label style="flex-direction:row;align-items:center;gap:8px">Temettü min %
-              <input id="scanDivMin" type="number" step="0.1" placeholder="—" style="width:88px">
-            </label>
             <button type="button" class="primary" onclick="applyScanFilters()">Filtrele</button>
           </div>
         </div>

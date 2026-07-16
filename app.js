@@ -2181,12 +2181,6 @@ function toggleScanQ(btn){
   else { SCAN_QF.add(q); btn.classList.add('active'); }
   applyScanFilters();
 }
-function scanNum(id){
-  const el=document.getElementById(id);
-  if(!el || el.value==='' || el.value==null) return null;
-  const n=Number(el.value);
-  return Number.isFinite(n)?n:null;
-}
 function scanMcapInBands(mcap, cc){
   if(SCAN_CAPS.has('all') || !SCAN_CAPS.size) return true;
   if(mcap==null) return false;
@@ -2280,14 +2274,8 @@ function onScanSortChange(){
   renderScanPage();
 }
 function applyScanFilters(){
-  const peMin=scanNum('scanPeMin');
-  const peMax=scanNum('scanPeMax');
-  const divMin=scanNum('scanDivMin');
   SCAN_VIEW=SCAN_RAW.filter(d=>{
     if(!scanMcapInBands(d[SCAN_I.mcap], SCAN_CC)) return false;
-    if(peMin!=null && (d[SCAN_I.pe]==null || d[SCAN_I.pe]<peMin)) return false;
-    if(peMax!=null && (d[SCAN_I.pe]==null || d[SCAN_I.pe]>peMax)) return false;
-    if(divMin!=null && (d[SCAN_I.div]==null || d[SCAN_I.div]*100<divMin)) return false;
     const close=d[SCAN_I.close], sma50=d[SCAN_I.sma50], sma200=d[SCAN_I.sma200];
     if(SCAN_MA.has('sma50') && (close==null || sma50==null || close<=sma50)) return false;
     if(SCAN_MA.has('sma200') && (close==null || sma200==null || close<=sma200)) return false;
