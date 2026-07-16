@@ -646,7 +646,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchTechPanel(sym, 'BIST', myGen);
     ['insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
     updateWatchStar();
-    stopNyClock();                  // NY saati yalnızca ABD hisselerinde
+    startBistClock();               // İstanbul saati + seans içi/dışı
   }catch(e){
     setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
@@ -1332,7 +1332,7 @@ async function fetchTargets(sym, myGen){
   }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
 }
 
-/* ---------- Borsa şehri canlı saati (ABD: New York; Avrupa: ilgili 15 şehirden biri) ----------
+/* ---------- Borsa şehri canlı saati (TR: İstanbul; ABD: NY; Avrupa: ilgili şehir) ----------
    Saniyede bir güncellenir; cfg.open–cfg.close (dakika) hafta içi = seans saatleri (resmi tatiller
    hesaba katılmaz, o yüzden "borsa açık" değil "seans içi" denir). */
 let EXCH_TIMER=null;
@@ -1363,6 +1363,10 @@ function stopNyClock(){
 }
 function startNyClock(){
   startExchangeClock({flag:'🗽',city:'New York',tz:'America/New_York',open:570,close:960});   // 09:30–16:00
+}
+function startBistClock(){
+  // BIST pay piyasası: 10:00–18:00 (Europe/Istanbul), hafta içi
+  startExchangeClock({flag:'🇹🇷',city:'İstanbul',tz:'Europe/Istanbul',open:600,close:1080});
 }
 function startEuExchangeClock(euInfo){
   startExchangeClock({flag:euInfo.flag,city:euInfo.city,tz:euInfo.tz,open:euInfo.open,close:euInfo.close});
