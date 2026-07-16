@@ -1058,7 +1058,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
     fetchPriceChart(sym, ysym, myGen);
     fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
     TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
-    fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
+    fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, ysym });
     updateWatchStar();
     startEuExchangeClock(euInfo);   // sağ üstte borsanın bulunduğu şehrin canlı saati + seans durumu
     renderOwnershipEU(R.floatPct, R.floatShares, R.shares);   // halka açıklık pastası (TV free float)
@@ -3617,8 +3617,30 @@ function renderIncome(T){
 /* ---- Teknik Görünüm & Risk (her iki pazar — TradingView; ABD'ye Finviz kısa pozisyonu eklenir) ---- */
 let TECH_SHORT=null;   // ABD: fetchTargets doldurur {floatPct, ratio}
 const TECH_COLS=['RSI','SMA50','SMA200','price_52_week_high','price_52_week_low',
-  'Perf.W','Perf.1M','Perf.3M','Perf.YTD','Perf.Y','beta_1_year','Volatility.M','close','relative_volume_10d_calc',
-  'ADX','MACD.macd','MACD.signal','OBV'];
+  'Perf.W','Perf.1M','Perf.3M','Perf.YTD','Perf.Y','beta_1_year','Volatility.M','close'];
+/* Ehlers Fisher Transform (periyot 9) — TV scanner'da yok, günlük kapanışlardan hesaplanır */
+function fisherTransform(closes, period){
+  const n=period==null?9:period;
+  if(!closes || closes.length<n+2) return null;
+  let valuePrev=0, fishPrev=0, fisher=null, trigger=null;
+  for(let i=n-1;i<closes.length;i++){
+    let hi=-Infinity, lo=Infinity;
+    for(let j=i-n+1;j<=i;j++){
+      const p=closes[j];
+      if(p>hi) hi=p;
+      if(p<lo) lo=p;
+    }
+    let val=hi!==lo ? 0.33*2*((closes[i]-lo)/(hi-lo)-0.5)+0.67*valuePrev : 0.67*valuePrev;
+    if(val>0.999) val=0.999;
+    if(val<-0.999) val=-0.999;
+    const fish=0.5*Math.log((1+val)/(1-val))+0.5*fishPrev;
+    trigger=fishPrev;
+    fisher=fish;
+    valuePrev=val;
+    fishPrev=fish;
+  }
+  return { fisher, trigger };
+}
 async function fetchTechPanel(sym, market, myGen, euOpt){
   const card=document.getElementById('techCard'), box=document.getElementById('techBody');
   if(!card) return;
@@ -3627,21 +3649,36 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
   try{
     const scan = euOpt ? euOpt.scan : (market==='BIST'?'turkey':'america');
     const tickers = euOpt ? [euOpt.tv] : (market==='BIST'?['BIST:'+sym]:['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym]);
-    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
-      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:TECH_COLS})});
+    const ysym = market==='BIST' ? (sym+'.IS') : (euOpt && euOpt.ysym ? euOpt.ysym : sym);
+    const [r, priceJ]=await Promise.all([
+      fetch('https://scanner.tradingview.com/'+scan+'/scan',
+        {method:'POST',body:JSON.stringify({symbols:{tickers},columns:TECH_COLS})}),
+      fetch('/price?s='+encodeURIComponent(ysym)+'&range=6mo').then(x=>x.ok?x.json():null).catch(()=>null)
+    ]);
     const j=r.ok?await r.json():null;
     if(myGen!=null && myGen!==REQ_GEN) return;
     const row=(j&&j.data||[]).find(x=>x.d && x.d[0]!=null);
     if(!row){ box.innerHTML='<div class="hint">Teknik veri bulunamadı.</div>'; return; }
-    const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close,relVol,adx,macd,macdSig,obv]=row.d;
+    const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close]=row.d;
+    const closes=((((((priceJ||{}).chart||{}).result||[])[0]||{}).indicators||{}).quote||[])[0];
+    const closeArr=((closes&&closes.close)||[]).filter(x=>x!=null&&Number.isFinite(x));
+    const fish=fisherTransform(closeArr, 9);
     const num=(v,d)=> v==null?'—':Number(v).toFixed(d==null?2:d);
     const clsOf=v=> v==null?'neutral':(v>0?'up':v<0?'down':'neutral');
     const sgn=v=> v==null?'—':(v>0?'+':'')+v.toFixed(1)+'%';
     // RSI bölgesi
     const rsiZone= rsi==null?['—','neutral'] : rsi>=70?['Aşırı Alım','down'] : rsi<=30?['Aşırı Satım','up'] : ['Nötr','neutral'];
-    const adxZone= adx==null?['—','neutral'] : adx>=25?['Güçlü trend','up'] : adx>=20?['Orta trend','neutral'] : ['Zayıf trend','neutral'];
-    const macdDiff=(macd!=null&&macdSig!=null)?(macd-macdSig):null;
-    const macdZone= macdDiff==null?['—','neutral'] : macdDiff>0?['MACD > Sinyal','up'] : ['MACD < Sinyal','down'];
+    let fishZone=['—','neutral'], fishSub='';
+    if(fish && fish.fisher!=null){
+      const f=fish.fisher, t=fish.trigger;
+      const cross=t==null?'':(f>t?'Fisher > tetik (yükseliş)':f<t?'Fisher < tetik (düşüş)':'nötr');
+      if(f>=2) fishZone=['Aşırı alım bölgesi','down'];
+      else if(f<=-2) fishZone=['Aşırı satım bölgesi','up'];
+      else if(f>t) fishZone=['Momentum ↑','up'];
+      else if(f<t) fishZone=['Momentum ↓','down'];
+      else fishZone=['Nötr','neutral'];
+      fishSub=(cross?(cross+' · '):'')+'tetik '+num(t,2);
+    }
     // Ortalamalara mesafe
     const d50=(close&&sma50)?(close/sma50-1)*100:null;
     const d200=(close&&sma200)?(close/sma200-1)*100:null;
@@ -3652,14 +3689,11 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
       ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
     let html='<div class="grid" style="margin-bottom:16px">';
     html+=kpi('RSI (14)', num(rsi,1), rsiZone[0], rsiZone[1]);
-    html+=kpi('ADX (14)', num(adx,1), adxZone[0], adxZone[1]);
-    html+=kpi('MACD', num(macd,2), macdZone[0]+(macdSig!=null?' · sinyal '+num(macdSig,2):''), macdZone[1]);
-    html+=kpi('OBV', obv==null?'—':Number(obv).toLocaleString('tr-TR',{maximumFractionDigits:0}), 'işlem hacmi baskısı', 'neutral');
+    html+=kpi('Fisher Dönüşümü (9)', fish&&fish.fisher!=null?num(fish.fisher,2):'—', fishSub||fishZone[0], fishZone[1]);
     html+=kpi('50 Günlük Ort. Mesafe', sgn(d50), 'SMA50: '+num(sma50), clsOf(d50));
     html+=kpi('200 Günlük Ort. Mesafe', sgn(d200), 'SMA200: '+num(sma200), clsOf(d200));
     html+=kpi('Beta (1 Yıl)', num(beta), beta==null?'':(beta>1.2?'piyasadan oynak':beta<0.8?'piyasadan sakin':'piyasayla uyumlu'));
     html+=kpi('Aylık Volatilite', num(volM,1)+'%', 'günlük ort. dalgalanma');
-    html+=kpi('Göreli Hacim (10g)', num(relVol), relVol!=null&&relVol>1.5?'ortalamanın üstünde ilgi':'');
     html+='</div>';
     // 52 hafta konum çubuğu
     if(pos!=null){
