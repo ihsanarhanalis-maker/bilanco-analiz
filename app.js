@@ -1,6 +1,6 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','econ','top100','scan','sect','wnews'].forEach(x=>{
+  ['home','stock','econ','top100','scan','sect','etf','wnews'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
@@ -9,15 +9,76 @@ function switchPage(p){
   if(p==='top100') initTop100Page();
   if(p==='scan') initScanPage();
   if(p==='sect') initSectPage();
+  if(p==='etf') initEtfPage();
   if(p==='wnews') initWnewsPage();
+  if(p==='home'){
+    if(DISC_REVEALED) loadDiscovery();
+    if(EQCAL_REVEALED) loadEqCalendar();
+  }
   window.scrollTo({top:0,behavior:'smooth'});
 }
-/* Ana sayfadaki büyük arama: değeri Bilanço sekmesindeki arama kutusuna taşıyıp orada aratır */
-function homeSearch(){
+
+/* Kod eki / aday → TOP100 ülke kodu (TR, US, DE…) */
+const DISC_SUFFIX_CC={
+  US:'US', IS:'TR',
+  L:'GB', DE:'DE', PA:'FR', AS:'NL', BR:'BE', LS:'PT', MI:'IT', MC:'ES',
+  SW:'CH', ST:'SE', CO:'DK', OL:'NO', HE:'FI', VI:'AT', WA:'PL',
+  KS:'KR', KQ:'KR', T:'JP', SS:'CN', SZ:'CN', HK:'HK', TW:'TW', TWO:'TW',
+  TO:'CA', V:'CA', AX:'AU', SI:'SG'
+};
+function discCcFromCode(code){
+  const eu=parseEUSymbol(String(code||'').toUpperCase());
+  if(eu && DISC_SUFFIX_CC[eu.suffix]) return DISC_SUFFIX_CC[eu.suffix];
+  if(/\.US$/i.test(code)) return 'US';
+  if(/\.IS$/i.test(code)) return 'TR';
+  return null;
+}
+function discCcFromPick(pick){
+  if(!pick) return null;
+  if(pick.market==='US') return 'US';
+  if(pick.market==='BIST') return 'TR';
+  return discCcFromCode(pick.code);
+}
+
+/* Ana sayfa: kod ara → ülkeyi bul → o borsanın Bugünün Fırsatları’nı göster (önceden gizli) */
+async function homeSearch(){
   const v=(document.getElementById('homeTicker').value||'').trim();
-  if(!v) return;
-  document.getElementById('ticker').value=v;
+  const st=document.getElementById('homeSearchStatus');
+  if(!v){ if(st) st.textContent='Bir hisse kodu yaz.'; return; }
   document.getElementById('periodType').value=document.getElementById('homePeriod').value;
+  const sym=v.toUpperCase().trim();
+  if(st){ st.style.color=''; st.innerHTML='⏳ <b>'+safeHTML(sym)+'</b> aranıyor…'; }
+
+  let pickCode=null, cc=null;
+
+  if(/\.[A-Z]{1,3}$/.test(sym)){
+    pickCode=sym;
+    cc=discCcFromCode(sym);
+  }else{
+    const myGen=++REQ_GEN;
+    const { cands }=await detectBareMarkets(sym);
+    if(myGen!==REQ_GEN) return;
+    if(!cands.length){
+      if(st) st.innerHTML='✕ <b>'+safeHTML(sym)+'</b> hiçbir borsada bulunamadı.';
+      return;
+    }
+    const pick=cands.find(c=>c.market==='US')||cands.find(c=>c.market==='BIST')||cands[0];
+    pickCode=pick.code;
+    cc=discCcFromPick(pick);
+  }
+
+  if(!cc || !TOP100_MARKETS[cc]){
+    if(st) st.innerHTML='✕ Bu kod için ülke eşlemesi yapılamadı.';
+    return;
+  }
+
+  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  if(st) st.innerHTML='✓ <b>'+safeHTML(pickCode)+'</b> → <b>'+safeHTML(cName)+'</b> · ana sayfada Fırsatlar + Takvim hazır';
+
+  document.getElementById('ticker').value=pickCode;
+  // Fırsatlar + Takvim o ülke için hazırlanır (logo → ana sayfa); analiz sekmesine gidilir
+  revealDiscoveryForCountry(cc, pickCode);
+  revealEqCalendarForCountry(cc);
   switchPage('stock');
   fetchTicker();
 }
@@ -73,8 +134,30 @@ function fmtAbbr(n){
   if(a>=1e6) return sign+two(a/1e6)+' M';
   return sign+Math.round(a).toLocaleString('tr-TR');
 }
-/* ISO tarih -> GG/AA/YYYY */
-const fmtDate = iso => { const p=String(iso).split('-'); return (p.length===3)?`${p[2]}/${p[1]}/${p[0]}`:iso; };
+/* Her türlü tarihi → GG/AA/YYYY (bilanço usulü) */
+function fmtDate(raw){
+  if(raw==null||raw==='') return '';
+  const s=String(raw).trim();
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return m[3]+'/'+m[2]+'/'+m[1];
+  m=s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return m[3]+'/'+m[2]+'/'+m[1];
+  m=s.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})/);
+  if(m){
+    let a=+m[1], b=+m[2]; const y=m[3];
+    const pad=n=>String(n).padStart(2,'0');
+    // 7/16/2026 → ABD A/G; 16.07.2026 / 16/07/2026 → TR G/A
+    if(b>12 && a<=12) return pad(b)+'/'+pad(a)+'/'+y;      // M/D/Y
+    if(a>12 && b<=12) return pad(a)+'/'+pad(b)+'/'+y;      // D/M/Y
+    if(s.includes('.')) return pad(a)+'/'+pad(b)+'/'+y;    // TR nokta
+    return pad(b)+'/'+pad(a)+'/'+y;                         // Nasdaq slash → M/D/Y
+  }
+  const d=new Date(s);
+  if(!isNaN(d.getTime())){
+    return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+  }
+  return s;
+}
 /* Sayı çöz: "206,80 B" / "5,72 M" / "206.803.000.000" hepsini anlar */
 function num(s){
   if(typeof s==='number') return s;
@@ -88,6 +171,27 @@ function num(s){
 }
 
 /* ---------- Şirket verisi çekme (SEC EDGAR — anahtarsız) ---------- */
+/* Açılan hissenin ülkesi / borsası — bayrak seçmeden net metin */
+function setMarketOrigin(info){
+  const box=document.getElementById('marketOrigin');
+  const txt=document.getElementById('marketOriginText');
+  if(!box||!txt) return;
+  if(!info){
+    box.classList.add('hidden');
+    box.style.display='none';
+    txt.textContent='';
+    return;
+  }
+  const parts=[
+    info.country ? ('Ülke: '+info.country) : null,
+    info.exchange || null,
+    info.ccy || null,
+    info.code || null
+  ].filter(Boolean);
+  txt.textContent=parts.join(' · ');
+  box.classList.remove('hidden');
+  box.style.display='flex';
+}
 function setStatus(msg,kind){
   const el=document.getElementById('fetchStatus');
   el.textContent=msg;
@@ -524,7 +628,8 @@ async function fetchTickerBIST(sym, mode, myGen){
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
     document.getElementById('curNote').textContent='TL cinsinden';
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
-    setStatus(`✓ ${sym} — BIST${group==='UFRS'?' (banka/sigorta)':''} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
+    setMarketOrigin({ country:'Türkiye', exchange:'Borsa İstanbul', ccy:'TRY', code:sym+'.IS' });
+    setStatus(`✓ ${sym} — Türkiye (BIST)${group==='UFRS'?' · banka/sigorta':''} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
     analyze();
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
@@ -536,7 +641,8 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchOwnershipBIST(sym, myGen);   // ortaklık yapısı pastası (KAP verisi)
     TECH_SHORT=null;                  // kısa pozisyon verisi yalnız ABD'de var
     fetchTechPanel(sym, 'BIST', myGen);
-    const ic=document.getElementById('insiderCard'); if(ic) ic.classList.add('hidden');  // Form 4 yalnız ABD
+    fetchQuantPanel(sym+'.IS', myGen);
+    ['insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
     updateWatchStar();
     stopNyClock();                  // NY saati yalnızca ABD hisselerinde
   }catch(e){
@@ -938,6 +1044,12 @@ async function fetchTickerEU(euInfo, mode, myGen){
     rows.forEach(rr=>b.insertAdjacentHTML('beforeend', rowHTML(rr[0],rr[1],rr[2],rr[3])));
     document.getElementById('curNote').textContent=CUR+' cinsinden';
     if(D1) setPeriodHeaders(fmtDate(D0), fmtDate(D1)); else setPeriodHeaders(ifrs?fmtDate(D0):'Güncel Dönem', null);
+    setMarketOrigin({
+      country: euInfo.country,
+      exchange: euInfo.tv || euInfo.city || ('ek .'+euInfo.suffix),
+      ccy: CUR || euInfo.ccy,
+      code: sym+'.'+euInfo.suffix
+    });
     setStatus(`✓ ${sym}.${euInfo.suffix} — ${euInfo.country} — ${D1?(mode==='quarter'?'çeyreklik':'yıllık'):'en güncel dönem'} — ${CUR} — ${srcNote}`,'good');
     analyze();
     fetchNews(sym, myGen);
@@ -948,6 +1060,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
     fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
     TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
     fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
+    fetchQuantPanel(ysym, myGen);
     updateWatchStar();
     startEuExchangeClock(euInfo);   // sağ üstte borsanın bulunduğu şehrin canlı saati + seans durumu
     renderOwnershipEU(R.floatPct, R.floatShares, R.shares);   // halka açıklık pastası (TV free float)
@@ -1020,6 +1133,7 @@ async function fetchTicker(){
   }
   let sym=(document.getElementById('ticker').value||'').trim().toUpperCase();
   if(!sym){ setStatus('Lütfen bir hisse kodu yazın.','bad'); return; }
+  setMarketOrigin(null);
   const mode=document.getElementById('periodType').value;        // 'annual' | 'quarter'
   const map=window.CIK_MAP||{};
   // Elle yazılmış ekler her zaman doğrudan yönlendirir: Avrupa (SAP.DE…), BIST (.IS), ABD (.US)
@@ -1059,8 +1173,8 @@ async function fetchTicker(){
     setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · Avrupa · Asya-Pasifik · Kanada tarandı).','bad');
     return;
   }
-  if(cands.length>1){ renderMarketChoices(sym, cands); return; }
-  const c=cands[0];
+  // Birden fazla borsa → bayrak/seçim yok; ABD > BIST > diğer önceliğiyle otomatik aç
+  const c = cands.find(x=>x.market==='US') || cands.find(x=>x.market==='BIST') || cands[0];
   if(c.market==='US') fetchTickerUS(sym, mode, myGen);
   else if(c.market==='BIST'){
     setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
@@ -1111,7 +1225,8 @@ async function fetchTickerUS(sym, mode, myGen){
     document.getElementById('curNote').textContent='USD cinsinden';
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
     const periodLbl = isIfrs20F ? 'yıllık (20-F)' : (mode==='annual'?'yıllık':'çeyreklik');
-    setStatus(`✓ ${sym} — ${periodLbl} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
+    setMarketOrigin({ country:'Amerika Birleşik Devletleri', exchange:'ABD (SEC EDGAR)', ccy:'USD', code:sym+'.US' });
+    setStatus(`✓ ${sym} — ABD — ${periodLbl} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
     analyze();
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
@@ -1123,6 +1238,7 @@ async function fetchTickerUS(sym, mode, myGen){
     fetchInsiders(cik, myGen);   // Form 4 içeriden işlemler (yalnızca ABD)
     TECH_SHORT=null;             // önceki hissenin kısa pozisyonu görünmesin
     fetchTechPanel(sym, 'US', myGen);
+    fetchQuantPanel(sym, myGen);
     updateWatchStar();
     const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
@@ -1167,7 +1283,7 @@ async function fetchTargets(sym, myGen){
     ]);
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     if(!tR || !tR.ok){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
-    renderOwnershipUS(tR.own);   // ortaklık yapısı pastası (aynı Finviz sayfasından, ek istek yok)
+    renderOwnershipUS(tR.own, sym);   // pasta + Yahoo 13F kurumsal liste
     if(tR.shortData){ TECH_SHORT=tR.shortData; renderTechShort(); }   // teknik panele kısa pozisyon satırı
     const meta = pR && pR.chart && pR.chart.result && pR.chart.result[0] && pR.chart.result[0].meta;
     const cur = meta ? meta.regularMarketPrice : null;
@@ -1960,10 +2076,13 @@ const SCAN_CAP_BANDS={
 };
 const SCAN_PAGE_SIZE=100;
 const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
+/* Kolon indeksleri: 0 name … 13 RSI, 14 Perf.3M, 15 Vol.M, 16 relVol, 17 beta; earn modunda +18 tarih */
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
   'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
-  'SMA50','SMA200','RSI'];
+  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year'];
 const SCAN_COLS_EARN=SCAN_COLS.concat(['earnings_release_next_date']);
+const SCAN_I={name:0,desc:1,mcap:2,close:3,chg:4,pe:5,pb:6,roe:7,nm:8,div:9,sector:10,
+  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,earn:18};
 const SCAN_TV_SORT={
   'mcap-desc':{sortBy:'market_cap_basic',sortOrder:'desc'},
   'mcap-asc':{sortBy:'market_cap_basic',sortOrder:'asc'},
@@ -1974,7 +2093,11 @@ const SCAN_TV_SORT={
   'div-desc':{sortBy:'dividend_yield_recent',sortOrder:'desc'},
   'rsi-desc':{sortBy:'RSI',sortOrder:'desc'},
   'rsi-asc':{sortBy:'RSI',sortOrder:'asc'},
+  'perf3m-desc':{sortBy:'Perf.3M',sortOrder:'desc'},
+  'vol-asc':{sortBy:'Volatility.M',sortOrder:'asc'},
+  'beta-asc':{sortBy:'beta_1_year',sortOrder:'asc'},
   'earn-asc':{sortBy:'earnings_release_next_date',sortOrder:'asc'},
+  'quant-desc':{sortBy:'market_cap_basic',sortOrder:'desc'}, // istemci sıralar
 };
 function scanCapTable(cc){
   if(cc==='US') return SCAN_CAP_BANDS.US;
@@ -1993,10 +2116,30 @@ function scanCapTable(cc){
   if(['SE','DK','NO'].includes(cc)) return SCAN_CAP_BANDS.NORDIC;
   return SCAN_CAP_BANDS.EU;
 }
-let SCAN_CC='TR', SCAN_CAPS=new Set(['all']), SCAN_MA=new Set(), SCAN_GEN=0, SCAN_PAGE_INIT=false;
+let SCAN_CC='TR', SCAN_CAPS=new Set(['all']), SCAN_MA=new Set(), SCAN_QF=new Set(), SCAN_GEN=0, SCAN_PAGE_INIT=false;
 let SCAN_RAW=[], SCAN_VIEW=[], SCAN_PAGE=0;
 let SCAN_MODE='mcap';   // 'mcap' | 'earn' — TV’den hangi sıralamayla çekildiği
 const SCAN_CACHE={};   // cc|mode → { rows, ts, total }
+/* Value + Momentum + Quality → 0–100 quant skor (Alpha Search tarzı basit kompozit) */
+function scanQuantScore(d){
+  if(!d) return null;
+  let value=50, mom=50, qual=50, n=0;
+  const pe=d[SCAN_I.pe], pb=d[SCAN_I.pb], roe=d[SCAN_I.roe], nm=d[SCAN_I.nm];
+  const perf=d[SCAN_I.perf3m], rsi=d[SCAN_I.rsi], vol=d[SCAN_I.vol];
+  if(pe!=null && pe>0){ value=Math.max(0, Math.min(100, 100 - Math.min(pe,40)/40*100)); n++; }
+  else if(pb!=null && pb>0){ value=Math.max(0, Math.min(100, 100 - Math.min(pb,8)/8*100)); n++; }
+  if(perf!=null){ mom=Math.max(0, Math.min(100, 50 + perf)); n++; }
+  if(rsi!=null){
+    // 40–60 ideal; aşırı alım/satım cezası
+    const rsiAdj=rsi>=40&&rsi<=60?15:(rsi<=30||rsi>=70?-10:0);
+    mom=Math.max(0, Math.min(100, (mom||50)+rsiAdj));
+  }
+  if(roe!=null){ qual=Math.max(0, Math.min(100, 40 + roe*1.2)); n++; }
+  if(nm!=null){ qual=Math.max(0, Math.min(100, (qual+Math.max(0,Math.min(100,40+nm*2)))/2)); }
+  if(vol!=null && vol>25) mom=Math.max(0, mom-8); // aşırı oynaklık cezası
+  if(!n) return null;
+  return Math.round((value+mom+qual)/3);
+}
 function initScanPage(){
   if(SCAN_PAGE_INIT) return;
   SCAN_PAGE_INIT=true;
@@ -2032,6 +2175,13 @@ function toggleScanMa(btn){
   if(!ma) return;
   if(SCAN_MA.has(ma)){ SCAN_MA.delete(ma); btn.classList.remove('active'); }
   else { SCAN_MA.add(ma); btn.classList.add('active'); }
+  applyScanFilters();
+}
+function toggleScanQ(btn){
+  const q=btn.dataset.qf;
+  if(!q) return;
+  if(SCAN_QF.has(q)){ SCAN_QF.delete(q); btn.classList.remove('active'); }
+  else { SCAN_QF.add(q); btn.classList.add('active'); }
   applyScanFilters();
 }
 function scanNum(id){
@@ -2134,12 +2284,25 @@ function onScanSortChange(){
 }
 function applyScanFilters(){
   const peMin=scanNum('scanPeMin');
+  const peMax=scanNum('scanPeMax');
+  const divMin=scanNum('scanDivMin');
   SCAN_VIEW=SCAN_RAW.filter(d=>{
-    if(!scanMcapInBands(d[2], SCAN_CC)) return false;
-    if(peMin!=null && (d[5]==null || d[5]<peMin)) return false;
-    const close=d[3], sma50=d[11], sma200=d[12];
+    if(!scanMcapInBands(d[SCAN_I.mcap], SCAN_CC)) return false;
+    if(peMin!=null && (d[SCAN_I.pe]==null || d[SCAN_I.pe]<peMin)) return false;
+    if(peMax!=null && (d[SCAN_I.pe]==null || d[SCAN_I.pe]>peMax)) return false;
+    if(divMin!=null && (d[SCAN_I.div]==null || d[SCAN_I.div]*100<divMin)) return false;
+    const close=d[SCAN_I.close], sma50=d[SCAN_I.sma50], sma200=d[SCAN_I.sma200];
     if(SCAN_MA.has('sma50') && (close==null || sma50==null || close<=sma50)) return false;
     if(SCAN_MA.has('sma200') && (close==null || sma200==null || close<=sma200)) return false;
+    const rsi=d[SCAN_I.rsi], perf=d[SCAN_I.perf3m], pe=d[SCAN_I.pe], pb=d[SCAN_I.pb];
+    const roe=d[SCAN_I.roe], nm=d[SCAN_I.nm], rel=d[SCAN_I.relvol], vol=d[SCAN_I.vol];
+    if(SCAN_QF.has('rsi_os') && (rsi==null || rsi>30)) return false;
+    if(SCAN_QF.has('rsi_ob') && (rsi==null || rsi<70)) return false;
+    if(SCAN_QF.has('mom') && (perf==null || perf<=0)) return false;
+    if(SCAN_QF.has('value') && !((pe!=null&&pe>0&&pe<15) || (pb!=null&&pb>0&&pb<1.5))) return false;
+    if(SCAN_QF.has('quality') && !((roe!=null&&roe>=15) || (nm!=null&&nm>=10))) return false;
+    if(SCAN_QF.has('relvol') && (rel==null || rel<1.5)) return false;
+    if(SCAN_QF.has('lowvol') && (vol==null || vol>12)) return false;
     return true;
   });
   SCAN_PAGE=0;
@@ -2149,15 +2312,25 @@ function scanSortedView(){
   const q=((document.getElementById('scanSearch')||{}).value||'').trim().toLowerCase();
   let rows=SCAN_VIEW;
   if(q) rows=rows.filter(d=>
-    String(d[0]||'').toLowerCase().includes(q) ||
-    String(d[1]||'').toLowerCase().includes(q) ||
-    String(d[10]||'').toLowerCase().includes(q));
+    String(d[SCAN_I.name]||'').toLowerCase().includes(q) ||
+    String(d[SCAN_I.desc]||'').toLowerCase().includes(q) ||
+    String(d[SCAN_I.sector]||'').toLowerCase().includes(q));
   // Yaklaşan kazanç: sıra TradingView’den geldi — istemcide yeniden sıralama
   if(SCAN_MODE==='earn') return rows.slice();
   const sort=(document.getElementById('scanSort')||{}).value||'mcap-desc';
   const [key,dir]=sort.split('-');
-  const idx={mcap:2,chg:4,name:0,pe:5,roe:7,div:9,rsi:13}[key]??2;
   const mul=dir==='asc'?1:-1;
+  if(key==='quant'){
+    return rows.slice().sort((a,b)=>{
+      const va=scanQuantScore(a), vb=scanQuantScore(b);
+      if(va==null && vb==null) return 0;
+      if(va==null) return 1;
+      if(vb==null) return -1;
+      return mul*(va-vb);
+    });
+  }
+  const idx={mcap:SCAN_I.mcap,chg:SCAN_I.chg,name:SCAN_I.name,pe:SCAN_I.pe,roe:SCAN_I.roe,
+    div:SCAN_I.div,rsi:SCAN_I.rsi,perf3m:SCAN_I.perf3m,vol:SCAN_I.vol,beta:SCAN_I.beta}[key]??SCAN_I.mcap;
   return rows.slice().sort((a,b)=>{
     let va=a[idx], vb=b[idx];
     if(key==='name'){
@@ -2189,8 +2362,9 @@ function renderScanPage(){
   const slice=sorted.slice(SCAN_PAGE*SCAN_PAGE_SIZE, (SCAN_PAGE+1)*SCAN_PAGE_SIZE);
   if(sub){
     const capNote=SCAN_CAPS.has('all')?'tüm dilimler':[...SCAN_CAPS].join('+');
-    const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend filtresi yok';
-    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView canlı · <b>satıra tıkla → analiz</b>`;
+    const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend yok';
+    const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):'quant filtresi yok';
+    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
   }
   if(!sorted.length){
     box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';
@@ -2211,6 +2385,11 @@ function renderScanPage(){
     const cls=v>=70?'down':(v<=30?'up':'neutral');
     return `<span class="${cls}">${Number(v).toFixed(1)}</span>`;
   };
+  const qCell=v=>{
+    if(v==null) return '—';
+    const cls=v>=70?'up':v>=50?'neutral':'down';
+    return `<span class="${cls}"><b>${v}</b></span>`;
+  };
   const showEarn=SCAN_MODE==='earn';
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
@@ -2219,27 +2398,30 @@ function renderScanPage(){
   const trRows=slice.map((d,i)=>{
     const code=m.click(String(d[0]).replace(/_/g,'-'));
     const n=SCAN_PAGE*SCAN_PAGE_SIZE+i+1;
+    const qs=scanQuantScore(d);
     return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
       <td style="color:var(--muted)">${n}</td>
       <td><b>${safeHTML(String(d[0]).replace(/_/g,'-'))}</b></td>
       <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
-      <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
-      <td>${d[3]==null?'—':m.sym+Number(d[3]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
-      <td>${chg(d[4])}</td>
-      ${showEarn?`<td style="white-space:nowrap">${earnCell(d[14])}</td>`:''}
-      <td>${rsi(d[13])}</td>
-      <td>${xx(d[5])}</td>
-      <td>${xx(d[6])}</td>
-      <td>${pp(d[7])}</td>
-      <td>${pp(d[8])}</td>
-      <td>${dy(d[9])}</td>
-      <td style="color:var(--muted);font-size:12px">${safeHTML(d[10]||'—')}</td>
+      <td><b>${fmtMcapSym(d[SCAN_I.mcap], m.sym)}</b></td>
+      <td>${d[SCAN_I.close]==null?'—':m.sym+Number(d[SCAN_I.close]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
+      <td>${chg(d[SCAN_I.chg])}</td>
+      ${showEarn?`<td style="white-space:nowrap">${earnCell(d[SCAN_I.earn])}</td>`:''}
+      <td>${qCell(qs)}</td>
+      <td>${rsi(d[SCAN_I.rsi])}</td>
+      <td>${chg(d[SCAN_I.perf3m])}</td>
+      <td>${d[SCAN_I.vol]==null?'—':Number(d[SCAN_I.vol]).toFixed(1)+'%'}</td>
+      <td>${xx(d[SCAN_I.pe])}</td>
+      <td>${xx(d[SCAN_I.pb])}</td>
+      <td>${pp(d[SCAN_I.roe])}</td>
+      <td>${dy(d[SCAN_I.div])}</td>
+      <td style="color:var(--muted);font-size:12px">${safeHTML(d[SCAN_I.sector]||'—')}</td>
     </tr>`;
   }).join('');
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
     <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
     ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
-    <th>RSI</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Temettü</th><th>Sektör</th>
+    <th>Q</th><th>RSI</th><th>3A</th><th>Vol</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Temettü</th><th>Sektör</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
     pager.style.display='flex';
@@ -2895,21 +3077,28 @@ async function fetchNews(sym, myGen){
       const cutoff=Date.now()-90*86400000;
       items=items.filter(it=> it.d && it.d.getTime()>=cutoff);
     }else{
-      // ABD: hisse koduyla arama yeterince isabetli. Avrupa'da kod tek başına belirsiz/kısa
-      // kalabilir (ör. "MC", "SIE") → şirketin kısaltılmış adını kullan (FIN.companyName,
-      // fetchTickerEU'da TradingView'den zaten alınmıştı — ek istek gerekmez).
+      // ABD/EU: önce Yahoo ticker news (OpenBB news.company karşılığı), sonra Bing yedek
       const isEU = FIN && FIN.market==='EU';
       let q=sym;
       if(isEU && FIN.companyName){
         q=FIN.companyName.replace(/\b(AG|SE|PLC|NV|N\.V\.|SA|S\.A\.|S\.p\.A\.|AB|A\/S|ASA|Ltd\.?|Limited|Inc\.?|Corp\.?|Corporation|Co\.?|Group|Aktiengesellschaft|Public Limited Company|Holding|Kabushiki Kaisha|\bKK\b|Company Limited|Holdings)\b\.?/gi,' ')
           .replace(/\s+/g,' ').trim().split(' ').slice(0,3).join(' ') || sym;
       }
+      const ysym=(FIN&&FIN.ysym)||sym;
+      let yItems=[];
+      try{
+        const yj=await fetch('/ynews?s='+encodeURIComponent(ysym)+'&count=16').then(r=>r.ok?r.json():null);
+        yItems=((yj&&yj.items)||[]).map(it=>({
+          title:it.title||'', link:it.link||'', src:it.src||'Yahoo', host:'', desc:it.desc||'',
+          d:it.d?new Date(it.d):null
+        })).filter(it=>it.title&&it.link);
+      }catch(e){}
       const [xPrem, xGen]=await Promise.all([
         fetch('/news?q='+encodeURIComponent(q+' stock '+PREMIUM_SITES)).then(r=>r.text()).catch(()=>''),
         fetch('/news?q='+encodeURIComponent(q+' stock')).then(r=>r.text()).catch(()=>'')
       ]);
       if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
-      items=[...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
+      items=[...yItems, ...parseNewsXML(xPrem), ...parseNewsXML(xGen)];
     }
 
     // Sorunlu kaynakları ele (MSN, Barron's, Seeking Alpha — çeviri/erişim sorunu çıkarıyor)
@@ -3183,7 +3372,7 @@ function hidePriceUI(){
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
-  ['chartCard','sectorCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
+  ['chartCard','sectorCard','insiderCard','ownerCard','techCard','quantCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
   const ws=document.getElementById('watchStar'); if(ws) ws.classList.add('hidden');
@@ -3431,7 +3620,8 @@ function renderIncome(T){
 /* ---- Teknik Görünüm & Risk (her iki pazar — TradingView; ABD'ye Finviz kısa pozisyonu eklenir) ---- */
 let TECH_SHORT=null;   // ABD: fetchTargets doldurur {floatPct, ratio}
 const TECH_COLS=['RSI','SMA50','SMA200','price_52_week_high','price_52_week_low',
-  'Perf.W','Perf.1M','Perf.3M','Perf.YTD','Perf.Y','beta_1_year','Volatility.M','close','relative_volume_10d_calc'];
+  'Perf.W','Perf.1M','Perf.3M','Perf.YTD','Perf.Y','beta_1_year','Volatility.M','close','relative_volume_10d_calc',
+  'ADX','MACD.macd','MACD.signal','OBV'];
 async function fetchTechPanel(sym, market, myGen, euOpt){
   const card=document.getElementById('techCard'), box=document.getElementById('techBody');
   if(!card) return;
@@ -3446,12 +3636,15 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
     if(myGen!=null && myGen!==REQ_GEN) return;
     const row=(j&&j.data||[]).find(x=>x.d && x.d[0]!=null);
     if(!row){ box.innerHTML='<div class="hint">Teknik veri bulunamadı.</div>'; return; }
-    const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close,relVol]=row.d;
+    const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close,relVol,adx,macd,macdSig,obv]=row.d;
     const num=(v,d)=> v==null?'—':Number(v).toFixed(d==null?2:d);
     const clsOf=v=> v==null?'neutral':(v>0?'up':v<0?'down':'neutral');
     const sgn=v=> v==null?'—':(v>0?'+':'')+v.toFixed(1)+'%';
     // RSI bölgesi
     const rsiZone= rsi==null?['—','neutral'] : rsi>=70?['Aşırı Alım','down'] : rsi<=30?['Aşırı Satım','up'] : ['Nötr','neutral'];
+    const adxZone= adx==null?['—','neutral'] : adx>=25?['Güçlü trend','up'] : adx>=20?['Orta trend','neutral'] : ['Zayıf trend','neutral'];
+    const macdDiff=(macd!=null&&macdSig!=null)?(macd-macdSig):null;
+    const macdZone= macdDiff==null?['—','neutral'] : macdDiff>0?['MACD > Sinyal','up'] : ['MACD < Sinyal','down'];
     // Ortalamalara mesafe
     const d50=(close&&sma50)?(close/sma50-1)*100:null;
     const d200=(close&&sma200)?(close/sma200-1)*100:null;
@@ -3462,6 +3655,9 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
       ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
     let html='<div class="grid" style="margin-bottom:16px">';
     html+=kpi('RSI (14)', num(rsi,1), rsiZone[0], rsiZone[1]);
+    html+=kpi('ADX (14)', num(adx,1), adxZone[0], adxZone[1]);
+    html+=kpi('MACD', num(macd,2), macdZone[0]+(macdSig!=null?' · sinyal '+num(macdSig,2):''), macdZone[1]);
+    html+=kpi('OBV', obv==null?'—':Number(obv).toLocaleString('tr-TR',{maximumFractionDigits:0}), 'işlem hacmi baskısı', 'neutral');
     html+=kpi('50 Günlük Ort. Mesafe', sgn(d50), 'SMA50: '+num(sma50), clsOf(d50));
     html+=kpi('200 Günlük Ort. Mesafe', sgn(d200), 'SMA200: '+num(sma200), clsOf(d200));
     html+=kpi('Beta (1 Yıl)', num(beta), beta==null?'':(beta>1.2?'piyasadan oynak':beta<0.8?'piyasadan sakin':'piyasayla uyumlu'));
@@ -3547,12 +3743,16 @@ async function fetchOwnershipBIST(sym, myGen){
     if(!rows.length){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
     rows.forEach(r=>{ if(/^diğer$/i.test(r.label)) r.label='Halka Açık / Diğer'; });
     rows.sort((a,b)=>b.pct-a.pct);
+    const inst=document.getElementById('ownerInstBody');
+    if(inst){ inst.classList.add('hidden'); inst.innerHTML=''; }
     renderOwnerPie(rows, 'Kaynak: KAP ortaklık yapısı (İş Yatırım aracılığıyla). "Halka Açık / Diğer" borsada işlem gören kısımdır.');
   }catch(e){ document.getElementById('ownerCard')?.classList.add('hidden'); }
 }
 /* Avrupa: isim-isim ortak listesi için ücretsiz kaynak yok (KAP/Finviz karşılığı yok) —
    TradingView'in fiili dolaşım (free float) verisiyle 2 dilimli pasta: halka açık vs büyük ortaklar. */
 function renderOwnershipEU(floatPct, floatShares, totalShares){
+  const inst=document.getElementById('ownerInstBody');
+  if(inst){ inst.classList.add('hidden'); inst.innerHTML=''; }
   if(floatPct==null || floatPct<=0 || floatPct>100){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
   const slices=[
     { label:'Halka Açık Dolaşım (free float)', pct:floatPct },
@@ -3562,7 +3762,7 @@ function renderOwnershipEU(floatPct, floatShares, totalShares){
   if(floatShares && totalShares) note+=` Fiili dolaşım: ${fmtShort(floatShares)} / ${fmtShort(totalShares)} pay.`;
   renderOwnerPie(slices, note);
 }
-function renderOwnershipUS(own){
+function renderOwnershipUS(own, ysym){
   if(!own || own.inst==null){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
   const inst=own.inst||0, ins=own.insider||0;
   const other=Math.max(0, 100-inst-ins);
@@ -3574,6 +3774,35 @@ function renderOwnershipUS(own){
   let note='Kaynak: Finviz. ABD\'de pay sahipleri isim isim açıklanmaz; dağılım kurumsal/içeriden/diğer olarak raporlanır.';
   if(own.shsFloat && own.shsOut) note+=` Fiili dolaşım: ${fmtShort(own.shsFloat)} / ${fmtShort(own.shsOut)} pay (%${(own.shsFloat/own.shsOut*100).toFixed(1)}).`;
   renderOwnerPie(slices, note);
+  if(ysym) fetchInstitutionalHolders(ysym);
+}
+async function fetchInstitutionalHolders(ysym){
+  const box=document.getElementById('ownerInstBody');
+  if(!box) return;
+  box.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Kurumsal sahipler (13F) yükleniyor…</div>';
+  try{
+    const j=await fetch('/yqs?s='+encodeURIComponent(ysym)+'&m=institutionOwnership,majorHoldersBreakdown').then(r=>r.ok?r.json():null);
+    const holders=((j&&j.institutionOwnership&&j.institutionOwnership.ownershipList)||[]).slice(0,12);
+    if(!holders.length){ box.innerHTML='<div class="hint">Kurumsal sahip listesi bulunamadı.</div>'; return; }
+    const rows=holders.map(h=>{
+      const pct=h.pctHeld!=null?(h.pctHeld*100):null;
+      const sh=h.position!=null?h.position:null;
+      const dt=h.reportDate==null?'—':(Number(h.reportDate)>1e12
+        ? new Date(Number(h.reportDate)).toLocaleDateString('tr-TR')
+        : new Date(Number(h.reportDate)*1000).toLocaleDateString('tr-TR'));
+      return `<tr>
+        <td><b>${safeHTML(h.organization||'—')}</b></td>
+        <td>${pct==null?'—':'%'+pct.toFixed(2)}</td>
+        <td>${sh==null?'—':Number(sh).toLocaleString('tr-TR')}</td>
+        <td style="color:var(--muted);font-size:12px">${dt}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML=`<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--ink)">En büyük kurumsal sahipler (13F)</div>
+      <div style="overflow-x:auto"><table><thead><tr><th>Kurum</th><th>Pay %</th><th>Adet</th><th>Rapor</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+      <div class="hint" style="margin-top:8px">Kaynak: Yahoo institutionOwnership — OpenBB equity.ownership karşılığı.</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">Kurumsal sahipler alınamadı.</div>'; }
 }
 
 /* ---- İçeriden Alım-Satım — SEC Form 4 (yalnızca ABD) ----
@@ -3593,7 +3822,7 @@ async function fetchInsiders(cik, myGen){
     const rec=sub&&sub.filings&&sub.filings.recent;
     if(!rec){ box.innerHTML='<div class="hint">Bildirim verisi alınamadı.</div>'; return; }
     const picks=[];
-    for(let i=0;i<rec.form.length && picks.length<6;i++){
+    for(let i=0;i<rec.form.length && picks.length<10;i++){
       if(rec.form[i]==='4') picks.push({ acc:rec.accessionNumber[i], date:rec.filingDate[i], doc:rec.primaryDocument[i] });
     }
     if(!picks.length){ box.innerHTML='<div class="hint">Yakın tarihli Form 4 bildirimi yok.</div>'; return; }
@@ -3639,6 +3868,61 @@ async function fetchInsiders(cik, myGen){
     </tbody></table>
     <div class="hint" style="margin-top:8px"><b>Alım (P)</b> açık piyasadan gerçek alımdır (en güçlü sinyal); Hisse Ödülü/Opsiyon Kullanımı rutin ödemedir, Vergi İçin Satış otomatiktir. Kaynak: SEC EDGAR Form 4.</div>`;
   }catch(e){ box.innerHTML='<div class="hint">Form 4 alınamadı: '+e.message+'</div>'; }
+}
+
+/* ---- Quant risk/getiri (1Y günlük fiyat serisi) ---- */
+async function fetchQuantPanel(ysym, myGen){
+  const card=document.getElementById('quantCard'), box=document.getElementById('quantBody');
+  if(!card||!box||!ysym) return;
+  card.classList.remove('hidden');
+  box.innerHTML='<div class="hint">Quant metrikler hesaplanıyor…</div>';
+  try{
+    const j=await fetch('/price?s='+encodeURIComponent(ysym)+'&range=1y').then(r=>r.ok?r.json():null);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+    const closes=((((j||{}).chart||{}).result||[])[0]||{}).indicators;
+    const quote=(closes&&closes.quote&&closes.quote[0])||{};
+    const arr=(quote.close||[]).filter(x=>x!=null && Number.isFinite(x));
+    if(arr.length<30){ box.innerHTML='<div class="hint">Quant için yeterli fiyat geçmişi yok.</div>'; return; }
+    const rets=[];
+    for(let i=1;i<arr.length;i++){
+      if(arr[i-1]>0) rets.push(arr[i]/arr[i-1]-1);
+    }
+    if(rets.length<20){ box.innerHTML='<div class="hint">Getiri serisi yetersiz.</div>'; return; }
+    const mean=rets.reduce((a,b)=>a+b,0)/rets.length;
+    const variance=rets.reduce((a,r)=>a+(r-mean)*(r-mean),0)/(rets.length-1);
+    const dailyVol=Math.sqrt(variance);
+    const annVol=dailyVol*Math.sqrt(252)*100;
+    const totalRet=(arr[arr.length-1]/arr[0]-1)*100;
+    const annRet=(Math.pow(arr[arr.length-1]/arr[0], 252/rets.length)-1)*100;
+    const sharpe=annVol>0?(annRet/annVol):null; // rf≈0 basit Sharpe
+    let peak=arr[0], maxDd=0;
+    for(const p of arr){
+      if(p>peak) peak=p;
+      const dd=(peak-p)/peak;
+      if(dd>maxDd) maxDd=dd;
+    }
+    const maxDdPct=maxDd*100;
+    const calmar=(maxDdPct>0)?(annRet/maxDdPct):null;
+    const downside=rets.filter(r=>r<0);
+    const downVar=downside.length?downside.reduce((a,r)=>a+r*r,0)/downside.length:0;
+    const sortino=downVar>0?(annRet/(Math.sqrt(downVar)*Math.sqrt(252)*100)):null;
+    const kpi=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
+      <div class="val" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
+      ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
+    const n=(v,d)=>v==null?'—':Number(v).toFixed(d==null?2:d);
+    const clsRet=v=>v==null?'neutral':v>=0?'up':'down';
+    let html='<div class="grid" style="margin-bottom:12px">';
+    html+=kpi('Yıllık Getiri', n(annRet,1)+'%', '1Y fiyat serisi', clsRet(annRet));
+    html+=kpi('Yıllık Volatilite', n(annVol,1)+'%', 'std × √252', annVol>40?'down':annVol>25?'warn':'up');
+    html+=kpi('Sharpe (rf≈0)', n(sharpe,2), sharpe==null?'':(sharpe>=1?'iyi risk-getiri':sharpe>=0.5?'orta':'zayıf'), sharpe!=null&&sharpe>=1?'up':sharpe!=null&&sharpe<0.3?'down':'neutral');
+    html+=kpi('Sortino', n(sortino,2), 'yalnız aşağı yön riski', sortino!=null&&sortino>=1?'up':'neutral');
+    html+=kpi('Max Drawdown', n(maxDdPct,1)+'%', 'zirveden en büyük düşüş', maxDdPct>30?'down':maxDdPct>15?'warn':'up');
+    html+=kpi('Calmar', n(calmar,2), 'getiri / |max DD|', calmar!=null&&calmar>=1?'up':'neutral');
+    html+=kpi('Dönem Getirisi', n(totalRet,1)+'%', arr.length+' işlem günü', clsRet(totalRet));
+    html+='</div>';
+    html+='<div class="hint">Kaynak: Yahoo günlük kapanış (/price). Sharpe/Sortino risksiz faiz ≈ 0 varsayar; karşılaştırma amaçlıdır, tavsiye değildir.</div>';
+    box.innerHTML=html;
+  }catch(e){ box.innerHTML='<div class="hint">Quant hesaplanamadı: '+safeHTML(e.message)+'</div>'; }
 }
 
 /* ---- Fiyat Grafiği (etkileşimli SVG, bağımsız) ---- */
@@ -4366,6 +4650,500 @@ function initMarketTape(){
   MARKET_TAPE_TIMER=setInterval(loadMarketTape, 60000);
 }
 
+/* ---------- Discovery: arama sonrası ilgili ülkenin TV listesi (başta gizli) ---------- */
+let DISC_SCR='gainers', DISC_CC=null, DISC_GEN=0, DISC_REVEALED=false, DISC_FOCUS_CODE=null;
+function revealDiscoveryForCountry(cc, focusCode){
+  DISC_CC=cc;
+  DISC_REVEALED=true;
+  DISC_FOCUS_CODE=focusCode||null;
+  const card=document.getElementById('discCard');
+  if(card) card.classList.remove('hidden');
+  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  const title=document.getElementById('discTitle');
+  const sub=document.getElementById('discSub');
+  if(title) title.textContent='Bugünün Fırsatları — '+cName;
+  if(sub) sub.textContent=cName+' borsasında günün yükselen, düşen ve en aktif hisseleri. Satıra tıkla → analiz. Kaynak: TradingView.';
+  const bar=document.getElementById('discOpenBar');
+  if(bar && focusCode){
+    bar.style.display='flex';
+    bar.innerHTML=`<button type="button" class="primary" onclick="searchExact('${safeHTML(focusCode)}')">📈 ${safeHTML(focusCode)} bilançosunu aç →</button>
+      <span class="hint">Ülke: <b>${safeHTML(cName)}</b></span>`;
+  }else if(bar){ bar.style.display='none'; bar.innerHTML=''; }
+  // Sekmeleri sıfırla: yükselenler aktif
+  DISC_SCR='gainers';
+  document.querySelectorAll('#discCard .scan-chip[data-disc]').forEach(b=>b.classList.toggle('active', b.dataset.disc==='gainers'));
+  loadDiscovery();
+}
+function selectDiscTab(btn){
+  const scr=btn.dataset.disc;
+  if(!scr || !DISC_REVEALED) return;
+  DISC_SCR=scr;
+  document.querySelectorAll('#discCard .scan-chip[data-disc]').forEach(b=>b.classList.toggle('active', b===btn));
+  loadDiscovery();
+}
+async function loadDiscovery(){
+  const box=document.getElementById('discBody');
+  const card=document.getElementById('discCard');
+  if(!box || !DISC_REVEALED || !DISC_CC) return;
+  if(card) card.classList.remove('hidden');
+  if(location.protocol==='file:'){ box.innerHTML='<div class="hint">Yerel köprü gerekli.</div>'; return; }
+  const m=TOP100_MARKETS[DISC_CC];
+  if(!m){ box.innerHTML='<div class="hint">Ülke verisi yok.</div>'; return; }
+  const myGen=++DISC_GEN;
+  box.innerHTML='<div class="hint">Yükleniyor…</div>';
+  try{
+    const sortBy=DISC_SCR==='actives'?'volume':'change';
+    const sortOrder=DISC_SCR==='losers'?'asc':'desc';
+    // Penny/OTC ele: min fiyat + min piyasa değeri; ABD'de yalnız ana borsalar
+    const filter=[
+      {left:'type',operation:'equal',right:'stock'},
+      {left:'is_primary',operation:'equal',right:true},
+      {left:'close',operation:'egreater',right:1},
+      {left:'market_cap_basic',operation:'egreater',right:500e6},
+    ];
+    if(DISC_CC==='US'){
+      filter.push({left:'exchange',operation:'in_range',right:['NASDAQ','NYSE','AMEX','NYSE ARCA']});
+    }else if(m.ex){
+      filter.push({left:'exchange',operation:'equal',right:m.ex});
+    }
+    const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
+      columns:['name','description','close','change','volume','market_cap_basic','exchange'],
+      filter,
+      sort:{sortBy,sortOrder},
+      range:[0,40]
+    })});
+    if(myGen!==DISC_GEN) return;
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    // Aşırı % değişim / sıfır fiyat / OTC artıklarını istemcide de ele
+    const data=(j.data||[]).map(x=>x.d).filter(d=>{
+      if(!d||!d[0]) return false;
+      const close=d[2], chg=d[3], mcap=d[5], ex=String(d[6]||'');
+      if(close==null || close<1) return false;
+      if(mcap!=null && mcap<500e6) return false;
+      if(chg!=null && Math.abs(chg)>80) return false; // anormal günlük sıçrama
+      if(DISC_CC==='US' && /OTC/i.test(ex)) return false;
+      return true;
+    }).slice(0,20);
+    if(!data.length){ box.innerHTML='<div class="hint">Liste boş (piyasa kapalı olabilir).</div>'; return; }
+    const chg=v=>{
+      if(v==null) return '—';
+      const cls=v>0?'up':(v<0?'down':'neutral');
+      return `<span class="${cls}"><b>${(v>0?'+':'')+Number(v).toFixed(2)}%</b></span>`;
+    };
+    const px=v=>{
+      if(v==null) return '—';
+      const dig=v<10?2:(v<100?2:2);
+      return m.sym+Number(v).toLocaleString('tr-TR',{minimumFractionDigits:dig,maximumFractionDigits:dig});
+    };
+    const rows=data.map((d,i)=>{
+      const code=m.click(String(d[0]).replace(/_/g,'-'));
+      return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="Analizi aç">
+        <td style="color:var(--muted)">${i+1}</td>
+        <td><b>${safeHTML(String(d[0]).replace(/_/g,'-'))}</b></td>
+        <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+        <td>${px(d[2])}</td>
+        <td>${chg(d[3])}</td>
+        <td style="color:var(--muted);font-size:12px">${d[4]==null?'—':Number(d[4]).toLocaleString('tr-TR')}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+      <th>#</th><th>Kod</th><th>Şirket</th><th>Fiyat</th><th>Değişim</th><th>Hacim</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+  }catch(e){
+    if(myGen===DISC_GEN) box.innerHTML='<div class="hint">Liste alınamadı: '+safeHTML(e.message)+'</div>';
+  }
+}
+
+/* ---------- Hisse Takvimi: arama sonrası ilgili ülke (Bugünün Fırsatları ile aynı kural) ---------- */
+let EQCAL_TYPE='earnings', EQCAL_CC=null, EQCAL_REVEALED=false, EQCAL_GEN=0;
+const fmtCalDay=raw=>fmtDate(raw);
+function revealEqCalendarForCountry(cc){
+  EQCAL_CC=cc;
+  EQCAL_REVEALED=true;
+  const card=document.getElementById('eqCalCard');
+  if(card) card.classList.remove('hidden');
+  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  const title=document.getElementById('eqCalTitle');
+  const sub=document.getElementById('eqCalSub');
+  if(title) title.textContent='Hisse Takvimi — '+cName;
+  if(sub) sub.textContent=cName+' borsası ajandası. Satıra tıkla → analiz. ABD: Nasdaq · TR: KAP (IPO/bedelsiz) · diğer: TradingView.';
+  // ABD dışı: gün seçici yalnızca Nasdaq gün-bazlı; TV yaklaşan kazançlar için gizle
+  const dayWrap=document.getElementById('eqCalDayWrap');
+  if(dayWrap) dayWrap.style.display = (cc==='US') ? 'flex' : 'none';
+  EQCAL_TYPE='earnings';
+  document.querySelectorAll('#eqCalCard .scan-chip[data-eqcal]').forEach(b=>b.classList.toggle('active', b.dataset.eqcal==='earnings'));
+  loadEqCalendar();
+}
+function selectEqCalTab(btn){
+  const t=btn.dataset.eqcal;
+  if(!t || !EQCAL_REVEALED) return;
+  EQCAL_TYPE=t;
+  document.querySelectorAll('#eqCalCard .scan-chip[data-eqcal]').forEach(b=>b.classList.toggle('active', b===btn));
+  loadEqCalendar();
+}
+async function loadEqCalendar(){
+  const box=document.getElementById('eqCalBody');
+  const card=document.getElementById('eqCalCard');
+  if(!box || !EQCAL_REVEALED || !EQCAL_CC) return;
+  if(card) card.classList.remove('hidden');
+  if(location.protocol==='file:'){ box.innerHTML='<div class="hint">Yerel köprü gerekli.</div>'; return; }
+  const myGen=++EQCAL_GEN;
+  box.innerHTML='<div class="hint">Takvim yükleniyor…</div>';
+
+  // ABD: Nasdaq gün bazlı (bilanço/temettü/IPO/bölünme)
+  if(EQCAL_CC==='US'){
+    const dayEl=document.getElementById('eqCalDay');
+    if(dayEl && !dayEl.value){
+      const d=new Date();
+      dayEl.value=d.toISOString().slice(0,10);
+    }
+    const day=dayEl?dayEl.value:(new Date().toISOString().slice(0,10));
+    try{
+      const j=await fetch('/ycal?type='+encodeURIComponent(EQCAL_TYPE)+'&day='+encodeURIComponent(day)).then(r=>r.json());
+      if(myGen!==EQCAL_GEN) return;
+      const rows=j.rows||[];
+      if(!rows.length){ box.innerHTML='<div class="hint">Bu gün için kayıt yok. Başka bir gün seçmeyi dene.</div>'; return; }
+      const extra=EQCAL_TYPE==='earnings'?'<th>EPS Tahmin</th><th>EPS Gerçek</th>':(EQCAL_TYPE==='dividends'?'<th>Tutar</th>':'');
+      const tr=rows.map((r,i)=>{
+        const code=String(r.symbol||'').replace(/^\^/,'').trim();
+        const openCode=code && !/\./.test(code) ? code+'.US' : code;
+        const click=openCode?`style="cursor:pointer" onclick="searchExact('${safeHTML(openCode)}')"`:'';
+        let mid='';
+        if(EQCAL_TYPE==='earnings'){
+          mid=`<td>${r.epsEst==null?'—':Number(r.epsEst).toFixed(2)}</td><td>${r.epsAct==null?'—':Number(r.epsAct).toFixed(2)}</td>`;
+        }else if(EQCAL_TYPE==='dividends'){
+          mid=`<td>${r.amount==null?'—':Number(r.amount).toFixed(4)}</td>`;
+        }
+        return `<tr ${click}>
+          <td style="color:var(--muted)">${i+1}</td>
+          <td><b>${safeHTML(code||'—')}</b></td>
+          <td><span class="ratio-formula">${safeHTML(r.name||'')}</span></td>
+          <td style="white-space:nowrap;font-size:12px">${fmtCalDay(r.date||day)}</td>
+          ${mid}
+        </tr>`;
+      }).join('');
+      box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+        <th>#</th><th>Kod</th><th>Şirket</th><th>Tarih</th>${extra}
+      </tr></thead><tbody>${tr}</tbody></table></div>
+      <div class="hint" style="margin-top:8px">ABD · Nasdaq Calendar · ${fmtCalDay(day)}</div>`;
+    }catch(e){
+      if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">Takvim alınamadı: '+safeHTML(e.message)+'</div>';
+    }
+    return;
+  }
+
+  // Türkiye: IPO + bedelsiz/bölünme → KAP bildirimleri
+  if(EQCAL_CC==='TR' && (EQCAL_TYPE==='ipo' || EQCAL_TYPE==='splits')){
+    try{
+      const j=await fetch('/trcal?type='+encodeURIComponent(EQCAL_TYPE)).then(r=>r.json());
+      if(myGen!==EQCAL_GEN) return;
+      const rows=j.rows||[];
+      if(!rows.length){
+        box.innerHTML='<div class="hint">Son dönemde KAP’ta '+(EQCAL_TYPE==='ipo'?'halka arz':'bedelsiz / bölünme')+' bildirimi bulunamadı.</div>';
+        return;
+      }
+      const tr=rows.map((r,i)=>{
+        const code=r.symbol? (String(r.symbol).toUpperCase()+'.IS') : '';
+        const click=code?`style="cursor:pointer" onclick="searchExact('${safeHTML(code)}')"`:(r.kapUrl?`style="cursor:pointer" onclick="window.open('${safeHTML(r.kapUrl)}','_blank')"`:'');
+        return `<tr ${click}>
+          <td style="color:var(--muted)">${i+1}</td>
+          <td><b>${safeHTML(r.symbol||'—')}</b></td>
+          <td><span class="ratio-formula">${safeHTML(r.name||'')}</span>${r.summary?`<br><span class="hint">${safeHTML(r.summary)}</span>`:''}</td>
+          <td style="white-space:nowrap;font-size:12px">${fmtDate(r.date||'')||'—'}</td>
+          <td style="font-size:12px;color:var(--muted)">${safeHTML(r.time||'—')}</td>
+          <td>${r.kapUrl?`<a href="${safeHTML(r.kapUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">KAP →</a>`:'—'}</td>
+        </tr>`;
+      }).join('');
+      box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+        <th>#</th><th>Kod</th><th>Şirket / Özet</th><th>Tarih</th><th>Konu</th><th></th>
+      </tr></thead><tbody>${tr}</tbody></table></div>
+      <div class="hint" style="margin-top:8px">Türkiye · KAP · ${EQCAL_TYPE==='ipo'?'halka arz bildirimleri':'bedelsiz sermaye artırımı / bölünme'}</div>`;
+    }catch(e){
+      if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">KAP takvimi alınamadı: '+safeHTML(e.message)+'</div>';
+    }
+    return;
+  }
+
+  // Diğer ülkeler: IPO/splits yalnızca ABD (+ TR yukarıda); TV kazanç/temettü
+  if(EQCAL_TYPE==='ipo' || EQCAL_TYPE==='splits'){
+    box.innerHTML='<div class="hint">IPO ve bölünme takvimi şu an <b>ABD</b> (Nasdaq) ve <b>Türkiye</b> (KAP) için. Bu ülke için <b>Bilanço</b> sekmesine bak.</div>';
+    return;
+  }
+  const m=TOP100_MARKETS[EQCAL_CC];
+  if(!m){ box.innerHTML='<div class="hint">Ülke verisi yok.</div>'; return; }
+  try{
+    const dateCol=EQCAL_TYPE==='dividends'?'ex_dividend_date_upcoming':'earnings_release_next_date';
+    const filter=[
+      {left:'type',operation:'equal',right:'stock'},
+      {left:'is_primary',operation:'equal',right:true},
+      {left:dateCol,operation:'nequal',right:0},
+      {left:'market_cap_basic',operation:'egreater',right:200e6},
+    ];
+    if(m.ex) filter.push({left:'exchange',operation:'equal',right:m.ex});
+    const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
+      columns:['name','description',dateCol,'market_cap_basic','close'],
+      filter,
+      sort:{sortBy:dateCol,sortOrder:'asc'},
+      range:[0,40]
+    })});
+    if(myGen!==EQCAL_GEN) return;
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    const now=Math.floor(Date.now()/1000)-86400; // dünden itibaren
+    const data=(j.data||[]).map(x=>x.d).filter(d=>{
+      if(!d||!d[0]||d[2]==null) return false;
+      const ts=Number(d[2]);
+      return Number.isFinite(ts) && ts>=now;
+    }).slice(0,25);
+    if(!data.length){
+      box.innerHTML='<div class="hint">Yaklaşan '+(EQCAL_TYPE==='dividends'?'temettü':'bilanço')+' kaydı bulunamadı.</div>';
+      return;
+    }
+    const cName=(ECON_COUNTRIES.find(x=>x[0]===EQCAL_CC)||[EQCAL_CC,EQCAL_CC])[1];
+    const tr=data.map((d,i)=>{
+      const code=m.click(String(d[0]).replace(/_/g,'-'));
+      const ts=Number(d[2]);
+      const ds=fmtDate(new Date(ts*1000).toISOString().slice(0,10));
+      return `<tr style="cursor:pointer" onclick="searchExact('${code}')">
+        <td style="color:var(--muted)">${i+1}</td>
+        <td><b>${safeHTML(String(d[0]).replace(/_/g,'-'))}</b></td>
+        <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+        <td style="white-space:nowrap;font-size:12px">${ds}</td>
+        <td>${d[4]==null?'—':m.sym+Number(d[4]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
+      </tr>`;
+    }).join('');
+    box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
+      <th>#</th><th>Kod</th><th>Şirket</th><th>Tarih</th><th>Fiyat</th>
+    </tr></thead><tbody>${tr}</tbody></table></div>
+    <div class="hint" style="margin-top:8px">${safeHTML(cName)} · TradingView · yaklaşan ${EQCAL_TYPE==='dividends'?'temettü (ex-date)':'bilanço'}</div>`;
+  }catch(e){
+    if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">Takvim alınamadı: '+safeHTML(e.message)+'</div>';
+  }
+}
+
+/* ---------- ETF (ABD Yahoo) · TR hisse fonları (TEFAS/KAP + holdings) ---------- */
+const ETF_PRESETS_US=['SPY','QQQ','IWM','DIA','EEM','VEA','VWO','GLD','TLT','XLK','XLF','XLE','VNQ','ARKK','SMH'];
+let ETF_MKT='US', ETF_PAGE_INIT=false, TEFAS_TOP=[];
+function fmtAumTr(n){
+  if(n==null||!isFinite(n)) return '—';
+  if(n>=1e12) return (n/1e12).toLocaleString('tr-TR',{maximumFractionDigits:2})+' Tr ₺';
+  if(n>=1e9) return (n/1e9).toLocaleString('tr-TR',{maximumFractionDigits:1})+' Mr ₺';
+  if(n>=1e6) return (n/1e6).toLocaleString('tr-TR',{maximumFractionDigits:0})+' Mn ₺';
+  return n.toLocaleString('tr-TR');
+}
+function setEtfMarket(m){
+  ETF_MKT=(m==='TR')?'TR':'US';
+  document.getElementById('etfMktUS')?.classList.toggle('active', ETF_MKT==='US');
+  document.getElementById('etfMktTR')?.classList.toggle('active', ETF_MKT==='TR');
+  const filters=document.getElementById('etfTefasFilters');
+  if(filters) filters.style.display='none';
+  if(ETF_MKT==='TR') loadTefasTop();
+  else{ renderEtfChips(); loadEtf('SPY'); }
+}
+function renderEtfChips(){
+  const chips=document.getElementById('etfChips');
+  if(!chips) return;
+  const inp=document.getElementById('etfTicker');
+  if(ETF_MKT==='TR'){
+    const list=TEFAS_TOP.slice(0,16).map(f=>f.code);
+    chips.innerHTML=list.map(s=>
+      `<button type="button" class="scan-chip" data-etf="${s}" onclick="loadTefasFund('${s}')">${s}</button>`).join('');
+    if(inp) inp.placeholder='örn. PHE';
+  }else{
+    chips.innerHTML=ETF_PRESETS_US.map(s=>
+      `<button type="button" class="scan-chip" data-etf="${s}" onclick="loadEtf('${s}')">${s}</button>`).join('');
+    if(inp) inp.placeholder='örn. SPY';
+  }
+}
+function initEtfPage(){
+  if(ETF_PAGE_INIT) return;
+  ETF_PAGE_INIT=true;
+  renderEtfChips();
+  loadEtf('SPY');
+}
+function normalizeEtfSymbol(code){
+  let sym=String(code||'').trim().toUpperCase().replace(/\.F$/,'');
+  if(!sym) return '';
+  if(/\.IS$/.test(sym)) return sym;
+  return sym.replace(/\.US$/,'');
+}
+function renderTefasTable(highlight){
+  const box=document.getElementById('etfBody');
+  if(!box||ETF_MKT!=='TR') return;
+  if(!TEFAS_TOP.length){
+    box.innerHTML='<div class="hint">Hisse fonu listesi boş.</div>';
+    return;
+  }
+  const rows=TEFAS_TOP.map((f,i)=>{
+    const act=highlight&&highlight===f.code?'background:rgba(79,156,249,.08)':'';
+    return `<tr style="cursor:pointer;${act}" onclick="loadTefasFund('${safeHTML(f.code)}')">
+      <td style="color:var(--muted)">${i+1}</td>
+      <td><b>${safeHTML(f.code)}</b></td>
+      <td style="text-align:left">${safeHTML(f.name)}</td>
+      <td><b>${fmtAumTr(f.aum)}</b></td>
+      <td>${(f.investors||0).toLocaleString('tr-TR')}</td>
+      <td>${f.price==null?'—':Number(f.price).toLocaleString('tr-TR',{maximumFractionDigits:6})}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">Türkiye hisse senedi fonları</div>
+    <div class="hint" style="margin-bottom:10px">Yalnızca sektör + varlık listesi olan fonlar · büyüklüğe göre. Satıra tıkla → detay.</div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>#</th><th>Kod</th><th style="text-align:left">Fon</th><th>Büyüklük</th><th>Yatırımcı</th><th>Fiyat</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+async function loadTefasTop(){
+  const box=document.getElementById('etfBody');
+  const meta=document.getElementById('etfMeta');
+  const filters=document.getElementById('etfTefasFilters');
+  if(filters) filters.style.display='none';
+  if(box) box.innerHTML='<div class="hint">Hisse fonları yükleniyor…</div>';
+  if(meta) meta.textContent='';
+  try{
+    const j=await fetch('/tefas?view=top&limit=40').then(r=>r.ok?r.json():null);
+    if(!j||!j.ok||!(j.funds||[]).length){
+      if(box) box.innerHTML='<div class="hint">Hisse fonları alınamadı'+(j&&j.error?(': '+safeHTML(j.error)):'')+'.</div>';
+      return;
+    }
+    TEFAS_TOP=j.funds;
+    renderEtfChips();
+    if(meta){
+      const d=j.date||'';
+      const dd=d.length===8?(d.slice(6,8)+'.'+d.slice(4,6)+'.'+d.slice(0,4)):d;
+      meta.innerHTML=`<b>Hisse fonları</b> · sektör/varlık verisi olan <b>${TEFAS_TOP.length}</b> fon · ${safeHTML(dd)}`;
+    }
+    renderTefasTable();
+  }catch(e){
+    if(box) box.innerHTML='<div class="hint">TEFAS alınamadı: '+safeHTML(e.message)+'</div>';
+  }
+}
+async function loadTefasFund(code){
+  const box=document.getElementById('etfBody');
+  const meta=document.getElementById('etfMeta');
+  const input=document.getElementById('etfTicker');
+  const c=String(code||'').trim().toUpperCase();
+  if(!c||!box) return;
+  if(input) input.value=c;
+  document.querySelectorAll('#etfChips .scan-chip').forEach(b=>b.classList.toggle('active', b.dataset.etf===c));
+  box.innerHTML='<div class="hint">Fon detayı yükleniyor…</div>';
+  try{
+    const j=await fetch('/tefas?view=fund&code='+encodeURIComponent(c)).then(r=>r.ok?r.json():null);
+    if(!j||!j.ok||!j.fund){
+      // Verisi olmayan fonları listeden sessizce çıkar
+      TEFAS_TOP=TEFAS_TOP.filter(f=>f.code!==c);
+      renderEtfChips();
+      if(TEFAS_TOP.length){
+        renderTefasTable();
+        if(meta) meta.innerHTML=`<b>Hisse fonları</b> · sektör/varlık verisi olan <b>${TEFAS_TOP.length}</b> fon`;
+      }else{
+        box.innerHTML='<div class="hint">Gösterilecek fon kalmadı.</div>';
+      }
+      return;
+    }
+    const f=j.fund;
+    const d=j.date||'';
+    const dd=d.length===8?(d.slice(6,8)+'.'+d.slice(4,6)+'.'+d.slice(0,4)):d;
+    if(meta){
+      meta.innerHTML=`<b>${safeHTML(f.name)}</b> · <b>${safeHTML(f.code)}</b> · ${fmtAumTr(f.aum)} · ${(f.investors||0).toLocaleString('tr-TR')} yatırımcı · ${safeHTML(dd)}
+        · <a href="https://www.tefas.gov.tr/tr/fon-karsilastirma?fon=${encodeURIComponent(f.code)}" target="_blank" rel="noopener">TEFAS</a>`;
+    }
+    let html=`<div style="margin-bottom:12px"><button type="button" class="scan-chip" onclick="renderTefasTable('${safeHTML(f.code)}')">← Listeye dön</button></div>`;
+    const sectors=f.sectors||[];
+    const holdings=f.holdings||[];
+    if(sectors.length){
+      const srows=sectors.map(s=>`<tr><td style="text-align:left">${safeHTML(s.sector||'—')}</td><td><b>%${Number(s.weight).toFixed(1)}</b></td></tr>`).join('');
+      html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Sektör Ağırlıkları</div>
+        <div class="hint" style="margin-bottom:8px">Portföy hisselerinin TradingView sektörlerine göre ağırlıklı dağılımı.</div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Sektör</th><th>Ağırlık</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
+    }
+    if(holdings.length){
+      const hrows=holdings.map((h,i)=>{
+        const pct=h.holdingPercent!=null?Number(h.holdingPercent):null;
+        const hcode=h.symbol? (String(h.symbol)+'.IS') : '';
+        const click=hcode?`style="cursor:pointer" onclick="searchExact('${safeHTML(hcode)}')"`:'';
+        return `<tr ${click}><td style="color:var(--muted)">${i+1}</td>
+          <td><b>${safeHTML(h.symbol||'—')}</b></td>
+          <td style="text-align:left">${safeHTML(h.name||'')}</td>
+          <td>${pct==null?'—':'%'+pct.toFixed(2)}</td></tr>`;
+      }).join('');
+      html+=`<div style="font-weight:700;margin-bottom:8px">En Büyük Varlıklar</div>
+        <div class="hint" style="margin-bottom:8px">KAP portföy dağılım raporundan. Satıra tıkla → hisse analizi.</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Kod</th><th style="text-align:left">Varlık</th><th>Ağırlık</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
+    }
+    if(!sectors.length && !holdings.length){
+      html+='<div class="hint">Bu fon için sektör / varlık listesi henüz yok. Üstte fiyat ve büyüklük TEFAS’tan.</div>';
+    }
+    box.innerHTML=html;
+  }catch(e){ box.innerHTML='<div class="hint">Fon alınamadı: '+safeHTML(e.message)+'</div>'; }
+}
+async function loadEtf(code){
+  if(ETF_MKT==='TR'){
+    const c=String(code||'').trim().toUpperCase();
+    if(!c) return loadTefasTop();
+    return loadTefasFund(c);
+  }
+  const box=document.getElementById('etfBody');
+  const meta=document.getElementById('etfMeta');
+  const input=document.getElementById('etfTicker');
+  const filters=document.getElementById('etfTefasFilters');
+  if(filters) filters.style.display='none';
+  if(!box) return;
+  const ysym=normalizeEtfSymbol(code);
+  if(!ysym) return;
+  if(input) input.value=ysym;
+  document.querySelectorAll('#etfChips .scan-chip').forEach(b=>b.classList.toggle('active', b.dataset.etf===ysym));
+  box.innerHTML='<div class="hint">ETF verisi yükleniyor…</div>';
+  if(meta) meta.textContent='';
+  try{
+    const j=await fetch('/yqs?s='+encodeURIComponent(ysym)+'&m=topHoldings,fundProfile,summaryDetail,quoteType,price').then(r=>r.ok?r.json():null);
+    if(!j || (j.error && !j.quoteType && !j.summaryDetail && !j.price)){
+      box.innerHTML='<div class="hint">Fon bulunamadı. ABD için <b>SPY</b> dene.</div>';
+      return;
+    }
+    const th=j.topHoldings||{};
+    const holdings=(th.holdings||[]).slice(0,20);
+    const sectors=th.sectorWeightings||[];
+    const fp=j.fundProfile||{};
+    const name=(j.quoteType&&(j.quoteType.longName||j.quoteType.shortName))||ysym;
+    const px=(j.price&&j.price.regularMarketPrice!=null)?j.price.regularMarketPrice
+      :(j.summaryDetail&&j.summaryDetail.regularMarketPreviousClose!=null)?j.summaryDetail.regularMarketPreviousClose:null;
+    const chg=j.price&&j.price.regularMarketChangePercent!=null?j.price.regularMarketChangePercent*100:null;
+    if(meta){
+      const cat=(fp.categoryName||fp.category||'');
+      const fam=(fp.family||'');
+      const chgTxt=chg==null?'':(` · <span class="${chg>0?'up':chg<0?'down':'neutral'}">${(chg>0?'+':'')+chg.toFixed(2)}%</span>`);
+      const pxTxt=px==null?'':('$'+Number(px).toLocaleString('en-US',{maximumFractionDigits:2}));
+      meta.innerHTML=`<b>${safeHTML(name)}</b> · <b>${safeHTML(ysym)}</b>${pxTxt?' · '+pxTxt:''}${chgTxt} · ABD${fam?' · '+safeHTML(fam):''}${cat?' · '+safeHTML(cat):''}`;
+    }
+    let html='';
+    if(sectors.length){
+      const srows=sectors.map(s=>{
+        const k=Object.keys(s||{})[0];
+        const v=k!=null?s[k]:null;
+        const pct=v==null?null:(v<=1?v*100:v);
+        return `<tr><td>${safeHTML(k||'—')}</td><td><b>${pct==null?'—':'%'+Number(pct).toFixed(1)}</b></td></tr>`;
+      }).join('');
+      html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Sektör Ağırlıkları</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Sektör</th><th>Ağırlık</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
+    }
+    if(holdings.length){
+      const hrows=holdings.map((h,i)=>{
+        const pct=h.holdingPercent!=null?(h.holdingPercent<=1?h.holdingPercent*100:h.holdingPercent):null;
+        const hcode=h.symbol||'';
+        const click=hcode?`style="cursor:pointer" onclick="searchExact('${safeHTML(hcode)}')"`:'';
+        return `<tr ${click}><td style="color:var(--muted)">${i+1}</td>
+          <td><b>${safeHTML(h.symbol||'—')}</b></td>
+          <td>${safeHTML(h.holdingName||'')}</td>
+          <td>${pct==null?'—':'%'+Number(pct).toFixed(2)}</td></tr>`;
+      }).join('');
+      html+=`<div style="font-weight:700;margin-bottom:8px">En Büyük Varlıklar</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Kod</th><th>Varlık</th><th>Ağırlık</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
+    }
+    if(!html) html='<div class="hint">Bu ETF için holdings verisi yok.</div>';
+    box.innerHTML=html;
+  }catch(e){ box.innerHTML='<div class="hint">ETF alınamadı: '+safeHTML(e.message)+'</div>'; }
+}
+
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
   loadSample();
@@ -4376,4 +5154,5 @@ window.addEventListener('DOMContentLoaded',()=>{
   body.addEventListener('change', colorInputRows);
   registerPwa();
   initMarketTape();
+  // Bugünün Fırsatları + Hisse Takvimi: arama yapılana kadar gizli
 });

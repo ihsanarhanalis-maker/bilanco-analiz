@@ -447,6 +447,7 @@
     <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
     <button class="tab-btn" id="tabbtn-scan" onclick="switchPage('scan')">🔎 Hisse Tarayıcı</button>
     <button class="tab-btn" id="tabbtn-sect" onclick="switchPage('sect')">🏭 Sektör Devleri</button>
+    <button class="tab-btn" id="tabbtn-etf" onclick="switchPage('etf')">📦 ETF</button>
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')">🌎 Dünya Haberleri</button>
   </div>
 </nav>
@@ -470,7 +471,8 @@
       </select>
       <button class="primary" onclick="homeSearch()">Ara →</button>
     </div>
-    <div class="hero-hint">Örnek: <b>NVDA</b> · <b>THYAO</b> · <b>NESN</b> (Nestlé) · <b>VOLV-B</b> (Volvo) · <b>005930</b> (Samsung) — aynı kod birden çok borsada varsa seçenekler listelenir.</div>
+    <div class="hero-hint">Örnek: <b>NVDA</b> · <b>THYAO</b> · <b>NESN</b> · <b>005930</b> — kodu yazıp Ara’ya bas; o ülkenin <b>Bugünün Fırsatları</b> listesi açılır.</div>
+    <div id="homeSearchStatus" class="hint" style="margin-top:10px"></div>
   </div>
 
   <!-- İZLEME LİSTESİ -->
@@ -478,6 +480,35 @@
     <h2>İzleme Listem</h2>
     <div class="sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
     <div id="watchBody"><div class="hint">—</div></div>
+  </div>
+
+  <!-- Discovery: arama yapılana kadar gizli; aranan hissenin ülkesine göre dolar -->
+  <div class="card no-print hidden" id="discCard">
+    <h2 id="discTitle">Bugünün Fırsatları</h2>
+    <div class="sub" id="discSub">Aradığın hissenin borsasına göre günün yükselen / düşen / en aktif listesi. Satıra tıkla → bilanço analizi.</div>
+    <div id="discOpenBar" class="toolbar" style="margin-bottom:12px;gap:8px;flex-wrap:wrap;display:none"></div>
+    <div class="toolbar" style="margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <button type="button" class="scan-chip active" data-disc="gainers" onclick="selectDiscTab(this)">Yükselenler</button>
+      <button type="button" class="scan-chip" data-disc="losers" onclick="selectDiscTab(this)">Düşenler</button>
+      <button type="button" class="scan-chip" data-disc="actives" onclick="selectDiscTab(this)">En Aktif</button>
+    </div>
+    <div id="discBody"><div class="hint">—</div></div>
+  </div>
+
+  <!-- Hisse Takvimi: arama yapılana kadar gizli (Bugünün Fırsatları ile aynı kural) -->
+  <div class="card no-print hidden" id="eqCalCard">
+    <h2 id="eqCalTitle">Hisse Takvimi</h2>
+    <div class="sub" id="eqCalSub">Aradığın hissenin borsasına göre ajanda. Satıra tıkla → analiz.</div>
+    <div class="toolbar" style="margin-bottom:12px;gap:8px;flex-wrap:wrap;align-items:center">
+      <button type="button" class="scan-chip active" data-eqcal="earnings" onclick="selectEqCalTab(this)">Bilanço</button>
+      <button type="button" class="scan-chip" data-eqcal="dividends" onclick="selectEqCalTab(this)">Temettü</button>
+      <button type="button" class="scan-chip" data-eqcal="ipo" onclick="selectEqCalTab(this)">IPO</button>
+      <button type="button" class="scan-chip" data-eqcal="splits" onclick="selectEqCalTab(this)">Bölünme</button>
+      <label id="eqCalDayWrap" style="flex-direction:row;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:var(--muted)">Gün
+        <input type="date" id="eqCalDay" onchange="loadEqCalendar()" style="background:var(--surface);border:1px solid var(--line-2);color:var(--ink);border-radius:8px;padding:6px 8px">
+      </label>
+    </div>
+    <div id="eqCalBody"><div class="hint">—</div></div>
   </div>
 
 </div>
@@ -498,6 +529,10 @@
       <button class="primary" onclick="fetchTicker()">Ara →</button>
       <button id="watchStar" class="hidden" onclick="toggleWatch()" title="İzleme listesine ekle/çıkar">☆ Listeme Ekle</button>
       <span id="fetchStatus" class="hint"></span>
+    </div>
+    <div id="marketOrigin" class="hidden" style="margin-top:12px;display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:11px;background:var(--surface-2);border:1px solid var(--line)">
+      <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Piyasa</span>
+      <span id="marketOriginText" style="font-size:14px;font-weight:700;color:var(--ink)"></span>
     </div>
   </div>
 
@@ -577,14 +612,21 @@
 
     <div class="card hidden" id="ownerCard">
       <h2>Ortaklık Yapısı</h2>
-      <div class="sub" id="ownerSub">Şirketin payları kimde — halka açıklık oranı ve büyük ortaklar, pasta dilimiyle.</div>
+      <div class="sub" id="ownerSub">Şirketin payları kimde — halka açıklık oranı ve büyük ortaklar, pasta dilimiyle. ABD’de kurumsal (13F) sahipler listelenir.</div>
       <div id="ownerBody"><div class="hint">—</div></div>
+      <div id="ownerInstBody" class="hidden" style="margin-top:14px"></div>
     </div>
 
     <div class="card hidden" id="techCard">
       <h2>Teknik Görünüm & Risk</h2>
-      <div class="sub">Momentum, trend ve risk göstergeleri (Bloomberg GP/BETA ekranlarının karşılığı): RSI, 50/200 günlük ortalamalara mesafe, 52 hafta konumu, beta, volatilite ve dönemsel getiriler. Kaynak: TradingView<span id="techShortSrc"></span>.</div>
+      <div class="sub">Momentum, trend ve risk: RSI, ADX, MACD, OBV, SMA50/200, 52 hafta, beta, volatilite. Kaynak: TradingView<span id="techShortSrc"></span>.</div>
       <div id="techBody"><div class="hint">—</div></div>
+    </div>
+
+    <div class="card hidden" id="quantCard">
+      <h2>Quant Risk &amp; Getiri</h2>
+      <div class="sub">1 yıllık günlük fiyatlardan hesaplanan volatilite, Sharpe, maksimum düşüş (max drawdown) ve Calmar. Risk-getiri profili için hızlı bakış — yatırım tavsiyesi değildir.</div>
+      <div id="quantBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card" id="incomeCard">
@@ -709,8 +751,9 @@
 
   <div class="card no-print" style="margin-bottom:16px">
     <h2>Hisse Tarayıcı — 25 Ülke Borsası</h2>
-    <div class="sub">TradingView Hisse Tarayıcısı gibi çalışır: soldan ülke seç → o borsadaki <b>tüm birincil hisse senetleri</b> canlı yüklenir.
-      Piyasa değeri dilimi ve F/K ile daralt; üstten isimle ara. <b>Satıra tıklayınca bilanço analizi açılır.</b></div>
+    <div class="sub">TradingView Hisse Tarayıcısı + quant skor: soldan ülke seç → tüm birincil hisseler yüklenir.
+      Piyasa değeri, trend, RSI, momentum, value/quality filtreleri ve <b>Quant Skor</b> ile daralt.
+      <b>Satıra tıklayınca bilanço analizi açılır.</b></div>
   </div>
 
   <div class="econ-layout">
@@ -734,6 +777,10 @@
                 <option value="div-desc">Temettü ↓</option>
                 <option value="rsi-desc">RSI ↓</option>
                 <option value="rsi-asc">RSI ↑</option>
+                <option value="quant-desc">Quant skor ↓</option>
+                <option value="perf3m-desc">3A getiri ↓</option>
+                <option value="vol-asc">Volatilite ↑</option>
+                <option value="beta-asc">Beta ↑</option>
                 <option value="earn-asc">Yaklaşan kazanç tarihi</option>
               </select>
             </label>
@@ -754,9 +801,25 @@
             <button type="button" class="scan-chip" data-ma="sma50" onclick="toggleScanMa(this)">Fiyat &gt; SMA50</button>
             <button type="button" class="scan-chip" data-ma="sma200" onclick="toggleScanMa(this)">Fiyat &gt; SMA200</button>
           </div>
+          <div class="scan-row">
+            <span class="scan-lbl">Quant</span>
+            <button type="button" class="scan-chip" data-qf="rsi_os" onclick="toggleScanQ(this)">RSI ≤ 30</button>
+            <button type="button" class="scan-chip" data-qf="rsi_ob" onclick="toggleScanQ(this)">RSI ≥ 70</button>
+            <button type="button" class="scan-chip" data-qf="mom" onclick="toggleScanQ(this)">Momentum+</button>
+            <button type="button" class="scan-chip" data-qf="value" onclick="toggleScanQ(this)">Value</button>
+            <button type="button" class="scan-chip" data-qf="quality" onclick="toggleScanQ(this)">Quality</button>
+            <button type="button" class="scan-chip" data-qf="relvol" onclick="toggleScanQ(this)">Hacim ↑</button>
+            <button type="button" class="scan-chip" data-qf="lowvol" onclick="toggleScanQ(this)">Düşük vol</button>
+          </div>
           <div class="scan-row scan-inputs">
             <label style="flex-direction:row;align-items:center;gap:8px">F/K min
               <input id="scanPeMin" type="number" step="0.1" placeholder="—" style="width:88px">
+            </label>
+            <label style="flex-direction:row;align-items:center;gap:8px">F/K max
+              <input id="scanPeMax" type="number" step="0.1" placeholder="—" style="width:88px">
+            </label>
+            <label style="flex-direction:row;align-items:center;gap:8px">Temettü min %
+              <input id="scanDivMin" type="number" step="0.1" placeholder="—" style="width:88px">
             </label>
             <button type="button" class="primary" onclick="applyScanFilters()">Filtrele</button>
           </div>
@@ -788,6 +851,28 @@
     <div class="econ-main" id="sectPanel">
       <div class="hint" id="sectEmptyHint" style="padding:26px 10px;text-align:center">Soldan bir sektör seç.</div>
     </div>
+  </div>
+
+</div>
+
+<!-- ============ SAYFA: ETF ============ -->
+<div id="page-etf" class="page">
+
+  <div class="card no-print" style="margin-bottom:16px">
+    <h2>ETF / Fon İçerik</h2>
+    <div class="sub">ABD: Yahoo ETF holdings. Türkiye: yalnızca sektör ve varlık listesi olan hisse fonları (İş Portföy vb.).</div>
+    <div class="toolbar" style="margin-bottom:10px;gap:8px;flex-wrap:wrap">
+      <button type="button" class="scan-chip active" id="etfMktUS" onclick="setEtfMarket('US')">ABD</button>
+      <button type="button" class="scan-chip" id="etfMktTR" onclick="setEtfMarket('TR')">Türkiye</button>
+    </div>
+    <div class="toolbar" id="etfTefasFilters" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;display:none"></div>
+    <div class="toolbar" id="etfChips" style="margin-bottom:12px;gap:8px;flex-wrap:wrap"></div>
+    <div class="toolbar" style="align-items:center;margin-bottom:12px">
+      <input id="etfTicker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. SPY" onkeydown="if(event.key==='Enter')loadEtf(document.getElementById('etfTicker').value)">
+      <button class="primary" type="button" onclick="loadEtf(document.getElementById('etfTicker').value)">Ara →</button>
+    </div>
+    <div id="etfMeta" class="sub" style="margin-bottom:10px"></div>
+    <div id="etfBody"><div class="hint">Soldan bir ETF/fon seç veya kod yaz.</div></div>
   </div>
 
 </div>

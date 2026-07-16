@@ -124,6 +124,76 @@ function httpsGetText(url, headers) {
     }).on('error', reject);
   });
 }
+/* Yahoo crumb + cookie (quoteSummary v10 icin gerekli).
+   Akis: fc.yahoo.com -> finance.yahoo.com (cookie) -> getcrumb.
+   ~30 dk onbellek; Invalid Crumb gelirse sifirlanir. */
+let _yahooCrumb = null, _yahooCookie = '', _yahooCrumbAt = 0;
+function mergeSetCookie(existing, setCookie) {
+  const map = {};
+  String(existing || '').split(';').forEach(p => {
+    const t = p.trim(); if (!t) return;
+    const i = t.indexOf('='); if (i < 1) return;
+    map[t.slice(0, i)] = t.slice(i + 1);
+  });
+  const list = !setCookie ? [] : (Array.isArray(setCookie) ? setCookie : [setCookie]);
+  list.forEach(c => {
+    const part = String(c).split(';')[0];
+    const i = part.indexOf('=');
+    if (i > 0) map[part.slice(0, i)] = part.slice(i + 1);
+  });
+  return Object.keys(map).map(k => k + '=' + map[k]).join('; ');
+}
+function httpsGetCookie(url, headers, cookie, redirects) {
+  const maxR = redirects == null ? 4 : redirects;
+  return new Promise((resolve, reject) => {
+    const h = Object.assign({}, headers || {});
+    if (cookie) h.Cookie = cookie;
+    https.get(url, { headers: h, maxHeaderSize: 262144 }, pr => {
+      let jar = mergeSetCookie(cookie || '', pr.headers['set-cookie']);
+      if ([301, 302, 303, 307, 308].includes(pr.statusCode) && pr.headers.location && maxR > 0) {
+        pr.resume();
+        const next = new URL(pr.headers.location, url).toString();
+        return httpsGetCookie(next, headers, jar, maxR - 1).then(resolve, reject);
+      }
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => resolve({ status: pr.statusCode || 0, body, cookie: jar }));
+    }).on('error', reject);
+  });
+}
+async function ensureYahooCrumb(force) {
+  const now = Date.now();
+  if (!force && _yahooCrumb && _yahooCookie && (now - _yahooCrumbAt) < 30 * 60 * 1000) {
+    return { crumb: _yahooCrumb, cookie: _yahooCookie };
+  }
+  const hdr = { 'User-Agent': BUA, 'Accept': 'text/html,application/json,*/*' };
+  let cookie = '';
+  try {
+    const r0 = await httpsGetCookie('https://fc.yahoo.com', hdr, cookie);
+    cookie = r0.cookie || cookie;
+  } catch (e) {}
+  try {
+    const r1 = await httpsGetCookie('https://finance.yahoo.com/', hdr, cookie);
+    cookie = r1.cookie || cookie;
+  } catch (e) {}
+  const r2 = await httpsGetCookie('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+    'User-Agent': BUA, 'Accept': 'text/plain,*/*'
+  }, cookie);
+  cookie = r2.cookie || cookie;
+  const crumb = String(r2.body || '').trim();
+  if (!crumb || crumb.length > 80 || /[<>\s]/.test(crumb) || /error/i.test(crumb)) {
+    throw new Error('crumb_fail');
+  }
+  _yahooCrumb = crumb;
+  _yahooCookie = cookie;
+  _yahooCrumbAt = now;
+  return { crumb, cookie };
+}
+function yahooUnwrap(v) {
+  if (v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, 'raw')) return v.raw;
+  return v;
+}
+
 
 /* Metni Türkçe'ye çevir — çoklu YEDEKLİ kaynak zinciri.
    Neden zincir: tek bir çeviri kaynağı Render'ın PAYLAŞILAN bulut IP'sinde ya oran
@@ -243,6 +313,348 @@ async function ifrsHandler(isin, name, country, res){
   } catch (e) {
     send({ ok: false, reason: 'exception', error: e.message });
   }
+}
+
+/* TEFAS (yeni Next.js API) — yatırım fonu büyüklük / dağılım */
+const TEFAS_INFO_URL = 'https://www.tefas.gov.tr/api/funds/fonGnlBlgSiraliGetir';
+const TEFAS_DIST_URL = 'https://www.tefas.gov.tr/api/funds/dagilimSiraliGetirT';
+const TEFAS_HDR = {
+  'Accept': '*/*',
+  'Content-Type': 'application/json',
+  'Origin': 'https://www.tefas.gov.tr',
+  'Referer': 'https://www.tefas.gov.tr/tr/fon-verileri',
+  'User-Agent': BUA
+};
+let TEFAS_CACHE = { key: '', at: 0, pack: null };
+let KAP_HS_CACHE = { at: 0, codes: null };
+let FONO_HOLD_CACHE = new Map(); // code -> {at, holdings}
+let TEFAS_TOP_HOLD_CACHE = { at: 0, date: '', funds: null, ver: 0 };
+const TEFAS_TOP_HOLD_VER = 2; // sektör+varlık zorunlu filtre
+/* İş Portföy hisse fonları — çoğu Fonoloji'de varlık listesi yayınlar */
+const IS_PORTFOY_HISSE = ['TI2', 'TTE', 'TIE', 'TAU', 'TI3', 'IHK', 'BIO', 'IDH', 'IML', 'KPH', 'IHT', 'TIL', 'NST'];
+
+function tefasYmd(d) {
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+}
+function tefasRecentDates(n) {
+  const out = [];
+  const d = new Date();
+  for (let i = 0; i < n; i++) {
+    out.push(tefasYmd(d));
+    d.setDate(d.getDate() - 1);
+  }
+  return out;
+}
+function tefasBody(kind, ymd, fundCode) {
+  return {
+    fonTipi: kind,
+    fonKodu: fundCode || null,
+    aramaMetni: null,
+    fonTurKod: null,
+    fonGrubu: null,
+    sfonTurKod: null,
+    fonTurAciklama: null,
+    kurucuKod: null,
+    basTarih: ymd,
+    bitTarih: ymd,
+    basSira: 1,
+    bitSira: 100000,
+    dil: 'TR',
+    sFonTurKod: '',
+    fonKod: '',
+    fonGrup: '',
+    fonUnvanTip: ''
+  };
+}
+function httpsPostJson(urlStr, bodyObj, headers) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const body = JSON.stringify(bodyObj);
+    const preq = https.request({
+      hostname: u.hostname,
+      path: u.pathname,
+      method: 'POST',
+      headers: Object.assign({}, headers, { 'Content-Length': Buffer.byteLength(body) })
+    }, pr => {
+      let raw = '';
+      pr.on('data', c => raw += c);
+      pr.on('end', () => {
+        try { resolve({ status: pr.statusCode || 0, json: JSON.parse(raw || '{}') }); }
+        catch (e) { reject(new Error('tefas_parse')); }
+      });
+    });
+    preq.on('error', reject);
+    preq.setTimeout(45000, () => { preq.destroy(new Error('tefas_timeout')); });
+    preq.write(body);
+    preq.end();
+  });
+}
+function tefasClassify(name, dist) {
+  const n = String(name || '').toUpperCase();
+  const hs = Number(dist && dist.hs) || 0;
+  const km = Number(dist && dist.km) || 0;
+  const yhs = Number(dist && dist.yhs) || 0;
+  if (/PARA\s*P[İI]YASASI/.test(n)) return 'para_piyasasi';
+  if (km >= 30 || (/ALTIN/.test(n) && !/SERBEST/.test(n))) return 'altin';
+  if (hs >= 50 || /H[İI]SSE\s*SENED[İI]/.test(n)) return 'hisse';
+  if (yhs >= 40 || /YABANCI\s*H[İI]SSE/.test(n)) return 'yabanci_hisse';
+  if (/D[ÖO]V[İI]Z|AVRO|USD|EUR/.test(n) && /SERBEST/.test(n)) return 'serbest_doviz';
+  if (/SERBEST/.test(n)) return 'serbest';
+  if (/BOR[ÇC]LANMA|TAHV[İI]L|K[İI]RA\s*SERT/.test(n)) return 'borclanma';
+  if (/DE[ĞG][İI][ŞS]KEN|KARMA|FON\s*SEPET/.test(n)) return 'karma';
+  return 'diger';
+}
+const TEFAS_CAT_TR = {
+  para_piyasasi: 'Para piyasası',
+  altin: 'Altın',
+  hisse: 'Hisse senedi',
+  yabanci_hisse: 'Yabancı hisse',
+  serbest_doviz: 'Serbest (döviz)',
+  serbest: 'Serbest',
+  borclanma: 'Borçlanma',
+  karma: 'Karma / değişken',
+  diger: 'Diğer'
+};
+function tefasAlloc(dist) {
+  if (!dist) return [];
+  const map = [
+    ['hs', 'Hisse senedi'], ['yhs', 'Yabancı hisse'], ['km', 'Kıymetli maden'],
+    ['dt', 'Devlet tahvili'], ['ost', 'Özel sektör tahvil'], ['eut', 'Eurobond'],
+    ['r', 'Repo'], ['tr', 'Ters repo'], ['vm', 'Mevduat'], ['tpp', 'Takasbank PP'],
+    ['bpp', 'BIST PP'], ['fkb', 'Fon katılma payı'], ['byf', 'BYF'], ['d', 'Diğer']
+  ];
+  return map.map(([k, label]) => ({ key: k, label, pct: Number(dist[k]) || 0 }))
+    .filter(x => x.pct > 0.05)
+    .sort((a, b) => b.pct - a.pct);
+}
+function tefasMapFund(f, dist) {
+  const aum = Number(f.portfoyBuyukluk) || 0;
+  const inv = Number(f.kisiSayisi) || 0;
+  const cat = tefasClassify(f.fonUnvan, dist);
+  const quality = aum * Math.log10(inv + 10);
+  return {
+    code: f.fonKodu,
+    name: f.fonUnvan || '',
+    price: f.fiyat != null ? Number(f.fiyat) : null,
+    aum,
+    investors: inv,
+    category: cat,
+    categoryTr: TEFAS_CAT_TR[cat] || cat,
+    quality,
+    stockPct: Number(dist && dist.hs) || 0,
+    goldPct: Number(dist && dist.km) || 0,
+    alloc: tefasAlloc(dist)
+  };
+}
+async function tefasFetchDay(kind, fundCode) {
+  const cacheKey = kind + '|' + (fundCode || '*');
+  if (!fundCode && TEFAS_CACHE.key === cacheKey && TEFAS_CACHE.pack && (Date.now() - TEFAS_CACHE.at) < 10 * 60 * 1000) {
+    return TEFAS_CACHE.pack;
+  }
+  const dates = tefasRecentDates(12);
+  for (const ymd of dates) {
+    const body = tefasBody(kind, ymd, fundCode);
+    const infoRes = await httpsPostJson(TEFAS_INFO_URL, body, TEFAS_HDR);
+    const rows = (infoRes.json && infoRes.json.resultList) || [];
+    if (!rows.length) continue;
+    let distRows = [];
+    try {
+      const distRes = await httpsPostJson(TEFAS_DIST_URL, body, TEFAS_HDR);
+      distRows = (distRes.json && distRes.json.resultList) || [];
+    } catch (e) { distRows = []; }
+    const pack = { date: ymd, info: rows, dist: distRows };
+    if (!fundCode) {
+      TEFAS_CACHE = { key: cacheKey, at: Date.now(), pack };
+    }
+    return pack;
+  }
+  return null;
+}
+
+/* KAP YF listesi — fundClass HS = hisse senedi fonları */
+function httpsGetJson(urlStr, headers) {
+  return new Promise((resolve, reject) => {
+    https.get(urlStr, {
+      headers: headers || { 'User-Agent': BUA, 'Accept': 'application/json' }
+    }, pr => {
+      let raw = '';
+      pr.on('data', c => raw += c);
+      pr.on('end', () => {
+        try { resolve({ status: pr.statusCode || 0, json: JSON.parse(raw || 'null') }); }
+        catch (e) { reject(new Error('json_parse')); }
+      });
+    }).on('error', reject);
+  });
+}
+async function kapHisseFundCodes() {
+  if (KAP_HS_CACHE.codes && (Date.now() - KAP_HS_CACHE.at) < 6 * 60 * 60 * 1000) {
+    return KAP_HS_CACHE.codes;
+  }
+  const r = await httpsGetJson('https://www.kap.org.tr/tr/api/fund/criteria/YF/Y', {
+    'User-Agent': BUA, 'Accept': 'application/json', 'Referer': 'https://www.kap.org.tr/'
+  });
+  const arr = Array.isArray(r.json) ? r.json : [];
+  const codes = new Set(
+    arr.filter(f => f && f.fundClass === 'HS' && String(f.fundCode || '').trim())
+      .map(f => String(f.fundCode).trim().toUpperCase())
+  );
+  KAP_HS_CACHE = { at: Date.now(), codes };
+  return codes;
+}
+
+/* Fonoloji kamu sayfasından hisse ağırlıkları (KAP portföy raporundan) */
+async function fonolojiHoldings(code) {
+  const c = String(code || '').toUpperCase();
+  const hit = FONO_HOLD_CACHE.get(c);
+  const ttl = hit && hit.holdings && hit.holdings.length ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000;
+  if (hit && (Date.now() - hit.at) < ttl) return hit.holdings;
+  const page = await httpsGetText('https://fonoloji.com/fon/' + encodeURIComponent(c), {
+    'User-Agent': BUA,
+    'Accept': 'text/html,application/xhtml+xml',
+    'Accept-Language': 'tr-TR,tr;q=0.9'
+  });
+  if (page.status !== 200 || !page.body) {
+    FONO_HOLD_CACHE.set(c, { at: Date.now(), holdings: [] });
+    return [];
+  }
+  const holdings = [];
+  const seen = new Set();
+  const re = /\\"ticker\\":\\"([A-Z0-9\.]+)\\",\\"name\\":\\"([^\\]*)\\",\\"weight\\":([0-9.]+)/g;
+  let m;
+  while ((m = re.exec(page.body))) {
+    const ticker = m[1];
+    if (seen.has(ticker)) continue;
+    seen.add(ticker);
+    holdings.push({ symbol: ticker, name: m[2], weight: Number(m[3]) });
+  }
+  holdings.sort((a, b) => b.weight - a.weight);
+  FONO_HOLD_CACHE.set(c, { at: Date.now(), holdings });
+  return holdings;
+}
+
+/* Yalnızca hem varlık hem sektör listesi üretilebilen fonlar */
+async function tefasTopWithHoldings(limit) {
+  if (
+    TEFAS_TOP_HOLD_CACHE.funds &&
+    TEFAS_TOP_HOLD_CACHE.ver === TEFAS_TOP_HOLD_VER &&
+    (Date.now() - TEFAS_TOP_HOLD_CACHE.at) < 30 * 60 * 1000
+  ) {
+    return {
+      date: TEFAS_TOP_HOLD_CACHE.date,
+      funds: TEFAS_TOP_HOLD_CACHE.funds.slice(0, limit),
+      scanned: TEFAS_TOP_HOLD_CACHE.scanned || 0
+    };
+  }
+  const [pack, hsCodes] = await Promise.all([
+    tefasFetchDay('YAT', null),
+    kapHisseFundCodes().catch(() => new Set())
+  ]);
+  if (!pack || !pack.info.length) return { date: '', funds: [], scanned: 0 };
+  const distMap = new Map((pack.dist || []).map(x => [x.fonKodu, x]));
+  const byCode = new Map(
+    pack.info.map(f => [f.fonKodu, tefasMapFund(f, distMap.get(f.fonKodu))])
+  );
+  const hsList = [...byCode.values()]
+    .filter(f => {
+      if (!(f.aum > 0)) return false;
+      if (hsCodes.size) return hsCodes.has(f.code);
+      return /H[İI]SSE\s*SENED[İI]/i.test(f.name);
+    })
+    .sort((a, b) => b.aum - a.aum);
+
+  // İş Portföy önce (varlık listesi genelde var), sonra diğer HS
+  const prefer = new Set(IS_PORTFOY_HISSE);
+  const preferred = IS_PORTFOY_HISSE.map(c => byCode.get(c)).filter(Boolean);
+  const rest = hsList.filter(f => !prefer.has(f.code)).slice(0, 70);
+  const withData = [];
+  let scanned = 0;
+  const probeBatch = async (list) => {
+    for (let i = 0; i < list.length && withData.length < limit; i += 3) {
+      const batch = list.slice(i, i + 3);
+      scanned += batch.length;
+      const rows = await Promise.all(batch.map(async (f) => {
+        let holdings = [];
+        let sectors = [];
+        try {
+          holdings = await fonolojiHoldings(f.code);
+          if (holdings.length < 5) return null;
+          sectors = await sectorsFromHoldings(holdings);
+        } catch (e) { return null; }
+        if (!sectors.length) return null;
+        return { ...f, holdingCount: holdings.length, sectorCount: sectors.length };
+      }));
+      for (const r of rows) {
+        if (r) withData.push(r);
+      }
+    }
+  };
+  await probeBatch(preferred);
+  if (withData.length < limit) await probeBatch(rest);
+
+  withData.sort((a, b) => b.aum - a.aum);
+  TEFAS_TOP_HOLD_CACHE = {
+    at: Date.now(),
+    date: pack.date,
+    funds: withData,
+    scanned,
+    ver: TEFAS_TOP_HOLD_VER
+  };
+  return { date: pack.date, funds: withData.slice(0, limit), scanned };
+}
+
+/* TradingView sektör → ağırlıklı sektör dağılımı */
+function tvScanPost(tickers, columns) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ symbols: { tickers }, columns });
+    const preq = https.request({
+      hostname: 'scanner.tradingview.com',
+      path: '/turkey/scan',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': BUA
+      }
+    }, pr => {
+      let raw = '';
+      pr.on('data', c => raw += c);
+      pr.on('end', () => {
+        try { resolve(JSON.parse(raw || '{}')); }
+        catch (e) { resolve({}); }
+      });
+    });
+    preq.on('error', reject);
+    preq.write(body);
+    preq.end();
+  });
+}
+async function sectorsFromHoldings(holdings) {
+  const top = (holdings || []).filter(h => h.symbol && h.weight > 0).slice(0, 40);
+  if (!top.length) return [];
+  const tickers = top.map(h => 'BIST:' + h.symbol);
+  let data = [];
+  try {
+    const j = await tvScanPost(tickers, ['name', 'sector', 'close']);
+    data = j.data || [];
+  } catch (e) { return []; }
+  const secOf = new Map();
+  for (const row of data) {
+    const sym = String(row.s || '').replace(/^BIST:/, '');
+    const sector = (row.d && row.d[1]) || 'Diğer';
+    secOf.set(sym, sector);
+  }
+  const bucket = new Map();
+  let covered = 0;
+  for (const h of top) {
+    const sec = secOf.get(h.symbol) || 'Diğer';
+    bucket.set(sec, (bucket.get(sec) || 0) + h.weight);
+    covered += h.weight;
+  }
+  const sectors = [...bucket.entries()]
+    .map(([sector, weight]) => ({ sector, weight: covered > 0 ? (weight / covered) * 100 : weight }))
+    .sort((a, b) => b.weight - a.weight);
+  return sectors;
 }
 
 http.createServer((req, res) => {
@@ -540,6 +952,352 @@ http.createServer((req, res) => {
     return;
   }
 
+  // --- OpenBB tarzı Yahoo köprüleri (anahtarsız; ODP'nin yfinance sağlayıcısıyla aynı kaynak) ---
+  //     /yscr  discovery (yedek): day_gainers | day_losers | most_actives
+  //     /yqs   quoteSummary modülleri: calendarEvents, institutionOwnership, topHoldings…
+  //     /ycal  piyasa takvimi: earnings | dividends | ipo | splits
+  //     /ynews şirket haberleri (Yahoo ticker news)
+  const YFIN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+  const yfinGet = (yurl, cb) => {
+    https.get(yurl, { headers: { 'User-Agent': YFIN_UA, 'Accept': 'application/json' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => cb(null, pr.statusCode || 502, body));
+    }).on('error', e => cb(e));
+  };
+  const yfinJson = (res, status, body, transform) => {
+    try {
+      const j = JSON.parse(body || '{}');
+      const out = transform ? transform(j) : j;
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(out));
+    } catch (e) {
+      res.writeHead(status >= 400 ? status : 502, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ error: 'parse', rawStatus: status }));
+    }
+  };
+
+  if (urlPath === '/yscr') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const allowed = new Set(['day_gainers', 'day_losers', 'most_actives', 'growth_technology_stocks', 'small_cap_gainers']);
+    const scr = allowed.has(qs.get('scr') || '') ? qs.get('scr') : 'day_gainers';
+    const count = Math.min(40, Math.max(5, parseInt(qs.get('count') || '15', 10) || 15));
+    const yurl = 'https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?formatted=false&lang=en-US&region=US&scrIds=' +
+      encodeURIComponent(scr) + '&count=' + count;
+    yfinGet(yurl, (err, status, body) => {
+      if (err) { res.writeHead(502); res.end(JSON.stringify({ quotes: [], error: err.message })); return; }
+      yfinJson(res, status, body, j => {
+        const block = (j.finance && j.finance.result && j.finance.result[0]) || {};
+        const quotes = (block.quotes || []).map(q => ({
+          symbol: q.symbol,
+          name: q.shortName || q.longName || q.symbol,
+          price: q.regularMarketPrice != null ? q.regularMarketPrice : null,
+          changePct: q.regularMarketChangePercent != null ? q.regularMarketChangePercent : null,
+          volume: q.regularMarketVolume != null ? q.regularMarketVolume : null,
+          mcap: q.marketCap != null ? q.marketCap : null
+        }));
+        return { scr, quotes, source: 'yahoo' };
+      });
+    });
+    return;
+  }
+
+  if (urlPath === '/yqs') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const rawSym = (qs.get('s') || '').trim().toUpperCase();
+    const sym = encodeURIComponent(rawSym);
+    const mods = (qs.get('m') || 'calendarEvents,institutionOwnership,majorHoldersBreakdown,topHoldings,assetProfile')
+      .split(',').map(x => x.trim()).filter(Boolean).slice(0, 12).join(',');
+    if (!rawSym) { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end('{}'); return; }
+    const sendJson = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    const normalizeQs = (r) => {
+      if (!r || typeof r !== 'object') return r;
+      const out = Object.assign({}, r);
+      if (out.institutionOwnership && Array.isArray(out.institutionOwnership.ownershipList)) {
+        out.institutionOwnership = Object.assign({}, out.institutionOwnership, {
+          ownershipList: out.institutionOwnership.ownershipList.map(h => ({
+            organization: h.organization,
+            pctHeld: yahooUnwrap(h.pctHeld),
+            position: yahooUnwrap(h.position),
+            value: yahooUnwrap(h.value),
+            pctChange: yahooUnwrap(h.pctChange),
+            reportDate: yahooUnwrap(h.reportDate)
+          }))
+        });
+      }
+    if (out.topHoldings) {
+      const th = out.topHoldings;
+      out.topHoldings = Object.assign({}, th, {
+        holdings: Array.isArray(th.holdings) ? th.holdings.map(h => ({
+          symbol: h.symbol,
+          holdingName: h.holdingName || h.holdingNameLong || h.symbol,
+          holdingPercent: yahooUnwrap(h.holdingPercent)
+        })) : [],
+        sectorWeightings: Array.isArray(th.sectorWeightings) ? th.sectorWeightings : [],
+        cashPosition: yahooUnwrap(th.cashPosition),
+        stockPosition: yahooUnwrap(th.stockPosition),
+        bondPosition: yahooUnwrap(th.bondPosition)
+      });
+    }
+      return out;
+    };
+    const fetchQs = async (forceCrumb) => {
+      const { crumb, cookie } = await ensureYahooCrumb(forceCrumb);
+      const yurl = 'https://query1.finance.yahoo.com/v10/finance/quoteSummary/' + sym +
+        '?modules=' + encodeURIComponent(mods) + '&formatted=false&lang=en-US&region=US&crumb=' + encodeURIComponent(crumb);
+      const r = await httpsGetCookie(yurl, {
+        'User-Agent': YFIN_UA, 'Accept': 'application/json', 'Cookie': cookie
+      }, cookie);
+      let j = {};
+      try { j = JSON.parse(r.body || '{}'); } catch (e) { throw new Error('parse'); }
+      const errDesc = j.quoteSummary && j.quoteSummary.error && j.quoteSummary.error.description;
+      if (r.status === 401 || /crumb/i.test(String(errDesc || ''))) {
+        _yahooCrumb = null; _yahooCrumbAt = 0;
+        if (!forceCrumb) return fetchQs(true);
+        throw new Error('unauthorized');
+      }
+      const result = j.quoteSummary && j.quoteSummary.result && j.quoteSummary.result[0];
+      if (!result) throw new Error((j.quoteSummary && j.quoteSummary.error && (j.quoteSummary.error.description || j.quoteSummary.error.code)) || 'empty');
+      return normalizeQs(result);
+    };
+    const finvizHoldersFallback = () => {
+      const url = 'https://finviz.com/quote.ashx?t=' + encodeURIComponent(rawSym);
+      httpGetHtmlFollow(url, { 'User-Agent': BUA, 'Accept': 'text/html' }, 4, (err, status, html) => {
+        if (err || status !== 200 || !html) { sendJson({ error: 'empty', source: 'finviz' }); return; }
+        const inst = finvizNum(extractStat2(html, 'Inst Own'));
+        const insider = finvizNum(extractStat2(html, 'Insider Own'));
+        sendJson({
+          source: 'finviz',
+          majorHoldersBreakdown: {
+            institutionsPercentHeld: inst != null ? inst / 100 : null,
+            insidersPercentHeld: insider != null ? insider / 100 : null
+          },
+          institutionOwnership: { ownershipList: [] },
+          error: mods.includes('topHoldings') ? 'topHoldings_unavailable' : undefined
+        });
+      });
+    };
+    fetchQs(false).then(sendJson).catch(() => finvizHoldersFallback());
+    return;
+  }
+
+  // --- Türkiye Hisse Takvimi: KAP bildirimlerinden IPO / bedelsiz (bölünme) ---
+  //     ?type=ipo|splits  →  { rows:[{symbol,name,date,amount,time,kapUrl}], source:'kap' }
+  if (urlPath === '/trcal') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const type = qs.get('type') === 'splits' ? 'splits' : 'ipo';
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    const pad = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const from = new Date(now.getTime() - 45 * 86400000);
+    const to = new Date(now.getTime() + 5 * 86400000);
+    const ymd = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+    const body = JSON.stringify({
+      fromDate: ymd(from),
+      toDate: ymd(to),
+      mkkMemberOidList: [],
+      subjectList: []
+    });
+    const preq = https.request({
+      hostname: 'www.kap.org.tr',
+      path: '/tr/api/disclosure/members/byCriteria',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': BUA,
+        'Accept': 'application/json',
+        'Referer': 'https://www.kap.org.tr/'
+      }
+    }, pr => {
+      let raw = '';
+      pr.on('data', c => raw += c);
+      pr.on('end', () => {
+        try {
+          const arr = JSON.parse(raw || '[]');
+          if (!Array.isArray(arr)) { send({ type, rows: [], source: 'kap', error: 'shape' }); return; }
+          const isIpo = (x) => {
+            const sub = String(x.subject || '');
+            const sum = String(x.summary || '');
+            return /halka\s*arz/i.test(sub) || (/halka\s*arz/i.test(sum) && (x.relatedStocks || x.stockCodes));
+          };
+          const isSplit = (x) => {
+            const sub = String(x.subject || '');
+            const sum = String(x.summary || '');
+            // Türkiye'de fiili bölünme çoğunlukla bedelsiz sermaye artırımı
+            if (/sermaye\s*artır/i.test(sub) && /bedelsiz/i.test(sum)) return true;
+            if (/bedelsiz/i.test(sub)) return true;
+            if (/pay\s*bölün|bölünme|stock\s*split/i.test(sub + ' ' + sum)) return true;
+            return false;
+          };
+          const pick = type === 'ipo' ? isIpo : isSplit;
+          const seen = new Set();
+          const rows = [];
+          for (const x of arr) {
+            if (!pick(x)) continue;
+            const sym = String(x.relatedStocks || x.stockCodes || '')
+              .split(/[,;\s]+/).map(s => s.trim().toUpperCase()).filter(Boolean)[0] || null;
+            const pub = String(x.publishDate || '').trim();
+            const datePart = pub.slice(0, 10); // DD.MM.YYYY
+            const key = (sym || x.kapTitle || '') + '|' + datePart + '|' + (x.subject || '');
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const idx = x.disclosureIndex;
+            rows.push({
+              symbol: sym,
+              name: x.kapTitle || '',
+              date: datePart,
+              amount: null,
+              time: (x.subject || '').slice(0, 80),
+              summary: (x.summary || '').slice(0, 160),
+              kapUrl: idx ? ('https://www.kap.org.tr/tr/Bildirim/' + idx) : null
+            });
+            if (rows.length >= 40) break;
+          }
+          send({ type, rows, source: 'kap', market: 'TR' });
+        } catch (e) {
+          send({ type, rows: [], source: 'kap', error: 'parse', rawStatus: pr.statusCode || 502 });
+        }
+      });
+    });
+    preq.on('error', e => send({ type, rows: [], error: e.message }));
+    preq.write(body);
+    preq.end();
+    return;
+  }
+
+  if (urlPath === '/ycal') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const type = ['earnings', 'dividends', 'ipo', 'splits'].includes(qs.get('type') || '') ? qs.get('type') : 'earnings';
+    const day = qs.get('day') || new Date().toISOString().slice(0, 10);
+    const sendCal = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    const parseEps = (v) => {
+      if (v == null || v === '') return null;
+      if (typeof v === 'number') return v;
+      const m = String(v).replace(/[$,]/g, '').match(/-?[\d.]+/);
+      return m ? parseFloat(m[0]) : null;
+    };
+    // Yahoo calendar-service su an 500; Nasdaq public API anahtarsiz calisiyor.
+    const nasdaqPath = type === 'earnings' ? 'earnings'
+      : type === 'dividends' ? 'dividends'
+      : type === 'splits' ? 'splits'
+      : type === 'ipo' ? 'ipos' : null;
+    if (!nasdaqPath) {
+      sendCal({ type, day, rows: [], source: 'nasdaq', error: 'unsupported' });
+      return;
+    }
+    const nurl = 'https://api.nasdaq.com/api/calendar/' + nasdaqPath + '?date=' + encodeURIComponent(day);
+    https.get(nurl, {
+      headers: {
+        'User-Agent': YFIN_UA,
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': 'https://www.nasdaq.com',
+        'Referer': 'https://www.nasdaq.com/'
+      }
+    }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        try {
+          const j = JSON.parse(body || '{}');
+          const data = j.data || {};
+          let rows = [];
+          if (type === 'earnings') rows = data.rows || [];
+          else if (type === 'dividends') rows = (data.calendar && data.calendar.rows) || data.rows || [];
+          else if (type === 'splits') rows = data.rows || [];
+          else if (type === 'ipo') {
+            // Nasdaq IPO: upcoming/priced/filed grupları
+            const upcoming = (data.upcoming && data.upcoming.rows) || data.upcoming || [];
+            const priced = (data.priced && data.priced.rows) || data.priced || [];
+            rows = [].concat(Array.isArray(upcoming) ? upcoming : [], Array.isArray(priced) ? priced : []);
+            if (!rows.length && Array.isArray(data.rows)) rows = data.rows;
+          }
+          if (!Array.isArray(rows)) rows = [];
+          const norm = rows.slice(0, 80).map(r => {
+            if (type === 'earnings') {
+              return {
+                symbol: r.symbol || null,
+                name: r.name || '',
+                date: day,
+                epsEst: parseEps(r.epsForecast),
+                epsAct: parseEps(r.lastYearEPS),
+                amount: null,
+                time: r.time || null
+              };
+            }
+            if (type === 'dividends') {
+              return {
+                symbol: r.symbol || null,
+                name: r.companyName || r.name || '',
+                date: r.dividend_Ex_Date || day,
+                epsEst: null,
+                epsAct: null,
+                amount: r.dividend_Rate != null ? r.dividend_Rate : null,
+                time: null
+              };
+            }
+            if (type === 'ipo') {
+              return {
+                symbol: r.proposedTickerSymbol || r.symbol || null,
+                name: r.companyName || r.name || '',
+                date: r.expectedPriceDate || r.pricedDate || day,
+                epsEst: null,
+                epsAct: null,
+                amount: r.dollarValueOfSharesOffered || r.priceRange || null,
+                time: r.exchange || null
+              };
+            }
+            return {
+              symbol: r.symbol || null,
+              name: r.name || r.companyName || '',
+              date: r.executionDate || day,
+              epsEst: null,
+              epsAct: null,
+              amount: null,
+              time: r.ratio || null
+            };
+          }).filter(x => x.symbol || x.name);
+          sendCal({ type, day, rows: norm, source: 'nasdaq' });
+        } catch (e) {
+          sendCal({ type, day, rows: [], source: 'nasdaq', error: 'parse', rawStatus: pr.statusCode || 502 });
+        }
+      });
+    }).on('error', e => sendCal({ type, day, rows: [], error: e.message }));
+    return;
+  }
+
+  if (urlPath === '/ynews') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const sym = encodeURIComponent(qs.get('s') || '');
+    const count = Math.min(30, Math.max(5, parseInt(qs.get('count') || '12', 10) || 12));
+    if (!sym) { res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }); res.end(JSON.stringify({ items: [] })); return; }
+    const yurl = 'https://query1.finance.yahoo.com/v1/finance/search?q=' + sym +
+      '&quotesCount=0&newsCount=' + count + '&listsCount=0&enableFuzzyQuery=false&quotesQueryId=tss_match_phrase_query';
+    yfinGet(yurl, (err, status, body) => {
+      if (err) { res.writeHead(502); res.end(JSON.stringify({ items: [], error: err.message })); return; }
+      yfinJson(res, status, body, j => {
+        const items = (j.news || []).map(n => ({
+          title: n.title || '',
+          link: n.link || n.url || '',
+          src: (n.publisher || n.provider || 'Yahoo'),
+          desc: n.summary || '',
+          d: n.providerPublishTime ? new Date(n.providerPublishTime * 1000).toISOString() : null
+        })).filter(x => x.title && x.link);
+        return { items, source: 'yahoo' };
+      });
+    });
+    return;
+  }
+
   // --- SEC köprüsü ---
   if (urlPath.startsWith('/sec/')) {
     const secUrl = 'https://data.sec.gov' + req.url.slice(4); // '/sec' -> ''
@@ -555,6 +1313,132 @@ http.createServer((req, res) => {
         res.end(body);
       });
     }).on('error', e => { res.writeHead(502); res.end(JSON.stringify({ error: e.message })); });
+    return;
+  }
+
+  // --- SEC filings özeti (EdgarTools tarzı — submissions'dan 10-K/10-Q/8-K/4) ---
+  //     ?cik=0000320193  →  { filings:[{form,date,acc,doc,url}], name }
+  if (urlPath === '/secfilings') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const cikRaw = (qs.get('cik') || '').replace(/\D/g, '');
+    const cik = cikRaw.padStart(10, '0');
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (!cikRaw) { send({ filings: [], error: 'cik' }); return; }
+    const secUrl = 'https://data.sec.gov/submissions/CIK' + cik + '.json';
+    https.get(secUrl, { headers: { 'User-Agent': UA, 'Accept': 'application/json', 'Accept-Encoding': 'identity' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        try {
+          const j = JSON.parse(body || '{}');
+          const rec = j.filings && j.filings.recent;
+          if (!rec || !Array.isArray(rec.form)) { send({ filings: [], name: j.name || '', error: 'empty' }); return; }
+          const want = new Set(['10-K', '10-K/A', '10-Q', '10-Q/A', '8-K', '8-K/A', '20-F', '6-K', '4', '13F-HR']);
+          const filings = [];
+          const cikNum = parseInt(cik, 10);
+          for (let i = 0; i < rec.form.length && filings.length < 40; i++) {
+            const form = rec.form[i];
+            if (!want.has(form)) continue;
+            const acc = rec.accessionNumber[i];
+            const folder = String(acc || '').replace(/-/g, '');
+            const doc = rec.primaryDocument[i] || '';
+            filings.push({
+              form,
+              date: rec.filingDate[i],
+              acc,
+              doc,
+              desc: (rec.primaryDocDescription && rec.primaryDocDescription[i]) || '',
+              url: 'https://www.sec.gov/Archives/edgar/data/' + cikNum + '/' + folder + '/' + doc
+            });
+          }
+          send({
+            name: j.name || '',
+            tickers: j.tickers || [],
+            exchanges: j.exchanges || [],
+            sic: j.sic || null,
+            sicDescription: j.sicDescription || '',
+            filings,
+            source: 'sec-edgar'
+          });
+        } catch (e) { send({ filings: [], error: 'parse' }); }
+      });
+    }).on('error', e => send({ filings: [], error: e.message }));
+    return;
+  }
+
+  // --- TEFAS: Türkiye hisse fonları — yalnızca sektör+varlık verisi olanlar ---
+  //     ?view=top&limit=30
+  //     ?view=fund&code=TI2
+  if (urlPath === '/tefas') {
+    const qs = new URLSearchParams(req.url.split('?')[1] || '');
+    const view = qs.get('view') === 'fund' ? 'fund' : 'top';
+    const kind = 'YAT';
+    const limit = Math.min(60, Math.max(5, parseInt(qs.get('limit') || '30', 10) || 30));
+    const code = String(qs.get('code') || '').trim().toUpperCase();
+    const send = (obj) => {
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=300'
+      });
+      res.end(JSON.stringify(obj));
+    };
+    (async () => {
+      try {
+        if (view === 'fund') {
+          if (!code) return send({ ok: false, error: 'code_required' });
+          const pack = await tefasFetchDay(kind, code);
+          if (!pack || !pack.info.length) return send({ ok: false, error: 'not_found', code });
+          const f = pack.info[0];
+          const d = pack.dist[0] || null;
+          const fund = tefasMapFund(f, d);
+          let holdings = [];
+          let sectors = [];
+          try {
+            holdings = await fonolojiHoldings(code);
+            sectors = await sectorsFromHoldings(holdings);
+          } catch (e) { holdings = []; sectors = []; }
+          if (holdings.length < 5 || !sectors.length) {
+            // Önbellekteki listeden de düş (bir daha görünmesin)
+            if (TEFAS_TOP_HOLD_CACHE.funds) {
+              TEFAS_TOP_HOLD_CACHE.funds = TEFAS_TOP_HOLD_CACHE.funds.filter(x => x.code !== code);
+            }
+            return send({ ok: false, error: 'no_holdings', code });
+          }
+          fund.holdings = holdings.slice(0, 25).map(h => ({
+            symbol: h.symbol,
+            name: h.name,
+            holdingPercent: h.weight
+          }));
+          fund.sectors = sectors.slice(0, 15);
+          return send({
+            ok: true,
+            source: 'tefas+kap',
+            date: pack.date,
+            kind,
+            fund
+          });
+        }
+        const top = await tefasTopWithHoldings(limit);
+        if (!top.funds.length) return send({ ok: false, error: 'empty', kind });
+        send({
+          ok: true,
+          source: 'tefas+kap',
+          date: top.date,
+          kind,
+          category: 'hisse',
+          onlyWithHoldings: true,
+          scanned: top.scanned,
+          total: top.funds.length,
+          funds: top.funds
+        });
+      } catch (e) {
+        send({ ok: false, error: e.message || 'tefas_fail' });
+      }
+    })();
     return;
   }
 
