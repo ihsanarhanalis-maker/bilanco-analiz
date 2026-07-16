@@ -318,15 +318,16 @@
       -webkit-overflow-scrolling:touch}
     #econCountries,#topCountries,#scanCountries{flex:0 0 auto;width:100%;max-width:100%;align-items:flex-start}
     #page-scan .econ-side{flex:0 0 auto;width:100%;max-width:100%}
-    /* Hisse Tarayıcı: kontroller alt alta, chip'ler yatay kaydırma, tablo taşmasın */
+    /* Hisse Tarayıcı: başlık/arama alt alta; filtre chip satırları yatay kaydırma */
     #page-scan .card > div:first-child{flex-direction:column;align-items:stretch !important;gap:12px}
-    #page-scan .scan-inputs{width:100%;flex-direction:column;align-items:stretch}
-    #page-scan .scan-inputs label{width:100%;justify-content:space-between}
-    #page-scan #scanSearch,#page-scan #scanSort,#page-scan #scanPeMin{width:100% !important;max-width:none;box-sizing:border-box}
-    #page-scan .scan-row{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+    #page-scan #scanSearch,#page-scan #scanSort{width:100% !important;max-width:none;box-sizing:border-box}
+    #page-scan .scan-row,
+    #page-scan .scan-row.scan-inputs{
+      flex-direction:row;flex-wrap:nowrap;align-items:center;
+      overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;width:100%}
     #page-scan .scan-row .scan-lbl{flex:0 0 auto}
-    #page-scan .scan-chip{flex:0 0 auto}
-    #page-scan .scan-row.scan-inputs{flex-wrap:wrap;overflow:visible}
+    #page-scan .scan-chip,
+    #page-scan .scan-row.scan-inputs .primary{flex:0 0 auto;white-space:nowrap}
     #page-scan #scanBody{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
     #page-scan #scanPager{flex-wrap:wrap;justify-content:center;gap:8px}
     #pwaInstall{margin-left:0;margin-top:6px}
