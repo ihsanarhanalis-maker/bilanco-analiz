@@ -4,6 +4,7 @@
    - /sec/* isteklerini sunucu tarafından data.sec.gov'a iletir (CORS sorunu olmaz) */
 const http  = require('http');
 const https = require('https');
+const zlib  = require('zlib');
 const fs    = require('fs');
 const path  = require('path');
 
@@ -604,12 +605,13 @@ async function tefasTopWithHoldings(limit) {
 }
 
 /* TradingView sektör → ağırlıklı sektör dağılımı */
-function tvScanPost(tickers, columns) {
+function tvScanPost(tickers, columns, market) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({ symbols: { tickers }, columns });
+    const mkt = market || 'turkey';
     const preq = https.request({
       hostname: 'scanner.tradingview.com',
-      path: '/turkey/scan',
+      path: '/' + mkt + '/scan',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -635,7 +637,7 @@ async function sectorsFromHoldings(holdings) {
   const tickers = top.map(h => 'BIST:' + h.symbol);
   let data = [];
   try {
-    const j = await tvScanPost(tickers, ['name', 'sector', 'close']);
+    const j = await tvScanPost(tickers, ['name', 'sector', 'close'], 'turkey');
     data = j.data || [];
   } catch (e) { return []; }
   const secOf = new Map();
@@ -655,6 +657,186 @@ async function sectorsFromHoldings(holdings) {
     .map(([sector, weight]) => ({ sector, weight: covered > 0 ? (weight / covered) * 100 : weight }))
     .sort((a, b) => b.weight - a.weight);
   return sectors;
+}
+/* ABD ETF holdings'ten TradingView america/scan ile sektör ağırlıkları (Yahoo formatı) */
+async function sectorsFromUsHoldings(holdings) {
+  const top = (holdings || []).filter(h => h.symbol && h.holdingPercent > 0).slice(0, 25);
+  if (!top.length) return [];
+  const tickers = [];
+  for (const h of top) {
+    const s = String(h.symbol || '').toUpperCase();
+    if (!s || /[^A-Z0-9.\-]/.test(s)) continue;
+    tickers.push('NASDAQ:' + s, 'NYSE:' + s, 'AMEX:' + s);
+  }
+  let data = [];
+  try {
+    const j = await tvScanPost(tickers, ['name', 'sector', 'close'], 'america');
+    data = j.data || [];
+  } catch (e) { return []; }
+  const secOf = new Map();
+  for (const row of data) {
+    const sym = String(row.s || '').replace(/^(NASDAQ|NYSE|AMEX):/, '');
+    const sector = (row.d && row.d[1]) || '';
+    if (sym && sector && !secOf.has(sym)) secOf.set(sym, sector);
+  }
+  const bucket = new Map();
+  let covered = 0;
+  for (const h of top) {
+    const sec = secOf.get(String(h.symbol || '').toUpperCase());
+    if (!sec) continue;
+    const w = h.holdingPercent <= 1 ? h.holdingPercent * 100 : h.holdingPercent;
+    bucket.set(sec, (bucket.get(sec) || 0) + w);
+    covered += w;
+  }
+  if (!covered) return [];
+  return [...bucket.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([name, w]) => {
+      const o = {};
+      o[name] = w / covered;
+      return o;
+    });
+}
+
+/* Minimal XLSX (ZIP) okuyucu — SSGA günlük holdings dosyası için */
+function zipReadEntries(buf) {
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('no_eocd');
+  const cdOff = buf.readUInt32LE(eocd + 16);
+  const files = {};
+  let p = cdOff;
+  while (p + 46 < buf.length && buf.readUInt32LE(p) === 0x02014b50) {
+    const method = buf.readUInt16LE(p + 10);
+    const compSize = buf.readUInt32LE(p + 20);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localOff = buf.readUInt32LE(p + 42);
+    const name = buf.slice(p + 46, p + 46 + nameLen).toString();
+    const localNameLen = buf.readUInt16LE(localOff + 26);
+    const localExtraLen = buf.readUInt16LE(localOff + 28);
+    const dataStart = localOff + 30 + localNameLen + localExtraLen;
+    const comp = buf.slice(dataStart, dataStart + compSize);
+    let data;
+    if (method === 0) data = comp;
+    else if (method === 8) data = zlib.inflateRawSync(comp);
+    else { p += 46 + nameLen + extraLen + commentLen; continue; }
+    files[name] = data;
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return files;
+}
+function xlsxSharedStrings(xml) {
+  const out = [];
+  const re = /<si>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    out.push([...m[1].matchAll(/<t[^>]*>([^<]*)<\/t>/g)].map(x => x[1]).join(''));
+  }
+  return out;
+}
+function xlsxColIdx(col) {
+  let n = 0;
+  for (let i = 0; i < col.length; i++) n = n * 26 + (col.charCodeAt(i) - 64);
+  return n - 1;
+}
+function xlsxSheetRows(xml, sst) {
+  const rows = {};
+  const re = /<c r="([A-Z]+)(\d+)"([^>]*)(?:\/>|>(?:<v>([^<]*)<\/v>)?<\/c>)/g;
+  let m;
+  while ((m = re.exec(xml))) {
+    const col = m[1], row = +m[2], attrs = m[3] || '';
+    let val = m[4];
+    if (val == null) continue;
+    if (attrs.includes('t="s"')) val = sst[+val];
+    if (!rows[row]) rows[row] = [];
+    rows[row][xlsxColIdx(col)] = val;
+  }
+  return Object.keys(rows).map(Number).sort((a, b) => a - b).map(r => rows[r]);
+}
+function parseSsgaHoldingsXlsx(buf) {
+  const files = zipReadEntries(buf);
+  const sstXml = files['xl/sharedStrings.xml'];
+  const sst = sstXml ? xlsxSharedStrings(sstXml.toString()) : [];
+  const sheetKey = Object.keys(files).find(k => /worksheets\/sheet1\.xml$/i.test(k)) ||
+    Object.keys(files).find(k => /worksheets\/sheet/i.test(k));
+  if (!sheetKey) return { fundName: '', holdings: [] };
+  const rows = xlsxSheetRows(files[sheetKey].toString(), sst);
+  let fundName = '';
+  for (const r of rows.slice(0, 8)) {
+    if (String(r && r[0] || '').toLowerCase().includes('fund name')) {
+      fundName = String(r[1] || '').replace(/&amp;/g, '&').trim();
+      break;
+    }
+  }
+  const hi = rows.findIndex(r => (r || []).some(c => /^Ticker$/i.test(String(c || '').trim())));
+  if (hi < 0) return { fundName, holdings: [] };
+  const header = rows[hi].map(c => String(c || '').trim().toLowerCase());
+  const iName = header.findIndex(h => h === 'name');
+  const iTicker = header.findIndex(h => h === 'ticker');
+  const iWeight = header.findIndex(h => h === 'weight');
+  const holdings = [];
+  for (let i = hi + 1; i < rows.length && holdings.length < 25; i++) {
+    const r = rows[i] || [];
+    const symbol = String(r[iTicker] || '').trim().toUpperCase();
+    const weight = parseFloat(r[iWeight]);
+    if (!symbol || !/^[A-Z][A-Z0-9.\-]{0,9}$/.test(symbol) || !(weight > 0)) continue;
+    if (/^(CASH|USD|-\s*$)/i.test(symbol)) continue;
+    holdings.push({
+      symbol,
+      holdingName: String(r[iName] || symbol).replace(/&amp;/g, '&').trim(),
+      holdingPercent: weight / 100
+    });
+  }
+  return { fundName, holdings };
+}
+const SSGA_HOLDINGS_CODES = new Set([
+  'spy', 'dia', 'xlk', 'xlf', 'xle', 'xli', 'xly', 'xlp', 'xlv', 'xlb', 'xlre', 'xlu'
+]);
+function httpsGetBuf(url, headers, redirects) {
+  const maxR = redirects == null ? 4 : redirects;
+  return new Promise((resolve, reject) => {
+    https.get(url, { headers: headers || {}, timeout: 25000 }, pr => {
+      if ([301, 302, 303, 307, 308].includes(pr.statusCode) && pr.headers.location && maxR > 0) {
+        pr.resume();
+        return httpsGetBuf(new URL(pr.headers.location, url).toString(), headers, maxR - 1).then(resolve, reject);
+      }
+      const chunks = [];
+      pr.on('data', c => chunks.push(c));
+      pr.on('end', () => resolve({ status: pr.statusCode || 0, buf: Buffer.concat(chunks) }));
+    }).on('error', reject);
+  });
+}
+function parseEtfdbHoldings(html) {
+  const holdings = [];
+  const re = /data-th="Symbol"><a href="\/stock\/([^"/]+)\/">([^<]+)<\/a><\/td>\s*<td[^>]*data-th="Holding">([^<]*)<\/td>\s*<td[^>]*data-th="% Assets">([\d.]+)%/gi;
+  let m;
+  while ((m = re.exec(html)) && holdings.length < 20) {
+    const symbol = String(m[2] || '').trim().toUpperCase();
+    const pct = parseFloat(m[4]);
+    if (!symbol || !(pct > 0)) continue;
+    holdings.push({
+      symbol,
+      holdingName: String(m[3] || '').replace(/&amp;/g, '&').trim(),
+      holdingPercent: pct / 100
+    });
+  }
+  return holdings;
+}
+function parseEtfdbMeta(html, fallback) {
+  let longName = fallback;
+  const og = html.match(/property=['"]og:title['"]\s+content=['"]([^'"]+)/i) ||
+    html.match(/content=['"]([^'"]+)['"]\s+property=['"]og:title['"]/i);
+  if (og) longName = og[1].replace(/\s*[-|].*$/, '').trim() || fallback;
+  else {
+    const tm = html.match(/<title>([^|<]+)/i);
+    if (tm) longName = tm[1].replace(/\s*[-|].*$/, '').trim() || fallback;
+  }
+  return { longName };
 }
 
 http.createServer((req, res) => {
@@ -1080,12 +1262,12 @@ http.createServer((req, res) => {
         });
       });
     };
-    /* Render/bulut IP'lerinde Yahoo crumb kırılınca ETF holdings için StockAnalysis yedeği */
-    const stockAnalysisEtfFallback = () => {
+    /* Yahoo crumb bulutta kırılınca: SSGA XLSX → ETFDB → StockAnalysis → Finviz */
+    const stockAnalysisEtfFallback = () => new Promise((resolve) => {
       const code = rawSym.replace(/\.US$/i, '').toLowerCase();
       const url = 'https://stockanalysis.com/etf/' + encodeURIComponent(code) + '/holdings/';
       httpGetHtmlFollow(url, { 'User-Agent': BUA, 'Accept': 'text/html' }, 4, (err, status, html) => {
-        if (err || status !== 200 || !html) { finvizHoldersFallback(); return; }
+        if (err || status !== 200 || !html) { resolve(null); return; }
         const holdings = [];
         const hre = /href="\/stocks\/([a-z0-9.\-]+)\/"\s*>([A-Z0-9.\-]+)<\/a>[\s\S]{0,500}?<td class="shr[^"]*">([^<]*)<\/td>[\s\S]{0,300}?>([0-9.]+)%<\/td>/gi;
         let hm;
@@ -1106,13 +1288,13 @@ http.createServer((req, res) => {
           obj[name] = parseFloat(sm[2]) / 100;
           sectors.push(obj);
         }
-        if (!holdings.length && !sectors.length) { finvizHoldersFallback(); return; }
+        if (!holdings.length && !sectors.length) { resolve(null); return; }
         let longName = rawSym;
         const tm = html.match(/<title>([^|<]+)/i);
         if (tm) longName = tm[1].replace(/\s*Holdings.*$/i, '').trim() || rawSym;
         const pxm = html.match(/\$([0-9]+(?:\.[0-9]+)?)/);
         const px = pxm ? parseFloat(pxm[1]) : null;
-        sendJson({
+        resolve({
           source: 'stockanalysis',
           quoteType: { longName: longName, shortName: rawSym, quoteType: 'ETF' },
           price: px != null ? { regularMarketPrice: px } : undefined,
@@ -1120,11 +1302,64 @@ http.createServer((req, res) => {
           topHoldings: { holdings, sectorWeightings: sectors }
         });
       });
-    };
-    fetchQs(false).then(sendJson).catch(() => {
-      if (mods.includes('topHoldings')) stockAnalysisEtfFallback();
-      else finvizHoldersFallback();
     });
+    const issuerEtfFallback = async () => {
+      const code = rawSym.replace(/\.US$/i, '').toUpperCase();
+      const codeLc = code.toLowerCase();
+      /* 1) State Street günlük XLSX (SPY, DIA, sektör SPDR) — Render IP'de genelde açık */
+      if (SSGA_HOLDINGS_CODES.has(codeLc)) {
+        try {
+          const url = 'https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-' + codeLc + '.xlsx';
+          const r = await httpsGetBuf(url, { 'User-Agent': BUA, Accept: '*/*' });
+          if (r.status === 200 && r.buf && r.buf.length > 1000 && r.buf[0] === 0x50 && r.buf[1] === 0x4b) {
+            const parsed = parseSsgaHoldingsXlsx(r.buf);
+            if (parsed.holdings.length) {
+              let sectors = [];
+              try { sectors = await sectorsFromUsHoldings(parsed.holdings); } catch (e) {}
+              return {
+                source: 'ssga',
+                quoteType: { longName: parsed.fundName || code, shortName: code, quoteType: 'ETF' },
+                fundProfile: { categoryName: 'ETF', family: 'State Street' },
+                topHoldings: { holdings: parsed.holdings, sectorWeightings: sectors }
+              };
+            }
+          }
+        } catch (e) {}
+      }
+      /* 2) ETF Database sayfa scrape — QQQ/IWM/ARKK/SMH vb. için geniş kapsama */
+      try {
+        const url = 'https://etfdb.com/etf/' + encodeURIComponent(code) + '/';
+        const r = await httpsGetText(url, { 'User-Agent': BUA, Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' });
+        if (r.status === 200 && r.body) {
+          const holdings = parseEtfdbHoldings(r.body);
+          if (holdings.length) {
+            const meta = parseEtfdbMeta(r.body, code);
+            let sectors = [];
+            try { sectors = await sectorsFromUsHoldings(holdings); } catch (e) {}
+            return {
+              source: 'etfdb',
+              quoteType: { longName: meta.longName, shortName: code, quoteType: 'ETF' },
+              fundProfile: { categoryName: 'ETF', family: 'ETF Database' },
+              topHoldings: { holdings, sectorWeightings: sectors }
+            };
+          }
+        }
+      } catch (e) {}
+      /* 3) StockAnalysis */
+      const sa = await stockAnalysisEtfFallback();
+      if (sa) return sa;
+      return null;
+    };
+    const forceIssuer = qs.get('fb') === '1';
+    const afterYahooFail = () => {
+      if (!mods.includes('topHoldings')) { finvizHoldersFallback(); return; }
+      issuerEtfFallback().then(obj => {
+        if (obj) sendJson(obj);
+        else finvizHoldersFallback();
+      }).catch(() => finvizHoldersFallback());
+    };
+    if (forceIssuer) afterYahooFail();
+    else fetchQs(false).then(sendJson).catch(afterYahooFail);
     return;
   }
 
