@@ -3618,9 +3618,9 @@ function renderIncome(T){
 let TECH_SHORT=null;   // ABD: fetchTargets doldurur {floatPct, ratio}
 const TECH_COLS=['RSI','SMA50','SMA200','price_52_week_high','price_52_week_low',
   'Perf.W','Perf.1M','Perf.3M','Perf.YTD','Perf.Y','beta_1_year','Volatility.M','close'];
-/* Ehlers Fisher Transform (periyot 9) — TV scanner'da yok, günlük kapanışlardan hesaplanır */
+/* Ehlers Fisher Transform (periyot 21) — TV scanner'da yok, günlük kapanışlardan hesaplanır */
 function fisherTransform(closes, period){
-  const n=period==null?9:period;
+  const n=period==null?21:period;
   if(!closes || closes.length<n+2) return null;
   let valuePrev=0, fishPrev=0, fisher=null, trigger=null;
   for(let i=n-1;i<closes.length;i++){
@@ -3662,7 +3662,7 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
     const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close]=row.d;
     const closes=((((((priceJ||{}).chart||{}).result||[])[0]||{}).indicators||{}).quote||[])[0];
     const closeArr=((closes&&closes.close)||[]).filter(x=>x!=null&&Number.isFinite(x));
-    const fish=fisherTransform(closeArr, 9);
+    const fish=fisherTransform(closeArr, 21);
     const num=(v,d)=> v==null?'—':Number(v).toFixed(d==null?2:d);
     const clsOf=v=> v==null?'neutral':(v>0?'up':v<0?'down':'neutral');
     const sgn=v=> v==null?'—':(v>0?'+':'')+v.toFixed(1)+'%';
@@ -3689,7 +3689,7 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
       ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
     let html='<div class="grid" style="margin-bottom:16px">';
     html+=kpi('RSI (14)', num(rsi,1), rsiZone[0], rsiZone[1]);
-    html+=kpi('Fisher Dönüşümü (9)', fish&&fish.fisher!=null?num(fish.fisher,2):'—', fishSub||fishZone[0], fishZone[1]);
+    html+=kpi('Fisher Dönüşümü (21)', fish&&fish.fisher!=null?num(fish.fisher,2):'—', fishSub||fishZone[0], fishZone[1]);
     html+=kpi('50 Günlük Ort. Mesafe', sgn(d50), 'SMA50: '+num(sma50), clsOf(d50));
     html+=kpi('200 Günlük Ort. Mesafe', sgn(d200), 'SMA200: '+num(sma200), clsOf(d200));
     html+=kpi('Beta (1 Yıl)', num(beta), beta==null?'':(beta>1.2?'piyasadan oynak':beta<0.8?'piyasadan sakin':'piyasayla uyumlu'));
