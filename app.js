@@ -641,7 +641,6 @@ async function fetchTickerBIST(sym, mode, myGen){
     fetchOwnershipBIST(sym, myGen);   // ortaklık yapısı pastası (KAP verisi)
     TECH_SHORT=null;                  // kısa pozisyon verisi yalnız ABD'de var
     fetchTechPanel(sym, 'BIST', myGen);
-    fetchQuantPanel(sym+'.IS', myGen);
     ['insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
     updateWatchStar();
     stopNyClock();                  // NY saati yalnızca ABD hisselerinde
@@ -1060,7 +1059,6 @@ async function fetchTickerEU(euInfo, mode, myGen){
     fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
     TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
     fetchTechPanel(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
-    fetchQuantPanel(ysym, myGen);
     updateWatchStar();
     startEuExchangeClock(euInfo);   // sağ üstte borsanın bulunduğu şehrin canlı saati + seans durumu
     renderOwnershipEU(R.floatPct, R.floatShares, R.shares);   // halka açıklık pastası (TV free float)
@@ -1238,7 +1236,6 @@ async function fetchTickerUS(sym, mode, myGen){
     fetchInsiders(cik, myGen);   // Form 4 içeriden işlemler (yalnızca ABD)
     TECH_SHORT=null;             // önceki hissenin kısa pozisyonu görünmesin
     fetchTechPanel(sym, 'US', myGen);
-    fetchQuantPanel(sym, myGen);
     updateWatchStar();
     const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
@@ -3372,7 +3369,7 @@ function hidePriceUI(){
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
-  ['chartCard','sectorCard','insiderCard','ownerCard','techCard','quantCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
+  ['chartCard','sectorCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
   const ws=document.getElementById('watchStar'); if(ws) ws.classList.add('hidden');
@@ -3871,60 +3868,6 @@ async function fetchInsiders(cik, myGen){
 }
 
 /* ---- Quant risk/getiri (1Y günlük fiyat serisi) ---- */
-async function fetchQuantPanel(ysym, myGen){
-  const card=document.getElementById('quantCard'), box=document.getElementById('quantBody');
-  if(!card||!box||!ysym) return;
-  card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Quant metrikler hesaplanıyor…</div>';
-  try{
-    const j=await fetch('/price?s='+encodeURIComponent(ysym)+'&range=1y').then(r=>r.ok?r.json():null);
-    if(myGen!=null && myGen!==REQ_GEN) return;
-    const closes=((((j||{}).chart||{}).result||[])[0]||{}).indicators;
-    const quote=(closes&&closes.quote&&closes.quote[0])||{};
-    const arr=(quote.close||[]).filter(x=>x!=null && Number.isFinite(x));
-    if(arr.length<30){ box.innerHTML='<div class="hint">Quant için yeterli fiyat geçmişi yok.</div>'; return; }
-    const rets=[];
-    for(let i=1;i<arr.length;i++){
-      if(arr[i-1]>0) rets.push(arr[i]/arr[i-1]-1);
-    }
-    if(rets.length<20){ box.innerHTML='<div class="hint">Getiri serisi yetersiz.</div>'; return; }
-    const mean=rets.reduce((a,b)=>a+b,0)/rets.length;
-    const variance=rets.reduce((a,r)=>a+(r-mean)*(r-mean),0)/(rets.length-1);
-    const dailyVol=Math.sqrt(variance);
-    const annVol=dailyVol*Math.sqrt(252)*100;
-    const totalRet=(arr[arr.length-1]/arr[0]-1)*100;
-    const annRet=(Math.pow(arr[arr.length-1]/arr[0], 252/rets.length)-1)*100;
-    const sharpe=annVol>0?(annRet/annVol):null; // rf≈0 basit Sharpe
-    let peak=arr[0], maxDd=0;
-    for(const p of arr){
-      if(p>peak) peak=p;
-      const dd=(peak-p)/peak;
-      if(dd>maxDd) maxDd=dd;
-    }
-    const maxDdPct=maxDd*100;
-    const calmar=(maxDdPct>0)?(annRet/maxDdPct):null;
-    const downside=rets.filter(r=>r<0);
-    const downVar=downside.length?downside.reduce((a,r)=>a+r*r,0)/downside.length:0;
-    const sortino=downVar>0?(annRet/(Math.sqrt(downVar)*Math.sqrt(252)*100)):null;
-    const kpi=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
-      <div class="val" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
-      ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
-    const n=(v,d)=>v==null?'—':Number(v).toFixed(d==null?2:d);
-    const clsRet=v=>v==null?'neutral':v>=0?'up':'down';
-    let html='<div class="grid" style="margin-bottom:12px">';
-    html+=kpi('Yıllık Getiri', n(annRet,1)+'%', '1Y fiyat serisi', clsRet(annRet));
-    html+=kpi('Yıllık Volatilite', n(annVol,1)+'%', 'std × √252', annVol>40?'down':annVol>25?'warn':'up');
-    html+=kpi('Sharpe (rf≈0)', n(sharpe,2), sharpe==null?'':(sharpe>=1?'iyi risk-getiri':sharpe>=0.5?'orta':'zayıf'), sharpe!=null&&sharpe>=1?'up':sharpe!=null&&sharpe<0.3?'down':'neutral');
-    html+=kpi('Sortino', n(sortino,2), 'yalnız aşağı yön riski', sortino!=null&&sortino>=1?'up':'neutral');
-    html+=kpi('Max Drawdown', n(maxDdPct,1)+'%', 'zirveden en büyük düşüş', maxDdPct>30?'down':maxDdPct>15?'warn':'up');
-    html+=kpi('Calmar', n(calmar,2), 'getiri / |max DD|', calmar!=null&&calmar>=1?'up':'neutral');
-    html+=kpi('Dönem Getirisi', n(totalRet,1)+'%', arr.length+' işlem günü', clsRet(totalRet));
-    html+='</div>';
-    html+='<div class="hint">Kaynak: Yahoo günlük kapanış (/price). Sharpe/Sortino risksiz faiz ≈ 0 varsayar; karşılaştırma amaçlıdır, tavsiye değildir.</div>';
-    box.innerHTML=html;
-  }catch(e){ box.innerHTML='<div class="hint">Quant hesaplanamadı: '+safeHTML(e.message)+'</div>'; }
-}
-
 /* ---- Fiyat Grafiği (etkileşimli SVG, bağımsız) ---- */
 let CHART_STATE={ sym:null, ysym:null, range:'1y', filedD0:null, filedD1:null };
 const CHART_RANGE_MAP={'1mo':{yrange:'1mo'},'3mo':{yrange:'3mo'},'6mo':{yrange:'6mo'},'1y':{yrange:'1y'},'5y':{yrange:'5y'}};
