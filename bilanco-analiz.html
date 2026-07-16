@@ -95,6 +95,10 @@
   .live-price .lp-chg{font-size:13px;font-weight:700}
   .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
   .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  /* Canlı fiyat / piyasa değeri / borsa saati yalnız Bilanço Analizi sekmesinde */
+  body:not(.page-stock) #livePrice,
+  body:not(.page-stock) #hdBadge,
+  body:not(.page-stock) #nyClock{display:none!important}
 
   /* --- Sekme çubuğu (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) --- */
   .tabs-nav{background:rgba(12,16,34,.92);border-bottom:1px solid var(--line-2);

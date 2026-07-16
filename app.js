@@ -4,6 +4,7 @@ function switchPage(p){
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
+  document.body.classList.toggle('page-stock', p==='stock');
   document.getElementById('marketTape')?.classList.toggle('hidden', p!=='home');
   if(p==='econ') initEconPage();       // ülke kutuları ilk girişte kurulur (tembel)
   if(p==='top100') initTop100Page();
