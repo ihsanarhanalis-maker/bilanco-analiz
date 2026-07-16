@@ -4925,6 +4925,39 @@ async function loadEqCalendar(){
 /* ---------- ETF (ABD Yahoo) · TR hisse fonları (TEFAS/KAP + holdings) ---------- */
 const ETF_PRESETS_US=['SPY','QQQ','IWM','DIA','EEM','VEA','VWO','GLD','TLT','XLK','XLF','XLE','VNQ','ARKK','SMH'];
 let ETF_MKT='US', ETF_PAGE_INIT=false, TEFAS_TOP=[];
+/* Yahoo / TradingView / ETFDB sektör adları → Türkçe etiket */
+const ETF_SECTOR_TR={
+  technology:'Teknoloji', healthcare:'Sağlık', financialservices:'Finansal Hizmetler',
+  financial_services:'Finansal Hizmetler', financials:'Finans', finance:'Finans',
+  consumercyclical:'Tüketici (Döngüsel)', consumer_cyclical:'Tüketici (Döngüsel)',
+  consumerdefensive:'Tüketici (Temel)', consumer_defensive:'Tüketici (Temel)',
+  consumerdiscretionary:'Tüketici (İhtiyari)', consumerstaples:'Tüketici (Temel)',
+  communication_services:'İletişim Hizmetleri', communicationservices:'İletişim Hizmetleri',
+  communication:'İletişim',
+  industrials:'Sanayi', industrial:'Sanayi', energy:'Enerji', utilities:'Kamu Hizmetleri',
+  realestate:'Gayrimenkul', real_estate:'Gayrimenkul', basicmaterials:'Temel Malzemeler',
+  basic_materials:'Temel Malzemeler', materials:'Malzemeler',
+  'electronic technology':'Elektronik Teknoloji', 'technology services':'Teknoloji Hizmetleri',
+  'health technology':'Sağlık Teknolojisi', 'health services':'Sağlık Hizmetleri',
+  'consumer services':'Tüketici Hizmetleri', 'consumer durables':'Dayanıklı Tüketim',
+  'consumer non-durables':'Dayanıksız Tüketim', 'retail trade':'Perakende',
+  'producer manufacturing':'Üretici İmalat', 'process industries':'Süreç Endüstrileri',
+  'non-energy minerals':'Enerji Dışı Mineraller', 'energy minerals':'Enerji Mineralleri',
+  'commercial services':'Ticari Hizmetler', transportation:'Ulaştırma',
+  'distribution services':'Dağıtım Hizmetleri', 'miscellaneous':'Diğer',
+  'health care':'Sağlık', healthcare_sector:'Sağlık', 'information technology':'Bilişim',
+  'real estate':'Gayrimenkul', 'basic materials':'Temel Malzemeler',
+  'consumer discretionary':'Tüketici (İhtiyari)', 'consumer staples':'Tüketici (Temel)',
+  'communication services':'İletişim Hizmetleri', telecommunications:'Telekomünikasyon',
+  other:'Diğer', cash:'Nakit', 'n/a':'Diğer'
+};
+function trSectorLabel(name){
+  if(name==null||name==='') return '—';
+  const raw=String(name).trim();
+  const key=raw.toLowerCase().replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
+  const compact=key.replace(/[\s\-]+/g,'');
+  return ETF_SECTOR_TR[key]||ETF_SECTOR_TR[compact]||raw;
+}
 function fmtAumTr(n){
   if(n==null||!isFinite(n)) return '—';
   if(n>=1e12) return (n/1e12).toLocaleString('tr-TR',{maximumFractionDigits:2})+' Tr ₺';
@@ -5051,7 +5084,7 @@ async function loadTefasFund(code){
     const sectors=f.sectors||[];
     const holdings=f.holdings||[];
     if(sectors.length){
-      const srows=sectors.map(s=>`<tr><td style="text-align:left">${safeHTML(s.sector||'—')}</td><td><b>%${Number(s.weight).toFixed(1)}</b></td></tr>`).join('');
+      const srows=sectors.map(s=>`<tr><td style="text-align:left">${safeHTML(trSectorLabel(s.sector))}</td><td><b>%${Number(s.weight).toFixed(1)}</b></td></tr>`).join('');
       html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Sektör Ağırlıkları</div>
         <div class="hint" style="margin-bottom:8px">Portföy hisselerinin TradingView sektörlerine göre ağırlıklı dağılımı.</div>
         <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Sektör</th><th>Ağırlık</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
@@ -5122,7 +5155,7 @@ async function loadEtf(code){
         const k=Object.keys(s||{})[0];
         const v=k!=null?s[k]:null;
         const pct=v==null?null:(v<=1?v*100:v);
-        return `<tr><td>${safeHTML(k||'—')}</td><td><b>${pct==null?'—':'%'+Number(pct).toFixed(1)}</b></td></tr>`;
+        return `<tr><td>${safeHTML(trSectorLabel(k))}</td><td><b>${pct==null?'—':'%'+Number(pct).toFixed(1)}</b></td></tr>`;
       }).join('');
       html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Sektör Ağırlıkları</div>
         <div style="overflow-x:auto"><table><thead><tr><th>Sektör</th><th>Ağırlık</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
