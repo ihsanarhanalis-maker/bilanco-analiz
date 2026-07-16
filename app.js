@@ -2877,15 +2877,17 @@ async function fetchPrice(sym, cik, myGen, opts){
         `<span class="lp-live">● canlı</span>`;
       lp.classList.remove('hidden');
     }else lp.classList.add('hidden');
-    // Piyasa değeri (≈ canlı fiyat × dolaşımdaki pay) → sağ üstteki rozet
+    // Piyasa değeri (≈ canlı fiyat × dolaşımdaki pay) → canlı fiyatın altındaki rozet
     const mcap = (live!=null && shares) ? live*shares : null;
     const badge=document.getElementById('hdBadge');
     if(badge){
       if(mcap!=null){
         badge.className='hd-badge mcap';
         badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
+        badge.classList.remove('hidden');
       }else{
-        badge.className='hd-badge'; badge.textContent='SEC EDGAR + Bing News';
+        badge.className='hd-badge hidden';
+        badge.textContent='';
       }
     }
     // Değerleme oranları (canlı): F/K, PD/DD — en güncel piyasa değeri + SEC verisiyle
@@ -3351,7 +3353,7 @@ function hidePriceUI(){
   const en=document.getElementById('earnNote');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
-  if(bd){ bd.className='hd-badge'; bd.textContent='SEC EDGAR + Bing News'; }
+  if(bd){ bd.className='hd-badge hidden'; bd.textContent=''; }
   if(tc) tc.classList.add('hidden');
   if(vc) vc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
