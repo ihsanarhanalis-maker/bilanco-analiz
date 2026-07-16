@@ -5,6 +5,8 @@ function switchPage(p){
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
   document.body.classList.toggle('page-stock', p==='stock');
+  /* Logo / Ana Sayfa: önceki hissenin canlı fiyatı ve yerel saati üstte kalmasın */
+  document.getElementById('hdrStockMeta')?.classList.toggle('hidden', p!=='stock');
   document.getElementById('marketTape')?.classList.toggle('hidden', p!=='home');
   if(p==='econ') initEconPage();       // ülke kutuları ilk girişte kurulur (tembel)
   if(p==='top100') initTop100Page();
@@ -2878,11 +2880,12 @@ async function fetchPrice(sym, cik, myGen, opts){
         `<span class="lp-live">● canlı</span>`;
       lp.classList.remove('hidden');
     }else lp.classList.add('hidden');
-    // Piyasa değeri (≈ canlı fiyat × dolaşımdaki pay) → canlı fiyatın altındaki rozet
+    // Piyasa değeri: yalnız BIST — canlı fiyatın altında rozet (diğer 24 ülkede gösterilmez)
     const mcap = (live!=null && shares) ? live*shares : null;
+    const isBist = (FIN&&FIN.market==='BIST') || /\.IS$/i.test(ysym);
     const badge=document.getElementById('hdBadge');
     if(badge){
-      if(mcap!=null){
+      if(isBist && mcap!=null){
         badge.className='hd-badge mcap';
         badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
         badge.classList.remove('hidden');

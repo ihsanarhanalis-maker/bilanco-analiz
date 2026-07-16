@@ -96,9 +96,8 @@
   .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
   .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
   /* Canlı fiyat / piyasa değeri / borsa saati yalnız Bilanço Analizi sekmesinde */
-  body:not(.page-stock) #livePrice,
-  body:not(.page-stock) #hdBadge,
-  body:not(.page-stock) #nyClock{display:none!important}
+  #hdrStockMeta.hidden{display:none!important}
+  body:not(.page-stock) #hdrStockMeta{display:none!important}
 
   /* --- Sekme çubuğu (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) --- */
   .tabs-nav{background:rgba(12,16,34,.92);border-bottom:1px solid var(--line-2);
@@ -436,7 +435,7 @@
     <div>
       <h1>Bilanço Analiz <button type="button" id="pwaInstall" class="no-print" onclick="installPwa()">📲 Yükle</button></h1>
     </div>
-    <div style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+    <div id="hdrStockMeta" class="hidden" style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div id="livePrice" class="live-price hidden"></div>
       <div id="hdBadge" class="hd-badge hidden"></div>
       <div id="nyClock" class="hidden" style="font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:600"></div>
