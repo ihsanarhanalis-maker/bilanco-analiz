@@ -4954,9 +4954,10 @@ const ETF_SECTOR_TR={
 function trSectorLabel(name){
   if(name==null||name==='') return '—';
   const raw=String(name).trim();
-  const key=raw.toLowerCase().replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
-  const compact=key.replace(/[\s\-]+/g,'');
-  return ETF_SECTOR_TR[key]||ETF_SECTOR_TR[compact]||raw;
+  const lower=raw.toLowerCase();
+  const spaced=lower.replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
+  const compact=spaced.replace(/[\s\-]+/g,'');
+  return ETF_SECTOR_TR[lower]||ETF_SECTOR_TR[spaced]||ETF_SECTOR_TR[compact]||raw;
 }
 function fmtAumTr(n){
   if(n==null||!isFinite(n)) return '—';

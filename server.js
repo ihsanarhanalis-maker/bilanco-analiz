@@ -194,6 +194,53 @@ function yahooUnwrap(v) {
   if (v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, 'raw')) return v.raw;
   return v;
 }
+/* ABD ETF sektör anahtarları (Yahoo/TV) → Türkçe etiket */
+const SECTOR_TR = {
+  technology: 'Teknoloji', healthcare: 'Sağlık', financialservices: 'Finansal Hizmetler',
+  financial_services: 'Finansal Hizmetler', financials: 'Finans', finance: 'Finans',
+  consumercyclical: 'Tüketici (Döngüsel)', consumer_cyclical: 'Tüketici (Döngüsel)',
+  consumerdefensive: 'Tüketici (Temel)', consumer_defensive: 'Tüketici (Temel)',
+  consumerdiscretionary: 'Tüketici (İhtiyari)', consumerstaples: 'Tüketici (Temel)',
+  communication_services: 'İletişim Hizmetleri', communicationservices: 'İletişim Hizmetleri',
+  communication: 'İletişim', industrials: 'Sanayi', industrial: 'Sanayi', energy: 'Enerji',
+  utilities: 'Kamu Hizmetleri', realestate: 'Gayrimenkul', real_estate: 'Gayrimenkul',
+  basicmaterials: 'Temel Malzemeler', basic_materials: 'Temel Malzemeler', materials: 'Malzemeler',
+  'electronic technology': 'Elektronik Teknoloji', 'technology services': 'Teknoloji Hizmetleri',
+  'health technology': 'Sağlık Teknolojisi', 'health services': 'Sağlık Hizmetleri',
+  'consumer services': 'Tüketici Hizmetleri', 'consumer durables': 'Dayanıklı Tüketim',
+  'consumer non-durables': 'Dayanıksız Tüketim', 'retail trade': 'Perakende',
+  'producer manufacturing': 'Üretici İmalat', 'process industries': 'Süreç Endüstrileri',
+  'non-energy minerals': 'Enerji Dışı Mineraller', 'energy minerals': 'Enerji Mineralleri',
+  'commercial services': 'Ticari Hizmetler', transportation: 'Ulaştırma',
+  'distribution services': 'Dağıtım Hizmetleri', miscellaneous: 'Diğer',
+  'health care': 'Sağlık', 'information technology': 'Bilişim', 'real estate': 'Gayrimenkul',
+  'basic materials': 'Temel Malzemeler', 'consumer discretionary': 'Tüketici (İhtiyari)',
+  'consumer staples': 'Tüketici (Temel)', 'communication services': 'İletişim Hizmetleri',
+  telecommunications: 'Telekomünikasyon', other: 'Diğer', cash: 'Nakit'
+};
+function trSectorLabel(name) {
+  if (name == null || name === '') return '—';
+  const raw = String(name).trim();
+  const lower = raw.toLowerCase();
+  const spaced = lower.replace(/[_/]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const compact = spaced.replace(/[\s\-]+/g, '');
+  return SECTOR_TR[lower] || SECTOR_TR[spaced] || SECTOR_TR[compact] || raw;
+}
+function localizeSectorWeightings(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.map(item => {
+    if (!item || typeof item !== 'object') return item;
+    if (item.sector != null) {
+      return Object.assign({}, item, { sector: trSectorLabel(item.sector) });
+    }
+    const k = Object.keys(item)[0];
+    if (k == null) return item;
+    const v = yahooUnwrap(item[k]);
+    const o = {};
+    o[trSectorLabel(k)] = v;
+    return o;
+  });
+}
 
 
 /* Metni Türkçe'ye çevir — çoklu YEDEKLİ kaynak zinciri.
@@ -1218,7 +1265,7 @@ http.createServer((req, res) => {
           holdingName: h.holdingName || h.holdingNameLong || h.symbol,
           holdingPercent: yahooUnwrap(h.holdingPercent)
         })) : [],
-        sectorWeightings: Array.isArray(th.sectorWeightings) ? th.sectorWeightings : [],
+        sectorWeightings: localizeSectorWeightings(th.sectorWeightings),
         cashPosition: yahooUnwrap(th.cashPosition),
         stockPosition: yahooUnwrap(th.stockPosition),
         bondPosition: yahooUnwrap(th.bondPosition)
@@ -1299,7 +1346,7 @@ http.createServer((req, res) => {
           quoteType: { longName: longName, shortName: rawSym, quoteType: 'ETF' },
           price: px != null ? { regularMarketPrice: px } : undefined,
           fundProfile: { categoryName: 'ETF', family: 'StockAnalysis' },
-          topHoldings: { holdings, sectorWeightings: sectors }
+          topHoldings: { holdings, sectorWeightings: localizeSectorWeightings(sectors) }
         });
       });
     });
@@ -1320,7 +1367,7 @@ http.createServer((req, res) => {
                 source: 'ssga',
                 quoteType: { longName: parsed.fundName || code, shortName: code, quoteType: 'ETF' },
                 fundProfile: { categoryName: 'ETF', family: 'State Street' },
-                topHoldings: { holdings: parsed.holdings, sectorWeightings: sectors }
+                topHoldings: { holdings: parsed.holdings, sectorWeightings: localizeSectorWeightings(sectors) }
               };
             }
           }
@@ -1340,7 +1387,7 @@ http.createServer((req, res) => {
               source: 'etfdb',
               quoteType: { longName: meta.longName, shortName: code, quoteType: 'ETF' },
               fundProfile: { categoryName: 'ETF', family: 'ETF Database' },
-              topHoldings: { holdings, sectorWeightings: sectors }
+              topHoldings: { holdings, sectorWeightings: localizeSectorWeightings(sectors) }
             };
           }
         }
@@ -1692,7 +1739,7 @@ http.createServer((req, res) => {
             name: h.name,
             holdingPercent: h.weight
           }));
-          fund.sectors = sectors.slice(0, 15);
+          fund.sectors = localizeSectorWeightings(sectors.slice(0, 15));
           return send({
             ok: true,
             source: 'tefas+kap',
