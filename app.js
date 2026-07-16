@@ -2287,7 +2287,6 @@ function applyScanFilters(){
     if(SCAN_QF.has('value') && !((pe!=null&&pe>0&&pe<15) || (pb!=null&&pb>0&&pb<1.5))) return false;
     if(SCAN_QF.has('quality') && !((roe!=null&&roe>=15) || (nm!=null&&nm>=10))) return false;
     if(SCAN_QF.has('relvol') && (rel==null || rel<1.5)) return false;
-    if(SCAN_QF.has('lowvol') && (vol==null || vol>12)) return false;
     return true;
   });
   SCAN_PAGE=0;
