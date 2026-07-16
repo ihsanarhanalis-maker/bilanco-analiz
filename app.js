@@ -5096,7 +5096,8 @@ async function loadEtf(code){
   if(meta) meta.textContent='';
   try{
     const j=await fetch('/yqs?s='+encodeURIComponent(ysym)+'&m=topHoldings,fundProfile,summaryDetail,quoteType,price').then(r=>r.ok?r.json():null);
-    if(!j || (j.error && !j.quoteType && !j.summaryDetail && !j.price)){
+    const hasHold=j&&j.topHoldings&&((j.topHoldings.holdings||[]).length||(j.topHoldings.sectorWeightings||[]).length);
+    if(!j || (!hasHold && j.error && !j.quoteType && !j.summaryDetail && !j.price)){
       box.innerHTML='<div class="hint">Fon bulunamadı. ABD için <b>SPY</b> dene.</div>';
       return;
     }

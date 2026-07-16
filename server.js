@@ -1080,7 +1080,51 @@ http.createServer((req, res) => {
         });
       });
     };
-    fetchQs(false).then(sendJson).catch(() => finvizHoldersFallback());
+    /* Render/bulut IP'lerinde Yahoo crumb kırılınca ETF holdings için StockAnalysis yedeği */
+    const stockAnalysisEtfFallback = () => {
+      const code = rawSym.replace(/\.US$/i, '').toLowerCase();
+      const url = 'https://stockanalysis.com/etf/' + encodeURIComponent(code) + '/holdings/';
+      httpGetHtmlFollow(url, { 'User-Agent': BUA, 'Accept': 'text/html' }, 4, (err, status, html) => {
+        if (err || status !== 200 || !html) { finvizHoldersFallback(); return; }
+        const holdings = [];
+        const hre = /href="\/stocks\/([a-z0-9.\-]+)\/"\s*>([A-Z0-9.\-]+)<\/a>[\s\S]{0,500}?<td class="shr[^"]*">([^<]*)<\/td>[\s\S]{0,300}?>([0-9.]+)%<\/td>/gi;
+        let hm;
+        while ((hm = hre.exec(html)) && holdings.length < 25) {
+          holdings.push({
+            symbol: hm[2],
+            holdingName: String(hm[3] || '').replace(/&amp;/g, '&').trim(),
+            holdingPercent: parseFloat(hm[4]) / 100
+          });
+        }
+        const sectors = [];
+        const sre = /\{n:"([^"]+)",w:([0-9.]+)\}/g;
+        let sm;
+        while ((sm = sre.exec(html)) && sectors.length < 20) {
+          const name = sm[1];
+          if (/United States|Switzerland|China|Netherlands|Ireland|United Kingdom|Canada|Brazil|country/i.test(name)) continue;
+          const obj = {};
+          obj[name] = parseFloat(sm[2]) / 100;
+          sectors.push(obj);
+        }
+        if (!holdings.length && !sectors.length) { finvizHoldersFallback(); return; }
+        let longName = rawSym;
+        const tm = html.match(/<title>([^|<]+)/i);
+        if (tm) longName = tm[1].replace(/\s*Holdings.*$/i, '').trim() || rawSym;
+        const pxm = html.match(/\$([0-9]+(?:\.[0-9]+)?)/);
+        const px = pxm ? parseFloat(pxm[1]) : null;
+        sendJson({
+          source: 'stockanalysis',
+          quoteType: { longName: longName, shortName: rawSym, quoteType: 'ETF' },
+          price: px != null ? { regularMarketPrice: px } : undefined,
+          fundProfile: { categoryName: 'ETF', family: 'StockAnalysis' },
+          topHoldings: { holdings, sectorWeightings: sectors }
+        });
+      });
+    };
+    fetchQs(false).then(sendJson).catch(() => {
+      if (mods.includes('topHoldings')) stockAnalysisEtfFallback();
+      else finvizHoldersFallback();
+    });
     return;
   }
 
