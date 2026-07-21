@@ -2207,6 +2207,12 @@ function toggleScanQ(btn){
   else { SCAN_QF.add(q); btn.classList.add('active'); }
   applyScanFilters();
 }
+function scanNum(id){
+  const el=document.getElementById(id);
+  if(!el || el.value==='' || el.value==null) return null;
+  const n=Number(el.value);
+  return Number.isFinite(n)?n:null;
+}
 function scanMcapInBands(mcap, cc){
   if(SCAN_CAPS.has('all') || !SCAN_CAPS.size) return true;
   if(mcap==null) return false;
