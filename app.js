@@ -2144,18 +2144,37 @@ function scanQuantScore(d){
   if(!n) return null;
   return Math.round((value+mom+qual)/3);
 }
+/* BIST YDF önbelleği: sym → { ydf, reserves, paidIn, r2p, ts }. KAP /bist ile doldurulur. */
+const SCAN_YDF_CACHE={};
+let SCAN_YDF_GEN=0;
 function initScanPage(){
   if(SCAN_PAGE_INIT) return;
   SCAN_PAGE_INIT=true;
   document.getElementById('scanCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
     `<button class="cbox" id="scanbox-${cc}" onclick="selectScanCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  updateScanYdfUi();
   selectScanCountry('TR');
 }
 function selectScanCountry(cc){
   document.getElementById('scanbox-'+SCAN_CC)?.classList.remove('active');
   SCAN_CC=cc;
   document.getElementById('scanbox-'+cc)?.classList.add('active');
+  updateScanYdfUi();
   loadScanMarket(cc);
+}
+function updateScanYdfUi(){
+  const isTr=SCAN_CC==='TR';
+  const filt=document.getElementById('scanYdfFilter');
+  const opt=document.getElementById('scanSortYdf');
+  if(filt) filt.style.display=isTr?'inline-flex':'none';
+  if(opt) opt.style.display=isTr?'':'none';
+  if(!isTr){
+    SCAN_YDF_GEN++;
+    const sortEl=document.getElementById('scanSort');
+    if(sortEl && sortEl.value==='ydf-desc') sortEl.value='mcap-desc';
+    const ydfMin=document.getElementById('scanYdfMin');
+    if(ydfMin) ydfMin.value='';
+  }
 }
 function toggleScanCap(btn){
   const cap=btn.dataset.cap;
@@ -2219,6 +2238,7 @@ async function loadScanMarket(cc){
   if(cached && (Date.now()-cached.ts)<10*60000 && cached.rows && cached.rows[0] && cached.rows[0].length>=needLen){
     SCAN_RAW=cached.rows;
     applyScanFilters();
+    if(cc==='TR') enrichScanYdf();
     return;
   }
   const myGen=++SCAN_GEN;
@@ -2263,6 +2283,7 @@ async function loadScanMarket(cc){
     SCAN_CACHE[cacheKey]={ rows:all, ts:Date.now(), total:total||all.length };
     SCAN_RAW=all;
     applyScanFilters();
+    if(cc==='TR') enrichScanYdf();
   }catch(e){
     if(myGen===SCAN_GEN){
       box.innerHTML='<div class="hint">Liste alınamadı: '+safeHTML(e.message)+'</div>';
@@ -2281,6 +2302,7 @@ function onScanSortChange(){
   renderScanPage();
 }
 function applyScanFilters(){
+  const ydfMin=SCAN_CC==='TR' ? scanNum('scanYdfMin') : null;
   SCAN_VIEW=SCAN_RAW.filter(d=>{
     if(!scanMcapInBands(d[SCAN_I.mcap], SCAN_CC)) return false;
     const close=d[SCAN_I.close], sma50=d[SCAN_I.sma50], sma200=d[SCAN_I.sma200];
@@ -2294,10 +2316,89 @@ function applyScanFilters(){
     if(SCAN_QF.has('value') && !((pe!=null&&pe>0&&pe<15) || (pb!=null&&pb>0&&pb<1.5))) return false;
     if(SCAN_QF.has('quality') && !((roe!=null&&roe>=15) || (nm!=null&&nm>=10))) return false;
     if(SCAN_QF.has('relvol') && (rel==null || rel<1.5)) return false;
+    if(ydfMin!=null){
+      const sym=String(d[0]).replace(/_/g,'-');
+      const c=SCAN_YDF_CACHE[sym];
+      if(!c || c.ydf==null || c.ydf<ydfMin) return false;
+    }
     return true;
   });
   SCAN_PAGE=0;
   renderScanPage();
+}
+function scanYdfOf(d){
+  const sym=String(d[0]||'').replace(/_/g,'-');
+  const c=SCAN_YDF_CACHE[sym];
+  return c && c.ydf!=null ? c.ydf : null;
+}
+/* KAP’tan son yıllık özkaynak + ödenmiş sermaye (YDF için hafif çağrı). */
+async function fetchBistYdfBasics(sym){
+  const thisY=new Date().getFullYear();
+  const pairs=[[thisY,12],[thisY-1,12],[thisY-2,12],[thisY-3,12]];
+  const has=c=>c && c.items.some(it=>[1,2,3,4].some(i=>it['value'+i]!=null && it['value'+i]!==''));
+  let group='XI_29';
+  let call=await bistCall(sym, group, pairs);
+  if(!has(call)){ group='UFRS'; call=await bistCall(sym, group, pairs); }
+  if(!has(call)) return null;
+  const byCode={};
+  bistMerge(byCode, call);
+  const equity=bc(byCode,'2O');
+  const common=bc(byCode,'2OA');
+  const dates=Object.keys(equity||{}).sort().reverse();
+  if(!dates.length) return null;
+  const d0=dates[0];
+  const eq=equity[d0], paid=common[d0];
+  if(eq==null || paid==null) return null;
+  return { equity:eq, paidIn:paid, reserves:eq-paid, date:d0 };
+}
+async function enrichScanYdf(){
+  if(SCAN_CC!=='TR') return;
+  const myGen=++SCAN_YDF_GEN;
+  const ttl=24*3600000;
+  const need=SCAN_RAW.filter(d=>{
+    const sym=String(d[0]).replace(/_/g,'-');
+    const c=SCAN_YDF_CACHE[sym];
+    return !c || (Date.now()-c.ts)>ttl;
+  });
+  if(!need.length){ renderScanPage(); return; }
+  const sub=document.getElementById('scanSub');
+  let done=0;
+  const conc=5;
+  let i=0;
+  async function worker(){
+    while(i<need.length){
+      if(myGen!==SCAN_YDF_GEN || SCAN_CC!=='TR') return;
+      const d=need[i++];
+      const sym=String(d[0]).replace(/_/g,'-');
+      try{
+        const snap=await fetchBistYdfBasics(sym);
+        const mcap=d[SCAN_I.mcap];
+        if(snap && mcap!=null && mcap>0){
+          SCAN_YDF_CACHE[sym]={
+            ydf:snap.reserves/mcap,
+            reserves:snap.reserves,
+            paidIn:snap.paidIn,
+            r2p:snap.paidIn>0 ? snap.reserves/snap.paidIn : null,
+            ts:Date.now()
+          };
+        }else{
+          SCAN_YDF_CACHE[sym]={ ydf:null, ts:Date.now() };
+        }
+      }catch(_e){
+        SCAN_YDF_CACHE[sym]={ ydf:null, ts:Date.now() };
+      }
+      done++;
+      if(done%15===0 || done===need.length){
+        if(sub) sub.innerHTML=`YDF (KAP) yükleniyor… <b>${done}</b> / ${need.length}` +
+          (scanNum('scanYdfMin')!=null?' · filtre aktif':'');
+        if(scanNum('scanYdfMin')!=null || (document.getElementById('scanSort')||{}).value==='ydf-desc')
+          applyScanFilters();
+        else renderScanPage();
+      }
+    }
+  }
+  await Promise.all(Array.from({length:conc}, ()=>worker()));
+  if(myGen===SCAN_YDF_GEN && SCAN_CC==='TR') applyScanFilters();
 }
 function scanSortedView(){
   const q=((document.getElementById('scanSearch')||{}).value||'').trim().toLowerCase();
@@ -2314,6 +2415,15 @@ function scanSortedView(){
   if(key==='quant'){
     return rows.slice().sort((a,b)=>{
       const va=scanQuantScore(a), vb=scanQuantScore(b);
+      if(va==null && vb==null) return 0;
+      if(va==null) return 1;
+      if(vb==null) return -1;
+      return mul*(va-vb);
+    });
+  }
+  if(key==='ydf'){
+    return rows.slice().sort((a,b)=>{
+      const va=scanYdfOf(a), vb=scanYdfOf(b);
       if(va==null && vb==null) return 0;
       if(va==null) return 1;
       if(vb==null) return -1;
@@ -2355,7 +2465,11 @@ function renderScanPage(){
     const capNote=SCAN_CAPS.has('all')?'tüm dilimler':[...SCAN_CAPS].join('+');
     const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend yok';
     const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):'quant filtresi yok';
-    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
+    const ydfMin=SCAN_CC==='TR'?scanNum('scanYdfMin'):null;
+    const ydfNote=SCAN_CC==='TR'
+      ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:' · YDF (KAP)')
+      : '';
+    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
   }
   if(!sorted.length){
     box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';
@@ -2366,6 +2480,11 @@ function renderScanPage(){
   const pp=v=>v==null?'—':v.toFixed(1)+'%';
   const dy=v=>v==null?'—':(v*100).toFixed(1)+'%';
   const xx=v=>v==null?'—':v.toFixed(1)+'x';
+  const ydfFmt=v=>{
+    if(v==null) return '—';
+    const cls=v>=0.8?'up':(v>=0.4?'neutral':'down');
+    return `<span class="${cls}">${v.toFixed(2)}</span>`;
+  };
   const chg=v=>{
     if(v==null) return '—';
     const cls=v>0?'up':(v<0?'down':'neutral');
@@ -2382,6 +2501,7 @@ function renderScanPage(){
     return `<span class="${cls}"><b>${v}</b></span>`;
   };
   const showEarn=SCAN_MODE==='earn';
+  const showYdf=SCAN_CC==='TR';
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
     return new Date(ts*1000).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
@@ -2398,6 +2518,7 @@ function renderScanPage(){
       <td>${d[SCAN_I.close]==null?'—':m.sym+Number(d[SCAN_I.close]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
       <td>${chg(d[SCAN_I.chg])}</td>
       ${showEarn?`<td style="white-space:nowrap">${earnCell(d[SCAN_I.earn])}</td>`:''}
+      ${showYdf?`<td>${ydfFmt(scanYdfOf(d))}</td>`:''}
       <td>${qCell(qs)}</td>
       <td>${rsi(d[SCAN_I.rsi])}</td>
       <td>${chg(d[SCAN_I.perf3m])}</td>
@@ -2412,6 +2533,7 @@ function renderScanPage(){
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
     <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
     ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
+    ${showYdf?'<th title="Toplam yedekler / piyasa değeri">YDF</th>':''}
     <th>Q</th><th>RSI</th><th>3A</th><th>Vol</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Temettü</th><th>Sektör</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
@@ -2900,6 +3022,7 @@ async function fetchPrice(sym, cik, myGen, opts){
     }
     // Değerleme oranları (canlı): F/K, PD/DD — en güncel piyasa değeri + SEC verisiyle
     renderValuation(mcap);
+    renderYdf(mcap);
     // Dönemsel fiyatlar (açıklandığı gün) — Bilanço Verisi
     const pCur=closeOn(fd0), pPrev=closeOn(fd1);
     const chip=(lbl,date,price,color)=> price==null?'' :
@@ -2944,6 +3067,38 @@ function renderValuation(mcap){
     cell('F/K (Fiyat / Kazanç)', x2(fk), netIncome==null?'net kâr verisi yetersiz':(netIncome<0?'şirket zararda — hesaplanamaz':'Net Kâr: '+fmtMcap(netIncome)+' · '+niLabel), fkCls) +
     cell('PD/DD (Piyasa Değ. / Defter Değ.)', x2(pddd), bookValue>0?'Defter Değeri: '+fmtMcap(bookValue):'özkaynak negatif — hesaplanamaz', pdCls) +
     cell('Defter Değeri (DD)', fmtMcap(bookValue), 'özkaynak (en güncel bilanço)');
+  card.classList.remove('hidden');
+}
+
+/* BIST YDF kartı: Toplam yedekler = Özkaynaklar − Ödenmiş sermaye; YDF = yedekler / PD.
+   Yalnız BIST; ≥0,80 yeşil (ucuz/güçlü yedek). */
+function renderYdf(mcap){
+  const card=document.getElementById('ydfCard'), box=document.getElementById('ydfBody');
+  if(!card||!box) return;
+  if(!FIN || FIN.market!=='BIST' || mcap==null){ card.classList.add('hidden'); return; }
+  const D=FIN.balance, D0=FIN.D0;
+  const vv=(m,d)=> (d && m && (d in m)) ? m[d] : null;
+  let equity=vv(D.equity,D0);
+  if(equity==null){
+    const a=vv(D.assets,D0);
+    if(a!=null) equity=a-liabTotal(D,D0);
+  }
+  const paidIn=vv(D.common,D0) ?? (FIN.sharesBist!=null?FIN.sharesBist:null);
+  if(equity==null || paidIn==null){ card.classList.add('hidden'); return; }
+  const reserves=equity-paidIn;
+  const ydf=mcap>0 ? reserves/mcap : null;
+  const r2p=paidIn>0 ? reserves/paidIn : null;
+  const ydfCls=ydf==null?'neutral':(ydf>=0.8?'up':ydf>=0.4?'neutral':'down');
+  const r2pCls=r2p==null?'neutral':(r2p>=1?'up':'neutral');
+  const cell=(lbl,val,sub,cls)=>`<div class="kpi"><div class="lbl">${lbl}</div>
+    <div class="val ${cls||''}" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
+    <div class="delta neutral">${sub}</div></div>`;
+  const x2=v=>v==null?'—':v.toFixed(2);
+  box.innerHTML =
+    cell('Toplam Yedekler', fmtMcap(reserves), 'Özkaynaklar − Ödenmiş sermaye') +
+    cell('YDF Oranı', x2(ydf), 'Toplam yedekler / Piyasa değeri · ≥0,80 tercih', ydfCls) +
+    cell('Ödenmiş Sermaye', fmtMcap(paidIn), 'KAP 2OA · düşük olması tercih') +
+    cell('Yedekler / Öd. Sermaye', x2(r2p), 'ne kadar yüksekse o kadar iyi', r2pCls);
   card.classList.remove('hidden');
 }
 
@@ -3358,12 +3513,14 @@ function setPeriodHeaders(curDate, prevDate){
 function hidePriceUI(){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
   const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard'), kc=document.getElementById('kapCard');
+  const yc=document.getElementById('ydfCard');
   const en=document.getElementById('earnNote');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
   if(bd){ bd.className='hd-badge hidden'; bd.textContent=''; }
   if(tc) tc.classList.add('hidden');
   if(vc) vc.classList.add('hidden');
+  if(yc) yc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
   ['chartCard','sectorCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
