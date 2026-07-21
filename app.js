@@ -2163,12 +2163,14 @@ function selectScanCountry(cc){
   loadScanMarket(cc);
 }
 function updateScanYdfUi(){
-  const isTr=SCAN_CC==='TR';
+  const ok=scanYdfMarket();
   const filt=document.getElementById('scanYdfFilter');
   const opt=document.getElementById('scanSortYdf');
-  if(filt) filt.style.display=isTr?'inline-flex':'none';
-  if(opt) opt.style.display=isTr?'':'none';
-  if(!isTr){
+  const hint=document.getElementById('scanYdfHint');
+  if(filt) filt.style.display=ok?'inline-flex':'none';
+  if(opt) opt.style.display=ok?'':'none';
+  if(hint) hint.textContent=SCAN_CC==='TR'?'BIST (KAP) · ≥0,80 tercih':(SCAN_CC==='US'?'ABD (SEC) · ≥0,80 tercih':'BIST / ABD · ≥0,80 tercih');
+  if(!ok){
     SCAN_YDF_GEN++;
     const sortEl=document.getElementById('scanSort');
     if(sortEl && sortEl.value==='ydf-desc') sortEl.value='mcap-desc';
@@ -2176,6 +2178,7 @@ function updateScanYdfUi(){
     if(ydfMin) ydfMin.value='';
   }
 }
+function scanYdfMarket(){ return SCAN_CC==='TR' || SCAN_CC==='US'; }
 function toggleScanCap(btn){
   const cap=btn.dataset.cap;
   if(cap==='all'){
@@ -2244,7 +2247,7 @@ async function loadScanMarket(cc){
   if(cached && (Date.now()-cached.ts)<10*60000 && cached.rows && cached.rows[0] && cached.rows[0].length>=needLen){
     SCAN_RAW=cached.rows;
     applyScanFilters();
-    if(cc==='TR') enrichScanYdf();
+    if(scanYdfMarket()) enrichScanYdf();
     return;
   }
   const myGen=++SCAN_GEN;
@@ -2289,7 +2292,7 @@ async function loadScanMarket(cc){
     SCAN_CACHE[cacheKey]={ rows:all, ts:Date.now(), total:total||all.length };
     SCAN_RAW=all;
     applyScanFilters();
-    if(cc==='TR') enrichScanYdf();
+    if(scanYdfMarket()) enrichScanYdf();
   }catch(e){
     if(myGen===SCAN_GEN){
       box.innerHTML='<div class="hint">Liste alınamadı: '+safeHTML(e.message)+'</div>';
@@ -2308,7 +2311,7 @@ function onScanSortChange(){
   renderScanPage();
 }
 function applyScanFilters(){
-  const ydfMin=SCAN_CC==='TR' ? scanNum('scanYdfMin') : null;
+  const ydfMin=scanYdfMarket() ? scanNum('scanYdfMin') : null;
   SCAN_VIEW=SCAN_RAW.filter(d=>{
     if(!scanMcapInBands(d[SCAN_I.mcap], SCAN_CC)) return false;
     const close=d[SCAN_I.close], sma50=d[SCAN_I.sma50], sma200=d[SCAN_I.sma200];
@@ -2357,9 +2360,37 @@ async function fetchBistYdfBasics(sym){
   if(eq==null || paid==null) return null;
   return { equity:eq, paidIn:paid, reserves:eq-paid, date:d0 };
 }
+/* SEC’ten son 10-K (yedek: 10-Q) özkaynak + common stock (YDF). */
+async function fetchUsYdfBasics(sym){
+  const map=window.CIK_MAP||{};
+  const raw=map[String(sym).toUpperCase()];
+  if(raw==null) return null;
+  const cik=String(raw).padStart(10,'0');
+  async function load(form){
+    const eq=pickInstant(await fetchConceptRaw(cik, CONCEPTS_BALANCE.equity, form));
+    let cm=pickInstant(await fetchConceptRaw(cik, CONCEPTS_BALANCE.common, form));
+    if(!Object.keys(cm).length)
+      cm=pickInstant(await fetchConceptRaw(cik, ['AdditionalPaidInCapital'], form));
+    return {eq, cm};
+  }
+  let {eq, cm}=await load('10-K');
+  if(!Object.keys(eq).length) ({eq, cm}=await load('10-Q'));
+  const dates=Object.keys(eq).sort().reverse();
+  if(!dates.length) return null;
+  const d0=dates[0];
+  let paid=cm[d0];
+  if(paid==null){
+    const cds=Object.keys(cm).sort().reverse();
+    if(cds.length) paid=cm[cds[0]];
+  }
+  const equity=eq[d0];
+  if(equity==null || paid==null) return null;
+  return { equity, paidIn:paid, reserves:equity-paid, date:d0 };
+}
 async function enrichScanYdf(){
-  if(SCAN_CC!=='TR') return;
+  if(!scanYdfMarket()) return;
   const myGen=++SCAN_YDF_GEN;
+  const cc=SCAN_CC;
   const ttl=24*3600000;
   const need=SCAN_RAW.filter(d=>{
     const sym=String(d[0]).replace(/_/g,'-');
@@ -2368,16 +2399,17 @@ async function enrichScanYdf(){
   });
   if(!need.length){ renderScanPage(); return; }
   const sub=document.getElementById('scanSub');
+  const srcLbl=cc==='TR'?'KAP':'SEC';
   let done=0;
-  const conc=5;
+  const conc=cc==='US'?3:5;
   let i=0;
   async function worker(){
     while(i<need.length){
-      if(myGen!==SCAN_YDF_GEN || SCAN_CC!=='TR') return;
+      if(myGen!==SCAN_YDF_GEN || SCAN_CC!==cc) return;
       const d=need[i++];
       const sym=String(d[0]).replace(/_/g,'-');
       try{
-        const snap=await fetchBistYdfBasics(sym);
+        const snap=cc==='TR' ? await fetchBistYdfBasics(sym) : await fetchUsYdfBasics(sym);
         const mcap=d[SCAN_I.mcap];
         if(snap && mcap!=null && mcap>0){
           SCAN_YDF_CACHE[sym]={
@@ -2395,7 +2427,7 @@ async function enrichScanYdf(){
       }
       done++;
       if(done%15===0 || done===need.length){
-        if(sub) sub.innerHTML=`YDF (KAP) yükleniyor… <b>${done}</b> / ${need.length}` +
+        if(sub) sub.innerHTML=`YDF (${srcLbl}) yükleniyor… <b>${done}</b> / ${need.length}` +
           (scanNum('scanYdfMin')!=null?' · filtre aktif':'');
         if(scanNum('scanYdfMin')!=null || (document.getElementById('scanSort')||{}).value==='ydf-desc')
           applyScanFilters();
@@ -2404,7 +2436,7 @@ async function enrichScanYdf(){
     }
   }
   await Promise.all(Array.from({length:conc}, ()=>worker()));
-  if(myGen===SCAN_YDF_GEN && SCAN_CC==='TR') applyScanFilters();
+  if(myGen===SCAN_YDF_GEN && SCAN_CC===cc) applyScanFilters();
 }
 function scanSortedView(){
   const q=((document.getElementById('scanSearch')||{}).value||'').trim().toLowerCase();
@@ -2471,9 +2503,9 @@ function renderScanPage(){
     const capNote=SCAN_CAPS.has('all')?'tüm dilimler':[...SCAN_CAPS].join('+');
     const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend yok';
     const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):'quant filtresi yok';
-    const ydfMin=SCAN_CC==='TR'?scanNum('scanYdfMin'):null;
-    const ydfNote=SCAN_CC==='TR'
-      ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:' · YDF (KAP)')
+    const ydfMin=scanYdfMarket()?scanNum('scanYdfMin'):null;
+    const ydfNote=scanYdfMarket()
+      ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:(SCAN_CC==='TR'?' · YDF (KAP)':' · YDF (SEC)'))
       : '';
     sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
   }
@@ -2507,7 +2539,7 @@ function renderScanPage(){
     return `<span class="${cls}"><b>${v}</b></span>`;
   };
   const showEarn=SCAN_MODE==='earn';
-  const showYdf=SCAN_CC==='TR';
+  const showYdf=scanYdfMarket();
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
     return new Date(ts*1000).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
@@ -3076,12 +3108,12 @@ function renderValuation(mcap){
   card.classList.remove('hidden');
 }
 
-/* BIST YDF kartı: Toplam yedekler = Özkaynaklar − Ödenmiş sermaye; YDF = yedekler / PD.
-   Yalnız BIST; ≥0,80 yeşil (ucuz/güçlü yedek). */
+/* YDF kartı: Toplam yedekler = Özkaynaklar − Ödenmiş sermaye; YDF = yedekler / PD.
+   BIST (KAP) ve ABD (SEC); ≥0,80 yeşil (ucuz/güçlü yedek). */
 function renderYdf(mcap){
   const card=document.getElementById('ydfCard'), box=document.getElementById('ydfBody');
   if(!card||!box) return;
-  if(!FIN || FIN.market!=='BIST' || mcap==null){ card.classList.add('hidden'); return; }
+  if(!FIN || (FIN.market!=='BIST' && FIN.market!=='US') || mcap==null){ card.classList.add('hidden'); return; }
   const D=FIN.balance, D0=FIN.D0;
   const vv=(m,d)=> (d && m && (d in m)) ? m[d] : null;
   let equity=vv(D.equity,D0);
@@ -3089,7 +3121,8 @@ function renderYdf(mcap){
     const a=vv(D.assets,D0);
     if(a!=null) equity=a-liabTotal(D,D0);
   }
-  const paidIn=vv(D.common,D0) ?? (FIN.sharesBist!=null?FIN.sharesBist:null);
+  let paidIn=vv(D.common,D0);
+  if(paidIn==null && FIN.market==='BIST' && FIN.sharesBist!=null) paidIn=FIN.sharesBist;
   if(equity==null || paidIn==null){ card.classList.add('hidden'); return; }
   const reserves=equity-paidIn;
   const ydf=mcap>0 ? reserves/mcap : null;
@@ -3100,10 +3133,11 @@ function renderYdf(mcap){
     <div class="val ${cls||''}" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
     <div class="delta neutral">${sub}</div></div>`;
   const x2=v=>v==null?'—':v.toFixed(2);
+  const paidSrc=FIN.market==='BIST'?'KAP 2OA':'SEC Common Stock';
   box.innerHTML =
     cell('Toplam Yedekler', fmtMcap(reserves), 'Özkaynaklar − Ödenmiş sermaye') +
     cell('YDF Oranı', x2(ydf), 'Toplam yedekler / Piyasa değeri · ≥0,80 tercih', ydfCls) +
-    cell('Ödenmiş Sermaye', fmtMcap(paidIn), 'KAP 2OA · düşük olması tercih') +
+    cell('Ödenmiş Sermaye', fmtMcap(paidIn), paidSrc+' · düşük olması tercih') +
     cell('Yedekler / Öd. Sermaye', x2(r2p), 'ne kadar yüksekse o kadar iyi', r2pCls);
   card.classList.remove('hidden');
 }

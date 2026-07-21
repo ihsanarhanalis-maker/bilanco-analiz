@@ -605,8 +605,8 @@
     </div>
 
     <div class="card hidden" id="ydfCard">
-      <h2>Yedekler &amp; YDF (BIST)</h2>
-      <div class="sub">Toplam yedekler = Özkaynaklar − Ödenmiş sermaye. YDF = Toplam yedekler / Piyasa değeri. Oran ne kadar yüksekse (özellikle ≥ 0,80) o kadar iyi; ödenmiş sermayesi düşük, yedekleri yüksek şirketler tercih edilir.</div>
+      <h2>Yedekler &amp; YDF</h2>
+      <div class="sub">Toplam yedekler = Özkaynaklar − Ödenmiş sermaye. YDF = Toplam yedekler / Piyasa değeri. Oran ne kadar yüksekse (özellikle ≥ 0,80) o kadar iyi; ödenmiş sermayesi düşük, yedekleri yüksek şirketler tercih edilir. <b>BIST</b> (KAP) ve <b>ABD</b> (SEC) hisselerinde görünür.</div>
       <div class="grid" id="ydfBody"></div>
     </div>
 
@@ -821,9 +821,9 @@
             <button type="button" class="scan-chip" data-qf="relvol" onclick="toggleScanQ(this)">Hacim ↑</button>
             <span id="scanYdfFilter" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
               <label style="flex-direction:row;align-items:center;gap:8px">YDF min
-                <input id="scanYdfMin" type="number" step="0.05" placeholder="0.80" style="width:88px" title="Toplam yedekler / piyasa değeri — yalnız BIST">
+                <input id="scanYdfMin" type="number" step="0.05" placeholder="0.80" style="width:88px" title="Toplam yedekler / piyasa değeri — BIST ve ABD">
               </label>
-              <span class="hint" style="margin:0">Yalnız BIST · ≥0,80 tercih</span>
+              <span class="hint" id="scanYdfHint" style="margin:0">BIST / ABD · ≥0,80 tercih</span>
             </span>
             <button type="button" class="primary" onclick="applyScanFilters()">Filtrele</button>
           </div>
