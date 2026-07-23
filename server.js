@@ -375,6 +375,8 @@ const TEFAS_HDR = {
 };
 let TEFAS_CACHE = { key: '', at: 0, pack: null };
 let KAP_HS_CACHE = { at: 0, codes: null };
+let KAP_OID_CACHE = { at: 0, map: null };          // BIST kod → mkkMemberOid
+let KAP_FLOAT_CACHE = new Map();                   // HISSE → { at, data }
 let FONO_HOLD_CACHE = new Map(); // code -> {at, holdings}
 let TEFAS_TOP_HOLD_CACHE = { at: 0, date: '', funds: null, ver: 0 };
 const TEFAS_TOP_HOLD_VER = 2; // sektör+varlık zorunlu filtre
@@ -518,6 +520,88 @@ async function tefasFetchDay(kind, fundCode) {
     return pack;
   }
   return null;
+}
+
+/* KAP fiili dolaşım — şirket genel sayfasındaki MKK güncel tutar/oran (formül yok). */
+function parseKapTrNum(s) {
+  if (s == null || s === '') return null;
+  const t = String(s).trim().replace(/\./g, '').replace(',', '.');
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+function buildKapOidMap(html) {
+  const unesc = String(html || '').replace(/\\"/g, '"');
+  const map = Object.create(null);
+  const add = (oid, codes) => {
+    if (!oid) return;
+    String(codes || '').split(/[,;]+/).map(s => s.trim().toUpperCase()).filter(Boolean)
+      .forEach(c => { map[c] = oid; });
+  };
+  const re = /\{[^{}]*"mkkMemberOid":"([^"]+)"[^{}]*"stockCode":"([^"]+)"[^{}]*\}/g;
+  const re2 = /\{[^{}]*"stockCode":"([^"]+)"[^{}]*"mkkMemberOid":"([^"]+)"[^{}]*\}/g;
+  let m;
+  while ((m = re.exec(unesc))) add(m[1], m[2]);
+  while ((m = re2.exec(unesc))) add(m[2], m[1]);
+  return map;
+}
+async function kapBistOidMap() {
+  if (KAP_OID_CACHE.map && (Date.now() - KAP_OID_CACHE.at) < 12 * 60 * 60 * 1000) {
+    return KAP_OID_CACHE.map;
+  }
+  const page = await httpsGetText('https://www.kap.org.tr/tr/bist-sirketler', {
+    'User-Agent': BUA, 'Accept': 'text/html', 'Accept-Language': 'tr-TR,tr;q=0.9'
+  });
+  const map = buildKapOidMap(page.body || '');
+  if (Object.keys(map).length) KAP_OID_CACHE = { at: Date.now(), map };
+  return KAP_OID_CACHE.map || map;
+}
+function extractKapFloatFromHtml(html, hisse) {
+  const code = String(hisse || '').toUpperCase();
+  const parseArr = (raw) => {
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const row = arr.find(x => String(x.isin || '').toUpperCase().split(/[,;]+/)
+      .map(s => s.trim()).includes(code)) || arr[0];
+    return {
+      symbol: code,
+      floatShares: parseKapTrNum(row.actualSharesOutstanding),
+      floatPct: parseKapTrNum(row.actualOutstandingSharesRatio),
+      asOf: row.creationDate || null,
+      oid: row.mkkMemberOid || null,
+      source: 'kap'
+    };
+  };
+  const esc = html.match(/\\"itemKey\\":\\"kpy41_acc5_fiili_dolasimdaki_pay\\",\\"value\\":(\[[\s\S]*?\])/);
+  if (esc) {
+    try { return parseArr(esc[1].replace(/\\"/g, '"')); } catch (e) { /* fall through */ }
+  }
+  const plain = html.match(/"itemKey":"kpy41_acc5_fiili_dolasimdaki_pay","value":(\[[\s\S]*?\])/);
+  if (plain) {
+    try { return parseArr(plain[1]); } catch (e) { /* fall through */ }
+  }
+  return null;
+}
+async function kapFloatShares(hisse) {
+  const sym = String(hisse || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!sym) return null;
+  const hit = KAP_FLOAT_CACHE.get(sym);
+  if (hit && (Date.now() - hit.at) < 60 * 60 * 1000) return hit.data;
+  const map = await kapBistOidMap();
+  const oid = map && map[sym];
+  if (!oid) {
+    const miss = { symbol: sym, floatShares: null, floatPct: null, asOf: null, source: 'kap', error: 'oid' };
+    KAP_FLOAT_CACHE.set(sym, { at: Date.now(), data: miss });
+    return miss;
+  }
+  const page = await httpsGetText('https://www.kap.org.tr/tr/sirket-bilgileri/genel/' + encodeURIComponent(oid), {
+    'User-Agent': BUA, 'Accept': 'text/html', 'Accept-Language': 'tr-TR,tr;q=0.9',
+    'Referer': 'https://www.kap.org.tr/tr/bist-sirketler'
+  });
+  const data = extractKapFloatFromHtml(page.body || '', sym) || {
+    symbol: sym, floatShares: null, floatPct: null, asOf: null, oid, source: 'kap', error: 'parse'
+  };
+  KAP_FLOAT_CACHE.set(sym, { at: Date.now(), data });
+  return data;
 }
 
 /* KAP YF listesi — fundClass HS = hisse senedi fonları */
@@ -1138,6 +1222,19 @@ http.createServer((req, res) => {
         res.end(body);
       });
     }).on('error', e => { res.writeHead(502); res.end('{"value":[]}'); });
+    return;
+  }
+
+  // --- BIST fiili dolaşım köprüsü (KAP şirket genel → MKK güncel pay tutarı/oran; formül yok) ---
+  if (urlPath === '/bistfloat') {
+    const h = (new URLSearchParams(req.url.split('?')[1] || '').get('hisse') || '').trim().toUpperCase();
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (!/^[A-Z0-9]{1,12}$/.test(h)) { send({ symbol: h, floatShares: null, floatPct: null, source: 'kap', error: 'bad_symbol' }); return; }
+    kapFloatShares(h).then(data => send(data || { symbol: h, floatShares: null, floatPct: null, source: 'kap', error: 'empty' }))
+      .catch(() => send({ symbol: h, floatShares: null, floatPct: null, source: 'kap', error: 'fetch' }));
     return;
   }
 

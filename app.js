@@ -3987,38 +3987,37 @@ function renderOwnerPie(slices, note){
       ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}</div></div>`;
   card.classList.remove('hidden');
 }
-/* Fiili dolaşımdaki senet = ödenmiş sermaye / halka açıklık oranı (BIST nominal 1 TL ≈ pay adedi).
-   ABD: toplam pay / halka açıklık (veya Finviz Shs Float varsa o kullanılır). Yalnız BIST / ABD. */
+/* Fiili dolaşımdaki senet:
+   BIST → KAP / MKK güncel `actualSharesOutstanding` (doğrudan; formül yok).
+   ABD → Finviz Shs Float (doğrudan). Yalnız BIST / ABD. */
 function hideOwnerFloat(){
   const el=document.getElementById('ownerFloatBody');
   if(el){ el.classList.add('hidden'); el.innerHTML=''; }
 }
-function floatRatioFromPct(pct){
-  if(pct==null || !Number.isFinite(pct) || pct<=0) return null;
-  return pct>1 ? pct/100 : pct;   // %45 → 0.45; 0.45 → 0.45
+function fmtKapAsOf(ymd){
+  const s=String(ymd||'');
+  if(/^\d{8}$/.test(s)) return s.slice(6,8)+'.'+s.slice(4,6)+'.'+s.slice(0,4);
+  return s||null;
 }
-function calcFloatShares(paidIn, floatPct){
-  const r=floatRatioFromPct(floatPct);
-  if(paidIn==null || !Number.isFinite(paidIn) || paidIn<=0 || r==null || r<=0) return null;
-  return paidIn / r;
-}
-function renderOwnerFloatKpis({ paidIn, floatPct, floatShares, paidLabel, note }){
+function renderOwnerFloatKpis({ paidIn, floatPct, floatShares, paidLabel, floatLabel, note }){
   const el=document.getElementById('ownerFloatBody');
   if(!el) return;
-  const fiili=floatShares!=null ? floatShares : calcFloatShares(paidIn, floatPct);
-  if(fiili==null && paidIn==null && floatPct==null){ hideOwnerFloat(); return; }
+  if(floatShares==null && paidIn==null && floatPct==null){ hideOwnerFloat(); return; }
   const cell=(lbl,val,sub)=>`<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="hint">${sub}</div>`:''}</div>`;
   el.innerHTML=`<div class="grid" style="margin:0">
     ${cell(paidLabel||'Ödenmiş Sermaye', paidIn!=null?fmtShort(paidIn):'—', 'Pay adedi ≈ (nominal 1)')}
     ${cell('Halka Açıklık', floatPct!=null?('%'+Number(floatPct).toFixed(2)):'—', 'Fiili dolaşım oranı')}
-    ${cell('Fiili Dolaşımdaki Senet', fiili!=null?fmtShort(fiili):'—', 'Ödenmiş sermaye ÷ halka açıklık')}
+    ${cell('Fiili Dolaşımdaki Senet', floatShares!=null?fmtShort(floatShares):'—', floatLabel||'KAP / MKK güncel')}
   </div>
   ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}`;
   el.classList.remove('hidden');
 }
 async function fetchOwnershipBIST(sym, myGen){
   try{
-    const j=await fetch('/bistown?hisse='+encodeURIComponent(sym)).then(r=>r.ok?r.json():null);
+    const [j, fl]=await Promise.all([
+      fetch('/bistown?hisse='+encodeURIComponent(sym)).then(r=>r.ok?r.json():null).catch(()=>null),
+      fetch('/bistfloat?hisse='+encodeURIComponent(sym)).then(r=>r.ok?r.json():null).catch(()=>null)
+    ]);
     if(myGen!=null && myGen!==REQ_GEN) return;
     let rows=((j&&j.value)||[]).map(v=>({
       label:(v.FO_ORTAK||'').trim(), pct:parseFloat(String(v.FO_ORTAK_ORANI||'').replace(',','.'))||0
@@ -4032,12 +4031,19 @@ async function fetchOwnershipBIST(sym, myGen){
     const halka=rows.find(s=>/halka|diğer/i.test(s.label));
     const paid=(FIN&&FIN.sharesBist!=null)?FIN.sharesBist
       :(FIN&&FIN.balance&&FIN.D0!=null?((FIN.balance.common||{})[FIN.D0]):null);
-    if(halka && paid!=null){
+    const floatShares=(fl && fl.floatShares!=null && Number.isFinite(fl.floatShares)) ? fl.floatShares : null;
+    const floatPct=(fl && fl.floatPct!=null && Number.isFinite(fl.floatPct)) ? fl.floatPct
+      : (halka ? halka.pct : null);
+    const asOf=fmtKapAsOf(fl && fl.asOf);
+    if(floatShares!=null || (halka && paid!=null) || floatPct!=null){
       renderOwnerFloatKpis({
         paidIn:paid,
-        floatPct:halka.pct,
+        floatPct,
+        floatShares,
         paidLabel:'Ödenmiş Sermaye',
-        note:'BIST: Ödenmiş sermaye (KAP 2OA) ÷ halka açıklık oranı = fiili dolaşımdaki senet.'
+        note: floatShares!=null
+          ? (`Kaynak: KAP — MKK güncel fiili dolaşım`+(asOf?` (${asOf})`:'')+`.`)
+          : 'KAP fiili dolaşım verisi alınamadı; oran ortaklık yapısından.'
       });
     }else hideOwnerFloat();
   }catch(e){ document.getElementById('ownerCard')?.classList.add('hidden'); hideOwnerFloat(); }
@@ -4071,13 +4077,14 @@ function renderOwnershipUS(own, ysym){
   renderOwnerPie(slices, note);
   const floatPct=own.shsOut && own.shsFloat ? (own.shsFloat/own.shsOut*100) : null;
   const paidShares=own.shsOut!=null ? own.shsOut : null;
-  if(paidShares!=null && floatPct!=null){
+  if(own.shsFloat!=null || (paidShares!=null && floatPct!=null)){
     renderOwnerFloatKpis({
       paidIn:paidShares,
       floatPct,
-      floatShares:calcFloatShares(paidShares, floatPct),
+      floatShares:own.shsFloat!=null ? own.shsFloat : null,
       paidLabel:'Toplam Pay (Shs Outstand)',
-      note:'ABD: Fiili dolaşımdaki senet = toplam pay ÷ halka açıklık oranı. Ödenmiş sermaye USD olduğu için pay adedi olarak Shs Outstand kullanılır.'
+      floatLabel:'Finviz Shs Float',
+      note:'Kaynak: Finviz — Shs Float (fiili dolaşımdaki senet, doğrudan).'
     });
   }else hideOwnerFloat();
   if(ysym) fetchInstitutionalHolders(ysym);
