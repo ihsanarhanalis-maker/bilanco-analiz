@@ -2083,11 +2083,10 @@ const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
 /* Kolon indeksleri: 0 name … 13 RSI, 14 Perf.3M, 15 Vol.M, 16 relVol, 17 beta; earn modunda +18 tarih */
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
   'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
-  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year',
-  'float_shares_outstanding','float_shares_percent_current'];
+  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year'];
 const SCAN_COLS_EARN=SCAN_COLS.concat(['earnings_release_next_date']);
 const SCAN_I={name:0,desc:1,mcap:2,close:3,chg:4,pe:5,pb:6,roe:7,nm:8,div:9,sector:10,
-  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,floatSh:18,floatPct:19,earn:20};
+  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,earn:18};
 const SCAN_TV_SORT={
   'mcap-desc':{sortBy:'market_cap_basic',sortOrder:'desc'},
   'mcap-asc':{sortBy:'market_cap_basic',sortOrder:'asc'},
@@ -2168,21 +2167,15 @@ function updateScanYdfUi(){
   const filt=document.getElementById('scanYdfFilter');
   const opt=document.getElementById('scanSortYdf');
   const hint=document.getElementById('scanYdfHint');
-  const fFilt=document.getElementById('scanFloatFilter');
-  const fOpt=document.getElementById('scanSortFloat');
   if(filt) filt.style.display=ok?'inline-flex':'none';
   if(opt) opt.style.display=ok?'':'none';
-  if(fFilt) fFilt.style.display=ok?'inline-flex':'none';
-  if(fOpt) fOpt.style.display=ok?'':'none';
   if(hint) hint.textContent=SCAN_CC==='TR'?'BIST (KAP) · ≥0,80 tercih':(SCAN_CC==='US'?'ABD (SEC) · ≥0,80 tercih':'BIST / ABD · ≥0,80 tercih');
   if(!ok){
     SCAN_YDF_GEN++;
     const sortEl=document.getElementById('scanSort');
-    if(sortEl && (sortEl.value==='ydf-desc' || sortEl.value==='float-desc')) sortEl.value='mcap-desc';
+    if(sortEl && sortEl.value==='ydf-desc') sortEl.value='mcap-desc';
     const ydfMin=document.getElementById('scanYdfMin');
     if(ydfMin) ydfMin.value='';
-    const floatMin=document.getElementById('scanFloatMin');
-    if(floatMin) floatMin.value='';
   }
 }
 function scanYdfMarket(){ return SCAN_CC==='TR' || SCAN_CC==='US'; }
@@ -2319,7 +2312,6 @@ function onScanSortChange(){
 }
 function applyScanFilters(){
   const ydfMin=scanYdfMarket() ? scanNum('scanYdfMin') : null;
-  const floatMin=scanYdfMarket() ? scanNum('scanFloatMin') : null;
   SCAN_VIEW=SCAN_RAW.filter(d=>{
     if(!scanMcapInBands(d[SCAN_I.mcap], SCAN_CC)) return false;
     const close=d[SCAN_I.close], sma50=d[SCAN_I.sma50], sma200=d[SCAN_I.sma200];
@@ -2337,10 +2329,6 @@ function applyScanFilters(){
       const sym=String(d[0]).replace(/_/g,'-');
       const c=SCAN_YDF_CACHE[sym];
       if(!c || c.ydf==null || c.ydf<ydfMin) return false;
-    }
-    if(floatMin!=null){
-      const fs=d[SCAN_I.floatSh];
-      if(fs==null || fs<floatMin) return false;
     }
     return true;
   });
@@ -2480,15 +2468,6 @@ function scanSortedView(){
       return mul*(va-vb);
     });
   }
-  if(key==='float'){
-    return rows.slice().sort((a,b)=>{
-      const va=a[SCAN_I.floatSh], vb=b[SCAN_I.floatSh];
-      if(va==null && vb==null) return 0;
-      if(va==null) return 1;
-      if(vb==null) return -1;
-      return mul*(va-vb);
-    });
-  }
   const idx={mcap:SCAN_I.mcap,chg:SCAN_I.chg,name:SCAN_I.name,pe:SCAN_I.pe,roe:SCAN_I.roe,
     div:SCAN_I.div,rsi:SCAN_I.rsi,perf3m:SCAN_I.perf3m,vol:SCAN_I.vol,beta:SCAN_I.beta}[key]??SCAN_I.mcap;
   return rows.slice().sort((a,b)=>{
@@ -2525,14 +2504,10 @@ function renderScanPage(){
     const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend yok';
     const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):'quant filtresi yok';
     const ydfMin=scanYdfMarket()?scanNum('scanYdfMin'):null;
-    const floatMin=scanYdfMarket()?scanNum('scanFloatMin'):null;
     const ydfNote=scanYdfMarket()
       ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:(SCAN_CC==='TR'?' · YDF (KAP)':' · YDF (SEC)'))
       : '';
-    const floatNote=scanYdfMarket()
-      ? (floatMin!=null?` · Fiili dolaşım ≥ ${fmtShort(floatMin)}`:' · Fiili dolaşım')
-      : '';
-    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote}${floatNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
+    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
   }
   if(!sorted.length){
     box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';
@@ -2565,12 +2540,10 @@ function renderScanPage(){
   };
   const showEarn=SCAN_MODE==='earn';
   const showYdf=scanYdfMarket();
-  const showFloat=scanYdfMarket();
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
     return new Date(ts*1000).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
   };
-  const floatFmt=v=>v==null?'—':fmtShort(v);
   const trRows=slice.map((d,i)=>{
     const code=m.click(String(d[0]).replace(/_/g,'-'));
     const n=SCAN_PAGE*SCAN_PAGE_SIZE+i+1;
@@ -2584,7 +2557,6 @@ function renderScanPage(){
       <td>${chg(d[SCAN_I.chg])}</td>
       ${showEarn?`<td style="white-space:nowrap">${earnCell(d[SCAN_I.earn])}</td>`:''}
       ${showYdf?`<td>${ydfFmt(scanYdfOf(d))}</td>`:''}
-      ${showFloat?`<td title="${d[SCAN_I.floatPct]!=null?('Halka açıklık %'+Number(d[SCAN_I.floatPct]).toFixed(1)):''}">${floatFmt(d[SCAN_I.floatSh])}</td>`:''}
       <td>${qCell(qs)}</td>
       <td>${rsi(d[SCAN_I.rsi])}</td>
       <td>${chg(d[SCAN_I.perf3m])}</td>
@@ -2600,7 +2572,6 @@ function renderScanPage(){
     <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
     ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
     ${showYdf?'<th title="Toplam yedekler / piyasa değeri">YDF</th>':''}
-    ${showFloat?'<th title="Fiili dolaşımdaki senet (float)">Fiili dol.</th>':''}
     <th>Q</th><th>RSI</th><th>3A</th><th>Vol</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Temettü</th><th>Sektör</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
@@ -3999,13 +3970,12 @@ function fmtKapAsOf(ymd){
   if(/^\d{8}$/.test(s)) return s.slice(6,8)+'.'+s.slice(4,6)+'.'+s.slice(0,4);
   return s||null;
 }
-function renderOwnerFloatKpis({ paidIn, floatPct, floatShares, paidLabel, floatLabel, note }){
+function renderOwnerFloatKpis({ floatPct, floatShares, floatLabel, note }){
   const el=document.getElementById('ownerFloatBody');
   if(!el) return;
-  if(floatShares==null && paidIn==null && floatPct==null){ hideOwnerFloat(); return; }
+  if(floatShares==null && floatPct==null){ hideOwnerFloat(); return; }
   const cell=(lbl,val,sub)=>`<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="hint">${sub}</div>`:''}</div>`;
   el.innerHTML=`<div class="grid" style="margin:0">
-    ${cell(paidLabel||'Ödenmiş Sermaye', paidIn!=null?fmtShort(paidIn):'—', 'Pay adedi ≈ (nominal 1)')}
     ${cell('Halka Açıklık', floatPct!=null?('%'+Number(floatPct).toFixed(2)):'—', 'Fiili dolaşım oranı')}
     ${cell('Fiili Dolaşımdaki Senet', floatShares!=null?fmtShort(floatShares):'—', floatLabel||'KAP / MKK güncel')}
   </div>
@@ -4029,18 +3999,14 @@ async function fetchOwnershipBIST(sym, myGen){
     if(inst){ inst.classList.add('hidden'); inst.innerHTML=''; }
     renderOwnerPie(rows, 'Kaynak: KAP ortaklık yapısı (İş Yatırım aracılığıyla). "Halka Açık / Diğer" borsada işlem gören kısımdır.');
     const halka=rows.find(s=>/halka|diğer/i.test(s.label));
-    const paid=(FIN&&FIN.sharesBist!=null)?FIN.sharesBist
-      :(FIN&&FIN.balance&&FIN.D0!=null?((FIN.balance.common||{})[FIN.D0]):null);
     const floatShares=(fl && fl.floatShares!=null && Number.isFinite(fl.floatShares)) ? fl.floatShares : null;
     const floatPct=(fl && fl.floatPct!=null && Number.isFinite(fl.floatPct)) ? fl.floatPct
       : (halka ? halka.pct : null);
     const asOf=fmtKapAsOf(fl && fl.asOf);
-    if(floatShares!=null || (halka && paid!=null) || floatPct!=null){
+    if(floatShares!=null || floatPct!=null){
       renderOwnerFloatKpis({
-        paidIn:paid,
         floatPct,
         floatShares,
-        paidLabel:'Ödenmiş Sermaye',
         note: floatShares!=null
           ? (`Kaynak: KAP — MKK güncel fiili dolaşım`+(asOf?` (${asOf})`:'')+`.`)
           : 'KAP fiili dolaşım verisi alınamadı; oran ortaklık yapısından.'
@@ -4076,13 +4042,10 @@ function renderOwnershipUS(own, ysym){
   if(own.shsFloat && own.shsOut) note+=` Fiili dolaşım: ${fmtShort(own.shsFloat)} / ${fmtShort(own.shsOut)} pay (%${(own.shsFloat/own.shsOut*100).toFixed(1)}).`;
   renderOwnerPie(slices, note);
   const floatPct=own.shsOut && own.shsFloat ? (own.shsFloat/own.shsOut*100) : null;
-  const paidShares=own.shsOut!=null ? own.shsOut : null;
-  if(own.shsFloat!=null || (paidShares!=null && floatPct!=null)){
+  if(own.shsFloat!=null || floatPct!=null){
     renderOwnerFloatKpis({
-      paidIn:paidShares,
       floatPct,
       floatShares:own.shsFloat!=null ? own.shsFloat : null,
-      paidLabel:'Toplam Pay (Shs Outstand)',
       floatLabel:'Finviz Shs Float',
       note:'Kaynak: Finviz — Shs Float (fiili dolaşımdaki senet, doğrudan).'
     });

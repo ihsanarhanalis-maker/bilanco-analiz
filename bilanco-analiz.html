@@ -790,7 +790,6 @@
                 <option value="vol-asc">Volatilite ↑</option>
                 <option value="beta-asc">Beta ↑</option>
                 <option value="ydf-desc" id="scanSortYdf" style="display:none">YDF ↓</option>
-                <option value="float-desc" id="scanSortFloat" style="display:none">Fiili dolaşım ↓</option>
                 <option value="earn-asc">Yaklaşan kazanç tarihi</option>
               </select>
             </label>
@@ -826,12 +825,6 @@
                 <input id="scanYdfMin" type="number" step="0.05" placeholder="0.80" style="width:88px" title="Toplam yedekler / piyasa değeri — BIST ve ABD">
               </label>
               <span class="hint" id="scanYdfHint" style="margin:0">BIST / ABD · ≥0,80 tercih</span>
-            </span>
-            <span id="scanFloatFilter" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
-              <label style="flex-direction:row;align-items:center;gap:8px">Fiili dolaşım min
-                <input id="scanFloatMin" type="number" step="1000000" placeholder="örn. 50e6" style="width:110px" title="Fiili dolaşımdaki senet adedi (TradingView float) — yalnız BIST ve ABD">
-              </label>
-              <span class="hint" id="scanFloatHint" style="margin:0">BIST / ABD · senet adedi</span>
             </span>
             <button type="button" class="primary" onclick="applyScanFilters()">Filtrele</button>
           </div>
