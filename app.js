@@ -2083,10 +2083,11 @@ const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
 /* Kolon indeksleri: 0 name … 13 RSI, 14 Perf.3M, 15 Vol.M, 16 relVol, 17 beta; earn modunda +18 tarih */
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
   'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
-  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year'];
+  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year',
+  'float_shares_outstanding','float_shares_percent_current'];
 const SCAN_COLS_EARN=SCAN_COLS.concat(['earnings_release_next_date']);
 const SCAN_I={name:0,desc:1,mcap:2,close:3,chg:4,pe:5,pb:6,roe:7,nm:8,div:9,sector:10,
-  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,earn:18};
+  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,floatSh:18,floatPct:19,earn:20};
 const SCAN_TV_SORT={
   'mcap-desc':{sortBy:'market_cap_basic',sortOrder:'desc'},
   'mcap-asc':{sortBy:'market_cap_basic',sortOrder:'asc'},
@@ -2167,15 +2168,21 @@ function updateScanYdfUi(){
   const filt=document.getElementById('scanYdfFilter');
   const opt=document.getElementById('scanSortYdf');
   const hint=document.getElementById('scanYdfHint');
+  const fFilt=document.getElementById('scanFloatFilter');
+  const fOpt=document.getElementById('scanSortFloat');
   if(filt) filt.style.display=ok?'inline-flex':'none';
   if(opt) opt.style.display=ok?'':'none';
+  if(fFilt) fFilt.style.display=ok?'inline-flex':'none';
+  if(fOpt) fOpt.style.display=ok?'':'none';
   if(hint) hint.textContent=SCAN_CC==='TR'?'BIST (KAP) · ≥0,80 tercih':(SCAN_CC==='US'?'ABD (SEC) · ≥0,80 tercih':'BIST / ABD · ≥0,80 tercih');
   if(!ok){
     SCAN_YDF_GEN++;
     const sortEl=document.getElementById('scanSort');
-    if(sortEl && sortEl.value==='ydf-desc') sortEl.value='mcap-desc';
+    if(sortEl && (sortEl.value==='ydf-desc' || sortEl.value==='float-desc')) sortEl.value='mcap-desc';
     const ydfMin=document.getElementById('scanYdfMin');
     if(ydfMin) ydfMin.value='';
+    const floatMin=document.getElementById('scanFloatMin');
+    if(floatMin) floatMin.value='';
   }
 }
 function scanYdfMarket(){ return SCAN_CC==='TR' || SCAN_CC==='US'; }
@@ -2312,6 +2319,7 @@ function onScanSortChange(){
 }
 function applyScanFilters(){
   const ydfMin=scanYdfMarket() ? scanNum('scanYdfMin') : null;
+  const floatMin=scanYdfMarket() ? scanNum('scanFloatMin') : null;
   SCAN_VIEW=SCAN_RAW.filter(d=>{
     if(!scanMcapInBands(d[SCAN_I.mcap], SCAN_CC)) return false;
     const close=d[SCAN_I.close], sma50=d[SCAN_I.sma50], sma200=d[SCAN_I.sma200];
@@ -2329,6 +2337,10 @@ function applyScanFilters(){
       const sym=String(d[0]).replace(/_/g,'-');
       const c=SCAN_YDF_CACHE[sym];
       if(!c || c.ydf==null || c.ydf<ydfMin) return false;
+    }
+    if(floatMin!=null){
+      const fs=d[SCAN_I.floatSh];
+      if(fs==null || fs<floatMin) return false;
     }
     return true;
   });
@@ -2468,6 +2480,15 @@ function scanSortedView(){
       return mul*(va-vb);
     });
   }
+  if(key==='float'){
+    return rows.slice().sort((a,b)=>{
+      const va=a[SCAN_I.floatSh], vb=b[SCAN_I.floatSh];
+      if(va==null && vb==null) return 0;
+      if(va==null) return 1;
+      if(vb==null) return -1;
+      return mul*(va-vb);
+    });
+  }
   const idx={mcap:SCAN_I.mcap,chg:SCAN_I.chg,name:SCAN_I.name,pe:SCAN_I.pe,roe:SCAN_I.roe,
     div:SCAN_I.div,rsi:SCAN_I.rsi,perf3m:SCAN_I.perf3m,vol:SCAN_I.vol,beta:SCAN_I.beta}[key]??SCAN_I.mcap;
   return rows.slice().sort((a,b)=>{
@@ -2504,10 +2525,14 @@ function renderScanPage(){
     const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend yok';
     const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):'quant filtresi yok';
     const ydfMin=scanYdfMarket()?scanNum('scanYdfMin'):null;
+    const floatMin=scanYdfMarket()?scanNum('scanFloatMin'):null;
     const ydfNote=scanYdfMarket()
       ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:(SCAN_CC==='TR'?' · YDF (KAP)':' · YDF (SEC)'))
       : '';
-    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
+    const floatNote=scanYdfMarket()
+      ? (floatMin!=null?` · Fiili dolaşım ≥ ${fmtShort(floatMin)}`:' · Fiili dolaşım')
+      : '';
+    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote}${floatNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
   }
   if(!sorted.length){
     box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';
@@ -2540,10 +2565,12 @@ function renderScanPage(){
   };
   const showEarn=SCAN_MODE==='earn';
   const showYdf=scanYdfMarket();
+  const showFloat=scanYdfMarket();
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
     return new Date(ts*1000).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
   };
+  const floatFmt=v=>v==null?'—':fmtShort(v);
   const trRows=slice.map((d,i)=>{
     const code=m.click(String(d[0]).replace(/_/g,'-'));
     const n=SCAN_PAGE*SCAN_PAGE_SIZE+i+1;
@@ -2557,6 +2584,7 @@ function renderScanPage(){
       <td>${chg(d[SCAN_I.chg])}</td>
       ${showEarn?`<td style="white-space:nowrap">${earnCell(d[SCAN_I.earn])}</td>`:''}
       ${showYdf?`<td>${ydfFmt(scanYdfOf(d))}</td>`:''}
+      ${showFloat?`<td title="${d[SCAN_I.floatPct]!=null?('Halka açıklık %'+Number(d[SCAN_I.floatPct]).toFixed(1)):''}">${floatFmt(d[SCAN_I.floatSh])}</td>`:''}
       <td>${qCell(qs)}</td>
       <td>${rsi(d[SCAN_I.rsi])}</td>
       <td>${chg(d[SCAN_I.perf3m])}</td>
@@ -2572,6 +2600,7 @@ function renderScanPage(){
     <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
     ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
     ${showYdf?'<th title="Toplam yedekler / piyasa değeri">YDF</th>':''}
+    ${showFloat?'<th title="Fiili dolaşımdaki senet (float)">Fiili dol.</th>':''}
     <th>Q</th><th>RSI</th><th>3A</th><th>Vol</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Temettü</th><th>Sektör</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
@@ -3944,7 +3973,7 @@ function renderOwnerPie(slices, note){
   const card=document.getElementById('ownerCard'), box=document.getElementById('ownerBody');
   if(!card||!box) return;
   slices=slices.filter(s=>s.pct>0.01);
-  if(!slices.length){ card.classList.add('hidden'); return; }
+  if(!slices.length){ card.classList.add('hidden'); hideOwnerFloat(); return; }
   slices.forEach((s,i)=>s.color=PIE_COLORS[i%PIE_COLORS.length]);
   // Merkezde halka açıklık oranı (varsa)
   const halka=slices.find(s=>/halka|diğer/i.test(s.label));
@@ -3958,6 +3987,35 @@ function renderOwnerPie(slices, note){
       ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}</div></div>`;
   card.classList.remove('hidden');
 }
+/* Fiili dolaşımdaki senet = ödenmiş sermaye / halka açıklık oranı (BIST nominal 1 TL ≈ pay adedi).
+   ABD: toplam pay / halka açıklık (veya Finviz Shs Float varsa o kullanılır). Yalnız BIST / ABD. */
+function hideOwnerFloat(){
+  const el=document.getElementById('ownerFloatBody');
+  if(el){ el.classList.add('hidden'); el.innerHTML=''; }
+}
+function floatRatioFromPct(pct){
+  if(pct==null || !Number.isFinite(pct) || pct<=0) return null;
+  return pct>1 ? pct/100 : pct;   // %45 → 0.45; 0.45 → 0.45
+}
+function calcFloatShares(paidIn, floatPct){
+  const r=floatRatioFromPct(floatPct);
+  if(paidIn==null || !Number.isFinite(paidIn) || paidIn<=0 || r==null || r<=0) return null;
+  return paidIn / r;
+}
+function renderOwnerFloatKpis({ paidIn, floatPct, floatShares, paidLabel, note }){
+  const el=document.getElementById('ownerFloatBody');
+  if(!el) return;
+  const fiili=floatShares!=null ? floatShares : calcFloatShares(paidIn, floatPct);
+  if(fiili==null && paidIn==null && floatPct==null){ hideOwnerFloat(); return; }
+  const cell=(lbl,val,sub)=>`<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="hint">${sub}</div>`:''}</div>`;
+  el.innerHTML=`<div class="grid" style="margin:0">
+    ${cell(paidLabel||'Ödenmiş Sermaye', paidIn!=null?fmtShort(paidIn):'—', 'Pay adedi ≈ (nominal 1)')}
+    ${cell('Halka Açıklık', floatPct!=null?('%'+Number(floatPct).toFixed(2)):'—', 'Fiili dolaşım oranı')}
+    ${cell('Fiili Dolaşımdaki Senet', fiili!=null?fmtShort(fiili):'—', 'Ödenmiş sermaye ÷ halka açıklık')}
+  </div>
+  ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}`;
+  el.classList.remove('hidden');
+}
 async function fetchOwnershipBIST(sym, myGen){
   try{
     const j=await fetch('/bistown?hisse='+encodeURIComponent(sym)).then(r=>r.ok?r.json():null);
@@ -3965,19 +4023,31 @@ async function fetchOwnershipBIST(sym, myGen){
     let rows=((j&&j.value)||[]).map(v=>({
       label:(v.FO_ORTAK||'').trim(), pct:parseFloat(String(v.FO_ORTAK_ORANI||'').replace(',','.'))||0
     })).filter(r=>r.label && r.pct>0);
-    if(!rows.length){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
+    if(!rows.length){ document.getElementById('ownerCard')?.classList.add('hidden'); hideOwnerFloat(); return; }
     rows.forEach(r=>{ if(/^diğer$/i.test(r.label)) r.label='Halka Açık / Diğer'; });
     rows.sort((a,b)=>b.pct-a.pct);
     const inst=document.getElementById('ownerInstBody');
     if(inst){ inst.classList.add('hidden'); inst.innerHTML=''; }
     renderOwnerPie(rows, 'Kaynak: KAP ortaklık yapısı (İş Yatırım aracılığıyla). "Halka Açık / Diğer" borsada işlem gören kısımdır.');
-  }catch(e){ document.getElementById('ownerCard')?.classList.add('hidden'); }
+    const halka=rows.find(s=>/halka|diğer/i.test(s.label));
+    const paid=(FIN&&FIN.sharesBist!=null)?FIN.sharesBist
+      :(FIN&&FIN.balance&&FIN.D0!=null?((FIN.balance.common||{})[FIN.D0]):null);
+    if(halka && paid!=null){
+      renderOwnerFloatKpis({
+        paidIn:paid,
+        floatPct:halka.pct,
+        paidLabel:'Ödenmiş Sermaye',
+        note:'BIST: Ödenmiş sermaye (KAP 2OA) ÷ halka açıklık oranı = fiili dolaşımdaki senet.'
+      });
+    }else hideOwnerFloat();
+  }catch(e){ document.getElementById('ownerCard')?.classList.add('hidden'); hideOwnerFloat(); }
 }
 /* Avrupa: isim-isim ortak listesi için ücretsiz kaynak yok (KAP/Finviz karşılığı yok) —
    TradingView'in fiili dolaşım (free float) verisiyle 2 dilimli pasta: halka açık vs büyük ortaklar. */
 function renderOwnershipEU(floatPct, floatShares, totalShares){
   const inst=document.getElementById('ownerInstBody');
   if(inst){ inst.classList.add('hidden'); inst.innerHTML=''; }
+  hideOwnerFloat();   // fiili dolaşım KPI yalnız BIST / ABD
   if(floatPct==null || floatPct<=0 || floatPct>100){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
   const slices=[
     { label:'Halka Açık Dolaşım (free float)', pct:floatPct },
@@ -3988,7 +4058,7 @@ function renderOwnershipEU(floatPct, floatShares, totalShares){
   renderOwnerPie(slices, note);
 }
 function renderOwnershipUS(own, ysym){
-  if(!own || own.inst==null){ document.getElementById('ownerCard')?.classList.add('hidden'); return; }
+  if(!own || own.inst==null){ document.getElementById('ownerCard')?.classList.add('hidden'); hideOwnerFloat(); return; }
   const inst=own.inst||0, ins=own.insider||0;
   const other=Math.max(0, 100-inst-ins);
   const slices=[
@@ -3999,6 +4069,17 @@ function renderOwnershipUS(own, ysym){
   let note='Kaynak: Finviz. ABD\'de pay sahipleri isim isim açıklanmaz; dağılım kurumsal/içeriden/diğer olarak raporlanır.';
   if(own.shsFloat && own.shsOut) note+=` Fiili dolaşım: ${fmtShort(own.shsFloat)} / ${fmtShort(own.shsOut)} pay (%${(own.shsFloat/own.shsOut*100).toFixed(1)}).`;
   renderOwnerPie(slices, note);
+  const floatPct=own.shsOut && own.shsFloat ? (own.shsFloat/own.shsOut*100) : null;
+  const paidShares=own.shsOut!=null ? own.shsOut : null;
+  if(paidShares!=null && floatPct!=null){
+    renderOwnerFloatKpis({
+      paidIn:paidShares,
+      floatPct,
+      floatShares:calcFloatShares(paidShares, floatPct),
+      paidLabel:'Toplam Pay (Shs Outstand)',
+      note:'ABD: Fiili dolaşımdaki senet = toplam pay ÷ halka açıklık oranı. Ödenmiş sermaye USD olduğu için pay adedi olarak Shs Outstand kullanılır.'
+    });
+  }else hideOwnerFloat();
   if(ysym) fetchInstitutionalHolders(ysym);
 }
 async function fetchInstitutionalHolders(ysym){
