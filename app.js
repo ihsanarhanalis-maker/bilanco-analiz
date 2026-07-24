@@ -21,8 +21,16 @@ function switchPage(p){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
-/* ---------- Hisse logoları (TradingView logoid → s3-symbol-logo) ---------- */
+/* ---------- Hisse logoları ----------
+   Öncelik: BIST→MarketIcons (güncel), sonra FMP / CompaniesMarketCap, son çare TradingView.
+   onerror ile sıradaki kaynağa düşer; hiçbiri yoksa harf rozeti. */
 const LOGO_CACHE={};   // "MARKET|SYM" → logoid | ''
+const LOGO_YAHOO_CC={
+  TR:'.IS', US:'', GB:'.L', DE:'.DE', FR:'.PA', NL:'.AS', BE:'.BR', PT:'.LS',
+  IT:'.MI', ES:'.MC', CH:'.SW', SE:'.ST', DK:'.CO', NO:'.OL', FI:'.HE',
+  AT:'.VI', PL:'.WA', KR:'.KS', JP:'.T', CN:'.SS', HK:'.HK', TW:'.TW',
+  CA:'.TO', AU:'.AX', SG:'.SI'
+};
 function logoCacheKey(sym, market){ return String(market||'')+'|'+String(sym||'').toUpperCase(); }
 function logoUrl(logoid){
   if(!logoid) return '';
@@ -32,13 +40,65 @@ function logoInitials(label){
   const s=String(label||'').replace(/[^A-Za-z0-9ÇĞİÖŞÜçğıöşü]/g,'');
   return (s.slice(0,2).toUpperCase()||'?');
 }
-function logoHtml(logoid, label, size){
-  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function logoBaseSym(sym){
+  return String(sym||'').toUpperCase().replace(/_/g,'-').replace(/\.[A-Z]{1,3}$/,'').trim();
+}
+function logoYahooSym(sym, opts){
+  opts=opts||{};
+  let s=String(opts.ysym||sym||'').toUpperCase().replace(/_/g,'-');
+  if(/\.[A-Z]{1,3}$/.test(s)){
+    if(s.endsWith('.US')) return s.slice(0,-3);
+    return s;
+  }
+  s=logoBaseSym(s);
+  if(opts.euInfo && opts.euInfo.ysym) return String(opts.euInfo.ysym).toUpperCase();
+  const m=opts.market, cc=opts.cc;
+  if(m==='BIST' || cc==='TR') return s+'.IS';
+  if(m==='US' || cc==='US') return s;
+  const suf=LOGO_YAHOO_CC[cc||''];
+  if(suf!=null) return s+suf;
+  return s;
+}
+function logoCandidates(sym, logoid, opts){
+  opts=opts||{};
+  const base=logoBaseSym(sym||opts.sym||'');
+  const ysym=logoYahooSym(base, opts);
+  const urls=[];
+  // FMP önce (sık güncellenir); BIST için MarketIcons yedek; TV en son (eski kalabiliyor)
+  if(ysym) urls.push('https://images.financialmodelingprep.com/symbol/'+encodeURIComponent(ysym)+'.png');
+  if((opts.market==='US' || opts.cc==='US') && ysym!==base)
+    urls.push('https://images.financialmodelingprep.com/symbol/'+encodeURIComponent(base)+'.png');
+  if(opts.market==='BIST' || opts.cc==='TR'){
+    urls.push('https://cdn.jsdelivr.net/npm/@marketicons/bist@1.0.1/svg/'+encodeURIComponent(base)+'.svg');
+  }
+  if(ysym) urls.push('https://companiesmarketcap.com/img/company-logos/64/'+encodeURIComponent(ysym)+'.webp');
+  if(logoid) urls.push(logoUrl(logoid));
+  return [...new Set(urls.filter(Boolean))];
+}
+window.__logoNext=function(img){
+  try{
+    const urls=(img.getAttribute('data-urls')||'').split('|').filter(Boolean);
+    let i=(+img.getAttribute('data-i')||0)+1;
+    img.setAttribute('data-i', String(i));
+    if(i<urls.length){ img.src=urls[i]; return; }
+    img.parentNode && img.parentNode.classList.add('fb');
+  }catch(_e){
+    img.parentNode && img.parentNode.classList.add('fb');
+  }
+};
+function logoHtml(logoid, label, size, opts){
+  opts=opts||{};
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const s=size||22;
-  const fb=logoInitials(label);
-  const fbCls=logoid?'':' fb';
-  return `<span class="sym-logo-wrap${fbCls}" style="width:${s}px;height:${s}px" title="${esc(label)}">`+
-    (logoid?`<img class="sym-logo" src="${logoUrl(logoid)}" alt="" width="${s}" height="${s}" loading="lazy" decoding="async" onerror="this.parentNode.classList.add('fb')">`:'')+
+  const sym=opts.sym||label;
+  const urls=logoCandidates(sym, logoid||opts.logoid, opts);
+  const fb=logoInitials(label||sym);
+  const fbCls=urls.length?'':' fb';
+  const dataUrls=esc(urls.join('|'));
+  return `<span class="sym-logo-wrap${fbCls}" style="width:${s}px;height:${s}px" title="${esc(label||sym)}">`+
+    (urls.length
+      ?`<img class="sym-logo" src="${esc(urls[0])}" data-urls="${dataUrls}" data-i="0" alt="" width="${s}" height="${s}" loading="lazy" decoding="async" onerror="window.__logoNext(this)">`
+      :'')+
     `<span class="sym-logo-fb" style="font-size:${Math.max(9,Math.round(s*0.38))}px">${esc(fb)}</span></span>`;
 }
 function rememberLogoid(sym, market, logoid){
@@ -67,22 +127,28 @@ async function resolveLogoid(sym, market, euInfo){
     return '';
   }
 }
+function logoOptsFromFin(){
+  if(!FIN) return {};
+  return { sym:FIN.ticker, market:FIN.market, euInfo:FIN.euInfo,
+    ysym: FIN.market==='BIST'?FIN.ticker+'.IS':(FIN.market==='EU'&&FIN.euInfo?(FIN.euInfo.ysym||null):FIN.ticker) };
+}
 async function applyStockLogo(myGen){
   if(!FIN) return;
   const id=await resolveLogoid(FIN.ticker, FIN.market, FIN.euInfo);
   if(myGen!=null && myGen!==REQ_GEN) return;
   if(!FIN) return;
   FIN.logoid=id;
+  const o={...logoOptsFromFin(), logoid:id};
   const rt=document.getElementById('reportTitle');
   if(rt){
     const txt=rt.getAttribute('data-title')||rt.textContent||'';
     rt.setAttribute('data-title', txt);
-    rt.innerHTML=logoHtml(id, FIN.ticker, 28)+`<span>${safeHTML(txt)}</span>`;
+    rt.innerHTML=logoHtml(id, FIN.ticker, 28, o)+`<span>${safeHTML(txt)}</span>`;
   }
   const lp=document.getElementById('livePrice');
   if(lp && !lp.classList.contains('hidden')){
     const wrap=lp.querySelector('.sym-logo-wrap');
-    const html=logoHtml(id, FIN.ticker, 26);
+    const html=logoHtml(id, FIN.ticker, 26, o);
     if(wrap) wrap.outerHTML=html; else lp.insertAdjacentHTML('afterbegin', html);
   }
 }
@@ -1636,7 +1702,7 @@ async function renderWatchlist(){
       const cur= x.market==='BIST'?'₺':'$';
       if(d.logo) rememberLogoid(x.sym, x.market, d.logo);
       return `<tr style="cursor:pointer" onclick="openWatch('${x.sym}')" title="Analizi aç">
-        <td><span class="sym-cell">${logoHtml(d.logo, x.sym, 22)}<b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':'ABD'}</span></span></td>
+        <td><span class="sym-cell">${logoHtml(d.logo, x.sym, 22, {sym:x.sym, market:x.market, cc:x.market==='BIST'?'TR':'US'})}<b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':'ABD'}</span></span></td>
         <td>${d.close!=null? cur+Number(d.close).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
         <td class="${cls}">${d.chg!=null? (d.chg>0?'▲ ':d.chg<0?'▼ ':'')+pct(d.chg) : '—'}</td>
         <td>${(d.pe!=null && isFinite(d.pe))? d.pe.toFixed(1)+'x' : '—'}</td>
@@ -2113,7 +2179,7 @@ function renderTop100Panel(cc, rows){
     rememberLogoid(sym, cc==='TR'?'BIST':(cc==='US'?'US':''), d[10]);
     return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
       <td style="color:var(--muted)">${i+1}</td>
-      <td><span class="sym-cell">${logoHtml(d[10], sym, 22)}<b>${safeHTML(sym)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></span></td>
+      <td><span class="sym-cell">${logoHtml(d[10], sym, 22, {sym, cc, market:cc==='TR'?'BIST':(cc==='US'?'US':''), ysym:m.click(sym)})}<b>${safeHTML(sym)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></span></td>
       <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
       <td>${d[3]==null?'—':m.sym+d[3].toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
       <td>${xx(d[5])}</td>
@@ -2621,7 +2687,7 @@ function renderScanPage(){
     rememberLogoid(sym, SCAN_CC==='TR'?'BIST':(SCAN_CC==='US'?'US':''), d[SCAN_I.logo]);
     return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
       <td style="color:var(--muted)">${n}</td>
-      <td><span class="sym-cell">${logoHtml(d[SCAN_I.logo], sym, 22)}<b>${safeHTML(sym)}</b></span></td>
+      <td><span class="sym-cell">${logoHtml(d[SCAN_I.logo], sym, 22, {sym, cc:SCAN_CC, market:SCAN_CC==='TR'?'BIST':(SCAN_CC==='US'?'US':''), ysym:m.click(sym)})}<b>${safeHTML(sym)}</b></span></td>
       <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
       <td><b>${fmtMcapSym(d[SCAN_I.mcap], m.sym)}</b></td>
       <td>${d[SCAN_I.close]==null?'—':m.sym+Number(d[SCAN_I.close]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
@@ -2817,13 +2883,14 @@ function renderSectPanel(def, cc, rows){
     const [ex,rawCode]=x.s.split(':');
     const base=(rawCode||d[0]).replace(/_/g,'-');
     const codeFn=TV_EX2CODE[ex];
+    const ysymLogo=codeFn?codeFn(base):base;
     const click=codeFn?` style="cursor:pointer" onclick="searchExact('${codeFn(base)}')" title="${safeHTML(d[1]||d[0])} analizini aç"`:' title="Bu borsa uygulamada analiz için desteklenmiyor"';
     const price=d[3]==null?'—':(cc==='GLOBAL'
       ? d[3].toLocaleString('tr-TR',{maximumFractionDigits:2})+' '+safeHTML(d[4]||'')
       : mSym+d[3].toLocaleString('tr-TR',{maximumFractionDigits:2}));
     return `<tr${click}>
       <td style="color:var(--muted)">${i+1}</td>
-      <td><span class="sym-cell">${logoHtml(d[10], base, 22)}<b>${safeHTML(base)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></span></td>
+      <td><span class="sym-cell">${logoHtml(d[10], base, 22, {sym:base, cc:cc==='GLOBAL'?null:cc, market:cc==='TR'?'BIST':(cc==='US'?'US':''), ysym:ysymLogo})}<b>${safeHTML(base)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></span></td>
       <td><b>${fmtMcapSym(d[2], cc==='GLOBAL'?'$':mSym)}</b></td>
       <td>${price}</td>
       <td>${xx(d[5])}</td>
@@ -3110,7 +3177,7 @@ async function fetchPrice(sym, cik, myGen, opts){
       const ch = (prevC? (live-prevC)/prevC*100 : null);
       const cls = ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
       const ar  = ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
-      lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26)+
+      lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26, logoOptsFromFin())+
         `<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
         (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
         `<span class="lp-live">● canlı</span>`;
@@ -3735,7 +3802,7 @@ function analyze(){
       const titleTxt = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
       rt.setAttribute('data-title', titleTxt);
       const cached=LOGO_CACHE[logoCacheKey(FIN.ticker, FIN.market)]||FIN.logoid||'';
-      rt.innerHTML=logoHtml(cached, FIN.ticker, 28)+`<span>${safeHTML(titleTxt)}</span>`;
+      rt.innerHTML=logoHtml(cached, FIN.ticker, 28, {...logoOptsFromFin(), logoid:cached})+`<span>${safeHTML(titleTxt)}</span>`;
       applyStockLogo(REQ_GEN);
     }
   }
@@ -5041,7 +5108,7 @@ async function loadDiscovery(){
       rememberLogoid(sym, DISC_CC==='TR'?'BIST':(DISC_CC==='US'?'US':''), d[7]);
       return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="Analizi aç">
         <td style="color:var(--muted)">${i+1}</td>
-        <td><span class="sym-cell">${logoHtml(d[7], sym, 22)}<b>${safeHTML(sym)}</b></span></td>
+        <td><span class="sym-cell">${logoHtml(d[7], sym, 22, {sym, cc:DISC_CC, market:DISC_CC==='TR'?'BIST':(DISC_CC==='US'?'US':''), ysym:m.click(sym)})}<b>${safeHTML(sym)}</b></span></td>
         <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
         <td>${px(d[2])}</td>
         <td>${chg(d[3])}</td>
