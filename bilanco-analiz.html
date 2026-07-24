@@ -89,12 +89,22 @@
   .hd-badge.mcap .mc-lbl{color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
   .hd-badge.mcap .mc-eq{color:var(--muted);font-weight:700}
   .hd-badge.mcap .mc-val{color:var(--good);font-weight:800;font-size:15px;font-variant-numeric:tabular-nums}
-  .live-price{display:flex;align-items:baseline;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+  .live-price{display:flex;align-items:center;gap:8px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .live-price .lp-sym{color:var(--ink-2);font-size:13px;font-weight:700;letter-spacing:.3px}
   .live-price .lp-val{color:#fff;font-size:22px;font-weight:800}
   .live-price .lp-chg{font-size:13px;font-weight:700}
   .live-price .lp-chg.up{color:var(--good)} .live-price .lp-chg.down{color:var(--bad)} .live-price .lp-chg.neutral{color:var(--muted)}
   .live-price .lp-live{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+  /* Hisse logoları (TradingView s3-symbol-logo) */
+  .sym-logo-wrap{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;vertical-align:middle;position:relative}
+  .sym-logo{width:100%;height:100%;border-radius:7px;object-fit:contain;background:#fff;display:block}
+  .sym-logo-fb{display:none;align-items:center;justify-content:center;width:100%;height:100%;border-radius:7px;
+    background:linear-gradient(145deg,#1e293f,#141c30);border:1px solid var(--line-2);color:var(--accent-2);
+    font-weight:800;letter-spacing:.3px;line-height:1}
+  .sym-logo-wrap.fb .sym-logo{display:none}
+  .sym-logo-wrap.fb .sym-logo-fb{display:inline-flex}
+  .sym-cell{display:inline-flex;align-items:center;gap:8px}
+  #reportTitle{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   /* Canlı fiyat / piyasa değeri / borsa saati yalnız Bilanço Analizi sekmesinde */
   #hdrStockMeta.hidden{display:none!important}
   body:not(.page-stock) #hdrStockMeta{display:none!important}

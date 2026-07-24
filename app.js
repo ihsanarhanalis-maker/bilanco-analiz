@@ -21,6 +21,72 @@ function switchPage(p){
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
+/* ---------- Hisse logoları (TradingView logoid → s3-symbol-logo) ---------- */
+const LOGO_CACHE={};   // "MARKET|SYM" → logoid | ''
+function logoCacheKey(sym, market){ return String(market||'')+'|'+String(sym||'').toUpperCase(); }
+function logoUrl(logoid){
+  if(!logoid) return '';
+  return 'https://s3-symbol-logo.tradingview.com/'+encodeURIComponent(logoid)+'.svg';
+}
+function logoInitials(label){
+  const s=String(label||'').replace(/[^A-Za-z0-9ÇĞİÖŞÜçğıöşü]/g,'');
+  return (s.slice(0,2).toUpperCase()||'?');
+}
+function logoHtml(logoid, label, size){
+  const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const s=size||22;
+  const fb=logoInitials(label);
+  const fbCls=logoid?'':' fb';
+  return `<span class="sym-logo-wrap${fbCls}" style="width:${s}px;height:${s}px" title="${esc(label)}">`+
+    (logoid?`<img class="sym-logo" src="${logoUrl(logoid)}" alt="" width="${s}" height="${s}" loading="lazy" decoding="async" onerror="this.parentNode.classList.add('fb')">`:'')+
+    `<span class="sym-logo-fb" style="font-size:${Math.max(9,Math.round(s*0.38))}px">${esc(fb)}</span></span>`;
+}
+function rememberLogoid(sym, market, logoid){
+  if(!sym || !logoid) return;
+  LOGO_CACHE[logoCacheKey(sym, market)]=logoid;
+}
+async function resolveLogoid(sym, market, euInfo){
+  const key=logoCacheKey(sym, market);
+  if(key in LOGO_CACHE) return LOGO_CACHE[key];
+  try{
+    let scan='america', tickers=['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
+    if(market==='BIST'){ scan='turkey'; tickers=['BIST:'+sym]; }
+    else if(market==='EU' && euInfo){
+      scan=euInfo.scan||'germany';
+      tickers=[euInfo.tv+':'+euTvBase(euInfo)];
+    }
+    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{
+      method:'POST', body:JSON.stringify({symbols:{tickers},columns:['logoid']})
+    });
+    const j=r.ok?await r.json():null;
+    const id=((j&&j.data)||[]).map(x=>x.d&&x.d[0]).find(Boolean)||'';
+    LOGO_CACHE[key]=id;
+    return id;
+  }catch(_e){
+    LOGO_CACHE[key]='';
+    return '';
+  }
+}
+async function applyStockLogo(myGen){
+  if(!FIN) return;
+  const id=await resolveLogoid(FIN.ticker, FIN.market, FIN.euInfo);
+  if(myGen!=null && myGen!==REQ_GEN) return;
+  if(!FIN) return;
+  FIN.logoid=id;
+  const rt=document.getElementById('reportTitle');
+  if(rt){
+    const txt=rt.getAttribute('data-title')||rt.textContent||'';
+    rt.setAttribute('data-title', txt);
+    rt.innerHTML=logoHtml(id, FIN.ticker, 28)+`<span>${safeHTML(txt)}</span>`;
+  }
+  const lp=document.getElementById('livePrice');
+  if(lp && !lp.classList.contains('hidden')){
+    const wrap=lp.querySelector('.sym-logo-wrap');
+    const html=logoHtml(id, FIN.ticker, 26);
+    if(wrap) wrap.outerHTML=html; else lp.insertAdjacentHTML('afterbegin', html);
+  }
+}
+
 /* Kod eki / aday → TOP100 ülke kodu (TR, US, DE…) */
 const DISC_SUFFIX_CC={
   US:'US', IS:'TR',
@@ -1557,19 +1623,20 @@ async function renderWatchlist(){
       items.forEach(x=>{ if(scanMk==='turkey') tickers.push('BIST:'+x.sym);
                          else ['NASDAQ','NYSE','AMEX'].forEach(ex=>tickers.push(ex+':'+x.sym)); });
       const j=await fetch('https://scanner.tradingview.com/'+scanMk+'/scan',
-        {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['name','close','change','price_earnings_ttm']})})
+        {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['name','close','change','price_earnings_ttm','logoid']})})
         .then(r=>r.json()).catch(()=>null);
       ((j&&j.data)||[]).forEach(row=>{
         const t=row.s.split(':')[1];
-        if(row.d && row.d[1]!=null && !q[t]) q[t]={close:row.d[1], chg:row.d[2], pe:row.d[3], bist:scanMk==='turkey'};
+        if(row.d && row.d[1]!=null && !q[t]) q[t]={close:row.d[1], chg:row.d[2], pe:row.d[3], logo:row.d[4], bist:scanMk==='turkey'};
       });
     }
     const rows=w.map(x=>{
       const d=q[x.sym]||{};
       const cls=d.chg==null?'neutral':(d.chg>0?'up':d.chg<0?'down':'neutral');
       const cur= x.market==='BIST'?'₺':'$';
+      if(d.logo) rememberLogoid(x.sym, x.market, d.logo);
       return `<tr style="cursor:pointer" onclick="openWatch('${x.sym}')" title="Analizi aç">
-        <td><b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':'ABD'}</span></td>
+        <td><span class="sym-cell">${logoHtml(d.logo, x.sym, 22)}<b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':'ABD'}</span></span></td>
         <td>${d.close!=null? cur+Number(d.close).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
         <td class="${cls}">${d.chg!=null? (d.chg>0?'▲ ':d.chg<0?'▼ ':'')+pct(d.chg) : '—'}</td>
         <td>${(d.pe!=null && isFinite(d.pe))? d.pe.toFixed(1)+'x' : '—'}</td>
@@ -2021,7 +2088,7 @@ async function loadTop100Panel(cc){
     if(m.ex) filter.push({left:'exchange',operation:'equal',right:m.ex});
     const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
       columns:['name','description','market_cap_basic','close','change',
-        'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'],
+        'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees','logoid'],
       filter, sort:{sortBy:'market_cap_basic',sortOrder:'desc'}, range:[0,100]
     })});
     const j=r.ok?await r.json():null;
@@ -2042,9 +2109,11 @@ function renderTop100Panel(cc, rows){
   const xx=v=>v==null?'—':v.toFixed(1)+'x';
   const trRows=rows.map((d,i)=>{
     const code=m.click(d[0].replace(/_/g,'-'));
+    const sym=String(d[0]).replace(/_/g,'-');
+    rememberLogoid(sym, cc==='TR'?'BIST':(cc==='US'?'US':''), d[10]);
     return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
       <td style="color:var(--muted)">${i+1}</td>
-      <td><b>${safeHTML(d[0].replace(/_/g,'-'))}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+      <td><span class="sym-cell">${logoHtml(d[10], sym, 22)}<b>${safeHTML(sym)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></span></td>
       <td><b>${fmtMcapSym(d[2], m.sym)}</b></td>
       <td>${d[3]==null?'—':m.sym+d[3].toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
       <td>${xx(d[5])}</td>
@@ -2080,13 +2149,13 @@ const SCAN_CAP_BANDS={
 };
 const SCAN_PAGE_SIZE=100;
 const SCAN_FETCH_SIZE=200;   // TV sayfa boyutu
-/* Kolon indeksleri: 0 name … 13 RSI, 14 Perf.3M, 15 Vol.M, 16 relVol, 17 beta; earn modunda +18 tarih */
+/* Kolon indeksleri: 0 name … 17 beta, 18 logoid; earn modunda +19 tarih */
 const SCAN_COLS=['name','description','market_cap_basic','close','change',
   'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','dividend_yield_recent','sector',
-  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year'];
+  'SMA50','SMA200','RSI','Perf.3M','Volatility.M','relative_volume_10d_calc','beta_1_year','logoid'];
 const SCAN_COLS_EARN=SCAN_COLS.concat(['earnings_release_next_date']);
 const SCAN_I={name:0,desc:1,mcap:2,close:3,chg:4,pe:5,pb:6,roe:7,nm:8,div:9,sector:10,
-  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,earn:18};
+  sma50:11,sma200:12,rsi:13,perf3m:14,vol:15,relvol:16,beta:17,logo:18,earn:19};
 const SCAN_TV_SORT={
   'mcap-desc':{sortBy:'market_cap_basic',sortOrder:'desc'},
   'mcap-asc':{sortBy:'market_cap_basic',sortOrder:'asc'},
@@ -2548,9 +2617,11 @@ function renderScanPage(){
     const code=m.click(String(d[0]).replace(/_/g,'-'));
     const n=SCAN_PAGE*SCAN_PAGE_SIZE+i+1;
     const qs=scanQuantScore(d);
+    const sym=String(d[0]).replace(/_/g,'-');
+    rememberLogoid(sym, SCAN_CC==='TR'?'BIST':(SCAN_CC==='US'?'US':''), d[SCAN_I.logo]);
     return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
       <td style="color:var(--muted)">${n}</td>
-      <td><b>${safeHTML(String(d[0]).replace(/_/g,'-'))}</b></td>
+      <td><span class="sym-cell">${logoHtml(d[SCAN_I.logo], sym, 22)}<b>${safeHTML(sym)}</b></span></td>
       <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
       <td><b>${fmtMcapSym(d[SCAN_I.mcap], m.sym)}</b></td>
       <td>${d[SCAN_I.close]==null?'—':m.sym+Number(d[SCAN_I.close]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
@@ -2701,7 +2772,7 @@ async function loadSectPanel(){
   const myGen=++SECT_GEN;
   try{
     const cols=['name','description','market_cap_basic','close','currency',
-      'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'];
+      'price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees','logoid'];
     let rows;
     if(def[3].curated){
       let list=SECT_CURATED[def[3].curated];
@@ -2752,7 +2823,7 @@ function renderSectPanel(def, cc, rows){
       : mSym+d[3].toLocaleString('tr-TR',{maximumFractionDigits:2}));
     return `<tr${click}>
       <td style="color:var(--muted)">${i+1}</td>
-      <td><b>${safeHTML(base)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
+      <td><span class="sym-cell">${logoHtml(d[10], base, 22)}<b>${safeHTML(base)}</b> <span class="ratio-formula">${safeHTML(d[1]||'')}</span></span></td>
       <td><b>${fmtMcapSym(d[2], cc==='GLOBAL'?'$':mSym)}</b></td>
       <td>${price}</td>
       <td>${xx(d[5])}</td>
@@ -3039,10 +3110,12 @@ async function fetchPrice(sym, cik, myGen, opts){
       const ch = (prevC? (live-prevC)/prevC*100 : null);
       const cls = ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
       const ar  = ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
-      lp.innerHTML=`<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
+      lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26)+
+        `<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
         (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
         `<span class="lp-live">● canlı</span>`;
       lp.classList.remove('hidden');
+      if(FIN) applyStockLogo(REQ_GEN);
     }else lp.classList.add('hidden');
     // Piyasa değeri: yalnız BIST — canlı fiyatın altında rozet (diğer 24 ülkede gösterilmez)
     const mcap = (live!=null && shares) ? live*shares : null;
@@ -3653,13 +3726,17 @@ function analyze(){
   // Rapor başlığı (dışa aktarmada da kullanılır)
   const rt=document.getElementById('reportTitle');
   if(rt){
-    if(!FIN) rt.textContent='Elle girilen veri';
+    if(!FIN){ rt.removeAttribute('data-title'); rt.textContent='Elle girilen veri'; }
     else{
       const mkt = FIN.market==='BIST' ? 'BIST'
                 : FIN.market==='EU' && FIN.euInfo ? FIN.euInfo.country
                 : 'ABD';
       const curLbl = FIN.market==='BIST' ? 'TL' : (FIN.cur || (FIN.market==='EU'?'—':'USD'));
-      rt.textContent = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
+      const titleTxt = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
+      rt.setAttribute('data-title', titleTxt);
+      const cached=LOGO_CACHE[logoCacheKey(FIN.ticker, FIN.market)]||FIN.logoid||'';
+      rt.innerHTML=logoHtml(cached, FIN.ticker, 28)+`<span>${safeHTML(titleTxt)}</span>`;
+      applyStockLogo(REQ_GEN);
     }
   }
   // Dönem notu: bildirilme tarihi + yıllık veride gecikme açıklaması
@@ -4929,7 +5006,7 @@ async function loadDiscovery(){
       filter.push({left:'exchange',operation:'equal',right:m.ex});
     }
     const r=await fetch('https://scanner.tradingview.com/'+m.scan+'/scan',{method:'POST',body:JSON.stringify({
-      columns:['name','description','close','change','volume','market_cap_basic','exchange'],
+      columns:['name','description','close','change','volume','market_cap_basic','exchange','logoid'],
       filter,
       sort:{sortBy,sortOrder},
       range:[0,40]
@@ -4960,9 +5037,11 @@ async function loadDiscovery(){
     };
     const rows=data.map((d,i)=>{
       const code=m.click(String(d[0]).replace(/_/g,'-'));
+      const sym=String(d[0]).replace(/_/g,'-');
+      rememberLogoid(sym, DISC_CC==='TR'?'BIST':(DISC_CC==='US'?'US':''), d[7]);
       return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="Analizi aç">
         <td style="color:var(--muted)">${i+1}</td>
-        <td><b>${safeHTML(String(d[0]).replace(/_/g,'-'))}</b></td>
+        <td><span class="sym-cell">${logoHtml(d[7], sym, 22)}<b>${safeHTML(sym)}</b></span></td>
         <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
         <td>${px(d[2])}</td>
         <td>${chg(d[3])}</td>
