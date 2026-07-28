@@ -5561,7 +5561,6 @@ let TAKAS_INIT=false;
 let TAKAS_LIST=null; // son liste (latest + recent)
 let TAKAS_OVERRIDE={}; // kind -> item (geçmiş gün seçimi)
 let TAKAS_ACTIVE_SLUG=null;
-let TAKAS_ZOOM=1;
 function initTakasPage(){
   if(TAKAS_INIT) return;
   TAKAS_INIT=true;
@@ -5574,13 +5573,10 @@ function initTakasPage(){
   if(box && !box._takasClick){
     box._takasClick=true;
     box.addEventListener('click', e=>{
-      const zbtn=e.target.closest('[data-akd-zoom]');
-      if(zbtn){
+      const shot=e.target.closest('img.akd-shot');
+      if(shot && shot.src){
         e.preventDefault();
-        const act=zbtn.getAttribute('data-akd-zoom');
-        if(act==='in') takasZoomBy(0.25);
-        else if(act==='out') takasZoomBy(-0.25);
-        else if(act==='reset') takasZoomSet(1);
+        openAkdFullscreen(shot.src, shot.alt||'');
         return;
       }
       const btn=e.target.closest('[data-takas-slug]');
@@ -5588,26 +5584,34 @@ function initTakasPage(){
       e.preventDefault();
       loadTakasAkdItem(btn.getAttribute('data-takas-slug'));
     });
-    box.addEventListener('wheel', e=>{
-      if(!e.ctrlKey && !e.metaKey) return;
-      if(!e.target.closest('.akd-shot-wrap')) return;
-      e.preventDefault();
-      takasZoomBy(e.deltaY < 0 ? 0.1 : -0.1);
-    }, { passive:false });
   }
 }
-function takasZoomSet(z){
-  TAKAS_ZOOM=Math.min(3, Math.max(0.5, Math.round(z*100)/100));
-  document.querySelectorAll('[data-akd-zoom-img]').forEach(img=>{
-    img.style.width=(TAKAS_ZOOM*100)+'%';
-    img.style.maxWidth='none';
-  });
-  document.querySelectorAll('.akd-zoom-lbl').forEach(el=>{
-    el.textContent=Math.round(TAKAS_ZOOM*100)+'%';
-  });
+function openAkdFullscreen(src, alt){
+  let overlay=document.getElementById('akdFsOverlay');
+  if(!overlay){
+    overlay=document.createElement('div');
+    overlay.id='akdFsOverlay';
+    overlay.className='akd-fs-overlay';
+    overlay.innerHTML=`<button type="button" class="akd-fs-close" aria-label="Kapat">×</button><img class="akd-fs-img" alt="">`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e=>{
+      if(e.target===overlay || e.target.classList.contains('akd-fs-close')) closeAkdFullscreen();
+    });
+    document.addEventListener('keydown', e=>{
+      if(e.key==='Escape') closeAkdFullscreen();
+    });
+  }
+  const img=overlay.querySelector('.akd-fs-img');
+  img.src=src;
+  img.alt=alt||'';
+  overlay.classList.add('open');
+  document.body.style.overflow='hidden';
 }
-function takasZoomBy(delta){
-  takasZoomSet(TAKAS_ZOOM + delta);
+function closeAkdFullscreen(){
+  const overlay=document.getElementById('akdFsOverlay');
+  if(!overlay) return;
+  overlay.classList.remove('open');
+  document.body.style.overflow='';
 }
 function takasFmtLot(n){
   if(n==null || !Number.isFinite(n)) return '—';
@@ -5629,16 +5633,8 @@ function takasCard(item, label){
   const when=item.publishedAt?new Date(item.publishedAt).toLocaleString('tr-TR'):'';
   const netTone=(st.netLots!=null && st.netLots<0)?'color:var(--bad)':(st.netLots>0?'color:var(--good)':'');
   const top5Tone=(st.top5NetLots!=null && st.top5NetLots<0)?'color:var(--bad)':(st.top5NetLots>0?'color:var(--good)':'');
-  const zPct=Math.round(TAKAS_ZOOM*100);
   const img=item.image
-    ? `<div class="akd-shot-toolbar">
-        <button type="button" class="akd-zoom-btn" data-akd-zoom="out" title="Uzaklaştır">−</button>
-        <span class="akd-zoom-lbl">${zPct}%</span>
-        <button type="button" class="akd-zoom-btn" data-akd-zoom="in" title="Yakınlaştır">+</button>
-        <button type="button" data-akd-zoom="reset" title="Sıfırla">Sıfırla</button>
-        <span class="hint">Ctrl + kaydırma ile de yakınlaştır</span>
-      </div>
-      <div class="akd-shot-wrap"><img class="akd-shot" data-akd-zoom-img src="${safeHTML(takasThemedImgSrc(item.image))}" alt="${safeHTML(item.title||label)}" loading="lazy" style="width:${zPct}%;max-width:none"></div>`
+    ? `<div class="akd-shot-wrap"><img class="akd-shot" src="${safeHTML(takasThemedImgSrc(item.image))}" alt="${safeHTML(item.title||label)}" loading="lazy" title="Tam ekran için tıkla"></div>`
     : '<div class="hint">Tablo görseli yok.</div>';
   return `<div class="akd-panel">
     <div class="akd-panel-hd">
@@ -5653,8 +5649,6 @@ function takasCard(item, label){
     ${img}
   </div>`;
 }
-window.takasZoomBy=takasZoomBy;
-window.takasZoomSet=takasZoomSet;
 function takasShownItem(kind){
   if(TAKAS_OVERRIDE[kind]) return TAKAS_OVERRIDE[kind];
   return (TAKAS_LIST && TAKAS_LIST.latest && TAKAS_LIST.latest[kind]) || null;
