@@ -472,11 +472,11 @@
 <nav class="tabs-nav no-print">
   <div class="tabs-in">
     <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
-    <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')">🏦 Takas & AKD</button>
     <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
     <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
     <button class="tab-btn" id="tabbtn-scan" onclick="switchPage('scan')">🔎 Hisse Tarayıcı</button>
     <button class="tab-btn" id="tabbtn-sect" onclick="switchPage('sect')">🏭 Sektör Devleri</button>
+    <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')">🏦 Takas & AKD</button>
     <button class="tab-btn" id="tabbtn-etf" onclick="switchPage('etf')">📦 ETF</button>
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')">🌎 Dünya Haberleri</button>
   </div>
@@ -913,7 +913,7 @@
     <div class="sub">Yalnızca Borsa İstanbul. Gün sonu / gün içi <b>aracı kurum dağılımı (AKD)</b> ve kurum işlem özetleri. Kaynak: <a href="https://borsacaddesi.com/" target="_blank" rel="noopener">BorsaCaddesi</a> (ücretsiz, güncel). Yatırım tavsiyesi değildir.</div>
     <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
       <input id="takasTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. THYAO" onkeydown="if(event.key==='Enter')loadTakasAkd()">
-      <button type="button" class="primary" onclick="loadTakasAkd()">Getir</button>
+      <button type="button" class="primary" onclick="loadTakasAkd()">Ara</button>
       <span class="hint" id="takasStatus"></span>
     </div>
   </div>
