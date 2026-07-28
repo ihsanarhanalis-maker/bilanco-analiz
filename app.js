@@ -5558,6 +5558,10 @@ async function loadEtf(code){
 
 /* ---------- Takas & AKD (BIST · BorsaCaddesi) ---------- */
 let TAKAS_INIT=false;
+let TAKAS_LIST=null; // son liste (latest + recent)
+let TAKAS_OVERRIDE={}; // kind -> item (geçmiş gün seçimi)
+let TAKAS_ACTIVE_SLUG=null;
+let TAKAS_ZOOM=1;
 function initTakasPage(){
   if(TAKAS_INIT) return;
   TAKAS_INIT=true;
@@ -5566,37 +5570,135 @@ function initTakasPage(){
     const t=(document.getElementById('ticker')?.value||document.getElementById('homeTicker')?.value||'').trim().toUpperCase();
     if(t && !/[.\s]/.test(t) && t.length<=8) inp.value=t;
   }
+  const box=document.getElementById('takasBody');
+  if(box && !box._takasClick){
+    box._takasClick=true;
+    box.addEventListener('click', e=>{
+      const zbtn=e.target.closest('[data-akd-zoom]');
+      if(zbtn){
+        e.preventDefault();
+        const act=zbtn.getAttribute('data-akd-zoom');
+        if(act==='in') takasZoomBy(0.25);
+        else if(act==='out') takasZoomBy(-0.25);
+        else if(act==='reset') takasZoomSet(1);
+        return;
+      }
+      const btn=e.target.closest('[data-takas-slug]');
+      if(!btn) return;
+      e.preventDefault();
+      loadTakasAkdItem(btn.getAttribute('data-takas-slug'));
+    });
+    box.addEventListener('wheel', e=>{
+      if(!e.ctrlKey && !e.metaKey) return;
+      if(!e.target.closest('.akd-shot-wrap')) return;
+      e.preventDefault();
+      takasZoomBy(e.deltaY < 0 ? 0.1 : -0.1);
+    }, { passive:false });
+  }
+}
+function takasZoomSet(z){
+  TAKAS_ZOOM=Math.min(3, Math.max(0.5, Math.round(z*100)/100));
+  document.querySelectorAll('[data-akd-zoom-img]').forEach(img=>{
+    img.style.width=(TAKAS_ZOOM*100)+'%';
+    img.style.maxWidth='none';
+  });
+  document.querySelectorAll('.akd-zoom-lbl').forEach(el=>{
+    el.textContent=Math.round(TAKAS_ZOOM*100)+'%';
+  });
+}
+function takasZoomBy(delta){
+  takasZoomSet(TAKAS_ZOOM + delta);
 }
 function takasFmtLot(n){
   if(n==null || !Number.isFinite(n)) return '—';
   return Math.round(n).toLocaleString('tr-TR');
 }
+function takasKindLabel(kind){
+  if(kind==='gun_sonu_akd') return 'Gün sonu AKD';
+  if(kind==='araci_kurum') return 'Gün içi aracı kurum dağılımı';
+  if(kind==='takas') return 'Aracı kurum dağılımı';
+  return kind||'';
+}
+function takasThemedImgSrc(imageUrl){
+  if(!imageUrl) return '';
+  return '/bistakdimg?v=orig1&u='+encodeURIComponent(imageUrl);
+}
 function takasCard(item, label){
   if(!item) return '';
   const st=item.stats||{};
   const when=item.publishedAt?new Date(item.publishedAt).toLocaleString('tr-TR'):'';
-  const kpis=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 12px">
-    <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:120px">
-      <div class="hint" style="margin:0">Net lot</div><div style="font-weight:800;font-variant-numeric:tabular-nums">${takasFmtLot(st.netLots)}</div></div>
-    <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:120px">
-      <div class="hint" style="margin:0">Toplam adet</div><div style="font-weight:800;font-variant-numeric:tabular-nums">${takasFmtLot(st.totalLots)}</div></div>
-    <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:140px">
-      <div class="hint" style="margin:0">Net ilk 5</div><div style="font-weight:800;font-variant-numeric:tabular-nums">${takasFmtLot(st.top5NetLots)}</div>
-      ${st.top5Note?`<div class="hint" style="margin:4px 0 0">${safeHTML(st.top5Note)}</div>`:''}</div>
-  </div>`;
+  const netTone=(st.netLots!=null && st.netLots<0)?'color:var(--bad)':(st.netLots>0?'color:var(--good)':'');
+  const top5Tone=(st.top5NetLots!=null && st.top5NetLots<0)?'color:var(--bad)':(st.top5NetLots>0?'color:var(--good)':'');
+  const zPct=Math.round(TAKAS_ZOOM*100);
   const img=item.image
-    ? `<a href="${safeHTML(item.url)}" target="_blank" rel="noopener"><img src="${safeHTML(item.image)}" alt="${safeHTML(item.title)}" style="width:100%;max-width:920px;border-radius:10px;border:1px solid var(--line);background:#fff" loading="lazy"></a>`
-    : '<div class="hint">Tablo görseli yok — kaynağa git.</div>';
-  return `<div class="card" style="margin-bottom:14px">
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;justify-content:space-between">
-      <h3 style="margin:0;font-size:16px">${safeHTML(label)}</h3>
-      <a href="${safeHTML(item.url)}" target="_blank" rel="noopener" style="font-size:12px">Kaynağı aç ↗</a>
+    ? `<div class="akd-shot-toolbar">
+        <button type="button" class="akd-zoom-btn" data-akd-zoom="out" title="Uzaklaştır">−</button>
+        <span class="akd-zoom-lbl">${zPct}%</span>
+        <button type="button" class="akd-zoom-btn" data-akd-zoom="in" title="Yakınlaştır">+</button>
+        <button type="button" data-akd-zoom="reset" title="Sıfırla">Sıfırla</button>
+        <span class="hint">Ctrl + kaydırma ile de yakınlaştır</span>
+      </div>
+      <div class="akd-shot-wrap"><img class="akd-shot" data-akd-zoom-img src="${safeHTML(takasThemedImgSrc(item.image))}" alt="${safeHTML(item.title||label)}" loading="lazy" style="width:${zPct}%;max-width:none"></div>`
+    : '<div class="hint">Tablo görseli yok.</div>';
+  return `<div class="akd-panel">
+    <div class="akd-panel-hd">
+      <h3>${safeHTML(label)}</h3>
+      <div class="akd-date">${safeHTML(item.title||'')}${when?' · '+safeHTML(when):''}</div>
     </div>
-    <div class="sub" style="margin-top:4px">${safeHTML(item.title)}${when?' · '+safeHTML(when):''}</div>
-    ${kpis}
+    <div class="akd-kpis">
+      <div class="akd-kpi"><div class="lbl">Net lot</div><div class="val" style="${netTone}">${takasFmtLot(st.netLots)}</div></div>
+      <div class="akd-kpi"><div class="lbl">Toplam adet</div><div class="val">${takasFmtLot(st.totalLots)}</div></div>
+      <div class="akd-kpi"><div class="lbl">Net ilk 5</div><div class="val" style="${top5Tone}">${takasFmtLot(st.top5NetLots)}</div></div>
+    </div>
     ${img}
-    ${item.summary?`<div class="hint" style="margin-top:10px">${safeHTML(item.summary)}${item.summary.length>=400?'…':''}</div>`:''}
   </div>`;
+}
+window.takasZoomBy=takasZoomBy;
+window.takasZoomSet=takasZoomSet;
+function takasShownItem(kind){
+  if(TAKAS_OVERRIDE[kind]) return TAKAS_OVERRIDE[kind];
+  return (TAKAS_LIST && TAKAS_LIST.latest && TAKAS_LIST.latest[kind]) || null;
+}
+function takasRecentHtml(j){
+  const list=(j.recent||[]).filter(a=>a && a.slug && a.kind!=='gun_ici_akd');
+  if(!list.length){
+    return j.note?`<div class="hint" style="margin-top:8px">${safeHTML(j.note)}</div>`:'';
+  }
+  const rows=list.map(a=>{
+    const active=TAKAS_ACTIVE_SLUG && TAKAS_ACTIVE_SLUG===a.slug;
+    const style=active
+      ? 'background:none;border:none;padding:0;color:var(--ink);font-weight:800;text-align:left;cursor:pointer;text-decoration:underline'
+      : 'background:none;border:none;padding:0;color:var(--accent-2);font-weight:600;text-align:left;cursor:pointer';
+    return `<tr${active?' style="background:rgba(79,156,249,.08)"':''}>
+      <td style="text-align:left"><button type="button" data-takas-slug="${safeHTML(a.slug)}" style="${style}">${safeHTML(a.title)}</button></td>
+      <td>${a.publishedAt?safeHTML(new Date(a.publishedAt).toLocaleDateString('tr-TR')):'—'}</td>
+      <td style="text-align:left;color:var(--muted);font-size:12px">${safeHTML(takasKindLabel(a.kind))}</td></tr>`;
+  }).join('');
+  return `<div class="card"><h3 style="margin-top:0">Son kayıtlar</h3>
+    <div class="hint" style="margin:-4px 0 10px">Başlığa tıklayınca üstteki ilgili panel o günün tam tablosuna geçer.</div>
+    <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Başlık</th><th>Tarih</th><th style="text-align:left">Tür</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="hint" style="margin-top:8px">${safeHTML(j.note||'')}</div></div>`;
+}
+function renderTakasView(){
+  const box=document.getElementById('takasBody');
+  if(!box || !TAKAS_LIST) return;
+  const j=TAKAS_LIST;
+  const sym=j.symbol||'';
+  let html='';
+  if(j.category){
+    html+=`<div class="hint" style="margin-bottom:12px">${logoHtml(null, sym, 22, {sym, market:'BIST', cc:'TR'})} <b>${safeHTML(sym)}</b> · ${safeHTML(j.category.name||'')}</div>`;
+  }
+  const gun=takasShownItem('gun_sonu_akd');
+  const araci=takasShownItem('araci_kurum');
+  const takas=takasShownItem('takas');
+  html+=takasCard(gun, 'Gün sonu AKD');
+  html+=takasCard(araci, 'Gün içi aracı kurum dağılımı');
+  html+=takasCard(takas, 'Aracı kurum dağılımı');
+  if(!gun && !araci && !takas){
+    html+='<div class="hint">Bu hisse için henüz AKD özeti yok.</div>';
+  }
+  html+=takasRecentHtml(j);
+  box.innerHTML=html;
 }
 async function loadTakasAkd(){
   const inp=document.getElementById('takasTicker');
@@ -5605,44 +5707,68 @@ async function loadTakasAkd(){
   const sym=String(inp?.value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
   if(!sym){ if(st) st.textContent='Hisse kodu gir.'; return; }
   if(inp) inp.value=sym;
+  initTakasPage();
+  TAKAS_OVERRIDE={};
+  TAKAS_ACTIVE_SLUG=null;
   if(st) st.textContent='Yükleniyor…';
-  box.innerHTML='<div class="hint">BorsaCaddesi’nden güncel AKD çekiliyor…</div>';
+  box.innerHTML='<div class="hint">AKD tabloları çekiliyor…</div>';
   try{
     const r=await fetch('/bistakd?hisse='+encodeURIComponent(sym));
     const j=await r.json();
     if(!j || !j.ok){
-      box.innerHTML=`<div class="hint">${safeHTML(sym)} için kayıt bulunamadı. Kaynak: <a href="https://borsacaddesi.com/" target="_blank" rel="noopener">BorsaCaddesi</a></div>`;
+      TAKAS_LIST=null;
+      box.innerHTML=`<div class="hint">${safeHTML(sym)} için AKD kaydı bulunamadı.</div>`;
       if(st) st.textContent='Bulunamadı';
       return;
     }
-    const L=j.latest||{};
-    let html='';
-    if(j.category){
-      html+=`<div class="hint" style="margin-bottom:12px">${logoHtml(null, sym, 22, {sym, market:'BIST', cc:'TR'})} <b>${safeHTML(sym)}</b> · ${safeHTML(j.category.name||'')} · <a href="${safeHTML(j.category.url)}" target="_blank" rel="noopener">Tüm yazılar</a></div>`;
-    }
-    html+=takasCard(L.gun_sonu_akd, 'Gün sonu AKD (aracı kurum dağılımı)');
-    html+=takasCard(L.araci_kurum, 'Gün içi aracı kurum dağılımı');
-    html+=takasCard(L.gun_ici_akd, 'Gün içi AKD / kim aldı kim sattı');
-    html+=takasCard(L.takas, 'Takas');
-    if(!L.gun_sonu_akd && !L.araci_kurum && !L.gun_ici_akd && !L.takas){
-      html+='<div class="hint">Bu hisse için henüz AKD özeti yok.</div>';
-    }
-    if((j.recent||[]).length){
-      const rows=j.recent.map(a=>`<tr style="cursor:pointer" onclick="window.open('${safeHTML(a.url)}','_blank')">
-        <td style="text-align:left">${safeHTML(a.title)}</td>
-        <td>${a.publishedAt?safeHTML(new Date(a.publishedAt).toLocaleDateString('tr-TR')):'—'}</td>
-        <td style="text-align:left;color:var(--muted);font-size:12px">${safeHTML(a.kind)}</td></tr>`).join('');
-      html+=`<div class="card"><h3 style="margin-top:0">Son kayıtlar</h3>
-        <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Başlık</th><th>Tarih</th><th style="text-align:left">Tür</th></tr></thead><tbody>${rows}</tbody></table></div>
-        <div class="hint" style="margin-top:8px">${safeHTML(j.note||'')}</div></div>`;
-    }
-    box.innerHTML=html;
-    if(st) st.textContent='Güncel · BorsaCaddesi';
+    TAKAS_LIST=j;
+    const latest=j.latest||{};
+    TAKAS_ACTIVE_SLUG=(latest.gun_sonu_akd && latest.gun_sonu_akd.slug) || null;
+    renderTakasView();
+    if(st) st.textContent='Güncel';
   }catch(e){
     box.innerHTML='<div class="hint">Alınamadı: '+safeHTML(e.message)+'</div>';
     if(st) st.textContent='Hata';
   }
 }
+async function loadTakasAkdItem(slug){
+  const inp=document.getElementById('takasTicker');
+  const st=document.getElementById('takasStatus');
+  const sym=String(inp?.value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const s=String(slug||'').trim();
+  if(!sym || !s || !TAKAS_LIST) return;
+  const meta=(TAKAS_LIST.recent||[]).find(a=>a.slug===s);
+  const kind=meta && meta.kind;
+  if(!kind || kind==='gun_ici_akd') return;
+
+  // Aynı günün güncel kaydıysa override kaldır → bugüne dön
+  const base=TAKAS_LIST.latest && TAKAS_LIST.latest[kind];
+  if(base && base.slug===s){
+    delete TAKAS_OVERRIDE[kind];
+    TAKAS_ACTIVE_SLUG=s;
+    renderTakasView();
+    if(st) st.textContent='Güncel';
+    return;
+  }
+
+  if(st) st.textContent='Kayıt açılıyor…';
+  try{
+    const r=await fetch('/bistakd?hisse='+encodeURIComponent(sym)+'&slug='+encodeURIComponent(s));
+    const j=await r.json();
+    if(!j || !j.ok || !j.item){
+      if(st) st.textContent='Kayıt bulunamadı';
+      return;
+    }
+    TAKAS_OVERRIDE[kind]=j.item;
+    TAKAS_ACTIVE_SLUG=s;
+    renderTakasView();
+    if(st) st.textContent=takasKindLabel(kind)+' · seçildi';
+  }catch(_e){
+    if(st) st.textContent='Hata';
+  }
+}
+window.loadTakasAkd=loadTakasAkd;
+window.loadTakasAkdItem=loadTakasAkdItem;
 
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{

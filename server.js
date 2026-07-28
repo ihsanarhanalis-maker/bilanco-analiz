@@ -626,13 +626,438 @@ function bcParseAkdStats(text) {
   const net = t.match(/Net:\s*([-\d.\s]+)\s*adet/i);
   const total = t.match(/Toplam\s*Adet:\s*([\d.\s]+)/i);
   const top5 = t.match(/Net\s*İlk\s*5:\s*([-\d.\s]+)\s*adet/i);
-  const top5Note = t.match(/Net\s*İlk\s*5:\s*[-\d.\s]+\s*adet\s+([^.]+)/i);
+  const top5Note = t.match(/Net\s*İlk\s*5:\s*[-\d.\s]+\s*adet\s+([^.]{3,80}?)(?:\.\s|Trend|Yasal|$)/i);
   return {
     netLots: net ? num(net[1]) : null,
     totalLots: total ? num(total[1]) : null,
     top5NetLots: top5 ? num(top5[1]) : null,
-    top5Note: top5Note ? top5Note[1].trim() : null
+    top5Note: top5Note ? top5Note[1].replace(/\s+/g, ' ').trim() : null
   };
+}
+
+/* AKD tabloları yalnızca PNG olarak yayınlanır → OCR ile Alım/Satım satırları */
+const BC_OCR_CACHE = new Map(); // imageUrl -> { at, data }
+let _bcTessWorker = null;
+let _bcTessLock = Promise.resolve();
+function bcPngSize(buf) {
+  if (!buf || buf.length < 24 || buf[0] !== 0x89) return null;
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+}
+function bcParseTrNum(s, asLots) {
+  const t = String(s || '').trim().replace(/\s/g, '');
+  if (!t || !/^\d/.test(t)) return null;
+  // OCR eksik binlik noktası: 1.378629 → 1378629
+  if (asLots && /^\d{1,3}\.\d{6,}$/.test(t)) return Number(t.replace(/\./g, ''));
+  if (/^\d{1,3}(\.\d{3}){2,}$/.test(t)) return Number(t.replace(/\./g, ''));
+  if (/^\d{1,3}\.\d{3}$/.test(t)) {
+    if (asLots) return Number(t.replace(/\./g, ''));
+    const asDec = Number(t);
+    if (asDec >= 40 && asDec <= 50000) return asDec;
+    return Number(t.replace(/\./g, ''));
+  }
+  if (/^\d+[.,]\d{1,4}$/.test(t)) return Number(t.replace(',', '.'));
+  if (/^\d+$/.test(t)) return Number(t);
+  const n = Number(t.replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+/** 29708→297.08, 296461→296.461, 297.078→297.078 */
+function bcGuessPrice(raw) {
+  const t = String(raw || '').trim().replace(/\s/g, '');
+  if (!t) return null;
+  if (/^\d+[.,]\d{1,4}$/.test(t)) {
+    const p = Number(t.replace(',', '.'));
+    return p >= 40 && p <= 20000 ? p : null;
+  }
+  if (/^\d{1,3}\.\d{3}$/.test(t)) {
+    const p = Number(t);
+    return p >= 40 && p <= 20000 ? p : null;
+  }
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  if (t.length === 5) {
+    const p = n / 100;
+    if (p >= 40 && p <= 2000) return Math.round(p * 100) / 100;
+  }
+  if (t.length === 6) {
+    const p = n / 1000;
+    if (p >= 40 && p <= 2000) return Math.round(p * 1000) / 1000;
+  }
+  return null;
+}
+/** OCR birleşmesi: "14297349" → pct 14 + fiyat 297.349 (yalnızca düz rakam) */
+function bcSplitPctPrice(raw) {
+  const t = String(raw || '').trim();
+  if (!/^\d{7,9}$/.test(t)) return null;
+  for (const pctLen of [2, 1]) {
+    const pct = Number(t.slice(0, pctLen));
+    const rest = t.slice(pctLen);
+    if (!(pct >= 1 && pct <= 100)) continue;
+    let price = null;
+    if (rest.length === 6) price = Number(rest) / 1000;
+    else if (rest.length === 5) price = Number(rest) / 100;
+    if (price != null && price >= 40 && price <= 5000) {
+      return { pct, price: Math.round(price * 1000) / 1000 };
+    }
+  }
+  return null;
+}
+function bcFixBrokerName(raw) {
+  let t = String(raw || '').toUpperCase()
+    .replace(/İ/g, 'I').replace(/ı/g, 'I').replace(/Ğ/g, 'G').replace(/Ü/g, 'U')
+    .replace(/Ş/g, 'S').replace(/Ö/g, 'O').replace(/Ç/g, 'C')
+    .replace(/[^A-Z0-9\-\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  t = t.replace(/^(BI|BL|EI|IE|IT|NI|SI|TE|CE|EE|NL|IG|I)\s+/, '');
+  t = t.replace(/^\d+\s+/, '');
+  if (/^(DIGER|DI GER|IGER|OTHER)\b/.test(t)) return 'DİĞER';
+  const map = [
+    [/^ONB\b|^QNB\b/, 'QNB YATIRIM'],
+    [/^HSBC\b/, 'HSBC YATIRIM'],
+    [/^TEB\b/, 'TEB YATIRIM'],
+    [/^BANK[\s\-]*OF[\s\-]*AMERICA/, 'BANK OF AMERICA'],
+    [/^YAPI[\s\-]*KREDI/, 'YAPI KREDI'],
+    [/^LOBAL\b|^GLOBAL\b/, 'GLOBAL MENKUL'],
+    [/^ALK\b|^HALK\b/, 'HALK YATIRIM'],
+    [/^ARANTI\b|^GARANTI\b/, 'GARANTI BBVA'],
+    [/^UVEYT|^KUVEYT/, 'KUVEYT TÜRK'],
+    [/^S\s*YATIRIM|^IS\s*YATIRIM|^ISYATIRM/, 'İŞ YATIRIM'],
+    [/^YATIRIM[\s\-]*FINANS/, 'YATIRIM FİNANSMAN'],
+    [/^YATIRIM$/, 'İŞ YATIRIM'],
+    [/^AK[\s\-]*YAT/, 'AK YATIRIM'],
+    [/^INFO\b/, 'INFO YATIRIM'],
+    [/^MIDAS\b/, 'MIDAS MENKUL'],
+    [/^ZIRAAT|^ZRAAT/, 'ZİRAAT YATIRIM'],
+    [/^VAKIF/, 'VAKIF YATIRIM'],
+    [/^DENIZ|^DENZ/, 'DENİZ YATIRIM'],
+    [/^OSMANLI/, 'OSMANLI YATIRIM'],
+    [/^TACIRLER|^TACRLER/, 'TACİRLER YATIRIM'],
+    [/^COLENDI/, 'COLENDİ MENKUL'],
+    [/^OYAK\b/, 'OYAK YATIRIM'],
+    [/^TERA\b/, 'TERA YATIRIM']
+  ];
+  for (const [re, name] of map) {
+    if (re.test(t)) return name;
+  }
+  return t.slice(0, 36) || null;
+}
+function bcParseBrokerSide(text) {
+  const rows = [];
+  for (const line0 of String(text || '').split(/\n/)) {
+    let line = line0.replace(/[\[\]|{}~]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!line) continue;
+    line = line.replace(/^(?:[\dIOBEl]{1,3}\s+)+(?=[A-Z])/i, '');
+    const matches = [...line.matchAll(/(\d{1,3}\.\d{6,}|\d{1,3}(?:\.\d{3})+|\d+[.,]\d{1,4}|\d{4,}|\b\d{1,3}\b)/g)];
+    if (matches.length < 2) continue;
+    const first = matches[0];
+    let name = bcFixBrokerName(line.slice(0, first.index));
+    if (!name || name.length < 2) continue;
+    if (/ADET|MALIYET|TOPLAM|KURUM|SATAN|NET\b|TK[S%]|MALET|SELAN/i.test(name)) continue;
+    let lots = bcParseTrNum(first[1], true);
+    let used = 1;
+    if (lots != null && lots < 100000 && matches[1] && /^\d{3}$/.test(matches[1][1])) {
+      lots = lots * 1000 + Number(matches[1][1]);
+      used = 2;
+    }
+    if (!(lots > 500) && name !== 'DİĞER') continue;
+    if (!(lots > 50) && name === 'DİĞER') continue;
+    const toks = matches.slice(used).map(m => m[1]);
+    let pct = null;
+    let price = null;
+    let total = null;
+    const priceIdx = new Set();
+
+    for (let i = 0; i < toks.length; i++) {
+      const raw = toks[i];
+      const split = bcSplitPctPrice(raw);
+      if (split && pct == null && price == null) {
+        pct = split.pct;
+        price = split.price;
+        priceIdx.add(i);
+        continue;
+      }
+      const nAny = bcParseTrNum(raw, false);
+      if (pct == null && nAny != null && nAny > 0 && nAny <= 100 && /^\d{1,3}$/.test(raw)) {
+        pct = nAny;
+        continue;
+      }
+      if (price == null) {
+        if (/^\d+[.,]\d{1,2}$/.test(raw) || (/^\d+[.,]\d{3}$/.test(raw) && Number(String(raw).replace(',', '.')) < 800)) {
+          const p = bcGuessPrice(raw);
+          if (p != null) { price = p; priceIdx.add(i); continue; }
+        }
+        // 293518 gibi yapışık maliyet: yalnızca sonrasında ayrı bir toplam varsa
+        if (/^\d{6}$/.test(raw)) {
+          const p = bcGuessPrice(raw);
+          if (p != null && p <= 800) {
+            const laterTot = toks.slice(i + 1).some(t => {
+              if (/^\d{1,3}$/.test(t)) return false;
+              const v = bcParseTrNum(t, true);
+              return v != null && v >= 1000 && v !== Number(raw);
+            });
+            if (laterTot) { price = p; priceIdx.add(i); continue; }
+          }
+        }
+      }
+    }
+    const totCandidates = [];
+    for (let i = 0; i < toks.length; i++) {
+      if (priceIdx.has(i)) continue;
+      const raw = toks[i];
+      if (bcSplitPctPrice(raw)) continue;
+      if (/^\d{1,3}$/.test(raw)) continue;
+      if (/^\d+[.,]\d{1,2}$/.test(raw)) continue;
+      if (price != null && /^\d+[.,]\d{3}$/.test(raw) && Math.abs(Number(String(raw).replace(',', '.')) - price) < 0.01) continue;
+      if (price != null && /^\d{6}$/.test(raw) && Math.round(price * 1000) === Number(raw)) continue;
+      let v = bcParseTrNum(raw, true);
+      if (v != null && v < 100000 && /^\d{3}$/.test(raw) && i > 0 && /^\d{1,3}\.\d{3}$/.test(toks[i - 1] || '')) {
+        v = bcParseTrNum(toks[i - 1], true) * 1000 + Number(raw);
+      }
+      if (v != null && v >= 1000) totCandidates.push(v);
+    }
+    if (totCandidates.length) total = totCandidates[totCandidates.length - 1];
+    rows.push({ name, lots, pct, price, total });
+  }
+  const seen = new Set();
+  const out = rows.filter(r => {
+    if (seen.has(r.name)) return false;
+    seen.add(r.name);
+    return true;
+  }).slice(0, 8);
+
+  // Tek satırda % kaçmışsa: diğerlerinin toplamından tamamla
+  const withPct = out.filter(r => r.pct != null && r.name !== 'DİĞER');
+  const missingPct = out.filter(r => r.pct == null && r.name !== 'DİĞER');
+  const pctSum = withPct.reduce((s, r) => s + r.pct, 0);
+  if (missingPct.length === 1 && pctSum > 0 && pctSum < 100) {
+    const dig = out.find(r => r.name === 'DİĞER' && r.pct != null);
+    const rem = 100 - pctSum - (dig ? dig.pct : 0);
+    if (rem >= 1 && rem <= 80) missingPct[0].pct = Math.round(rem);
+  }
+  // Hâlâ boşsa lot payından kabaca doldur
+  const need = out.filter(r => r.pct == null && r.lots > 0);
+  if (need.length) {
+    const base = out.filter(r => r.lots > 0);
+    const sum = base.reduce((s, r) => s + r.lots, 0);
+    if (sum > 0) {
+      for (const r of need) r.pct = Math.max(1, Math.round((r.lots / sum) * 100));
+    }
+  }
+  return out;
+}
+async function bcGetTessWorker() {
+  if (_bcTessWorker) return _bcTessWorker;
+  const { createWorker } = require('tesseract.js');
+  const worker = await createWorker('eng');
+  await worker.setParameters({ tessedit_pageseg_mode: '6' });
+  _bcTessWorker = worker;
+  return worker;
+}
+async function bcOcrAkdTables(imageUrl) {
+  const url = String(imageUrl || '').trim();
+  if (!/^https:\/\/img\.borsacaddesi\.com\//i.test(url)) {
+    return { buyers: [], sellers: [], ok: false, error: 'bad_image_host' };
+  }
+  const cacheKey = 'v8:' + url;
+  const hit = BC_OCR_CACHE.get(cacheKey);
+  if (hit && (Date.now() - hit.at) < 6 * 60 * 60 * 1000) return hit.data;
+
+  const run = async () => {
+    const img = await httpsGetBuf(url, {
+      'User-Agent': BUA,
+      Accept: 'image/png,image/*',
+      Referer: 'https://borsacaddesi.com/'
+    });
+    if (!img.buf || img.status >= 400) throw new Error('image_fetch');
+    const size = bcPngSize(img.buf);
+    if (!size || size.w < 200 || size.h < 200) throw new Error('bad_png');
+    const worker = await bcGetTessWorker();
+    const left = {
+      left: 0,
+      top: Math.floor(size.h * 0.24),
+      width: Math.floor(size.w * 0.36),
+      height: Math.floor(size.h * 0.28)
+    };
+    const mid = {
+      left: Math.floor(size.w * 0.33),
+      top: Math.floor(size.h * 0.24),
+      width: Math.floor(size.w * 0.35),
+      height: Math.floor(size.h * 0.28)
+    };
+    const [L, M] = await Promise.all([
+      worker.recognize(img.buf, { rectangle: left }),
+      worker.recognize(img.buf, { rectangle: mid })
+    ]);
+    let buyers = bcParseBrokerSide(L.data && L.data.text);
+    let sellers = bcParseBrokerSide(M.data && M.data.text);
+    if (buyers.length < 4 || sellers.length < 3) {
+      const wide = {
+        left: 0,
+        top: Math.floor(size.h * 0.24),
+        width: Math.floor(size.w * 0.68),
+        height: Math.floor(size.h * 0.28)
+      };
+      const W = await worker.recognize(img.buf, { rectangle: wide });
+      const all = bcParseBrokerSide(W.data && W.data.text);
+      // Geniş tarama satırları karışabilir; eksik tarafı tamamla
+      if (buyers.length < 4) {
+        const extra = all.filter(r => !buyers.some(b => b.name === r.name));
+        buyers = buyers.concat(extra).slice(0, 8);
+      }
+    }
+    const data = {
+      buyers,
+      sellers,
+      ok: buyers.length + sellers.length >= 3,
+      imageW: size.w,
+      imageH: size.h
+    };
+    BC_OCR_CACHE.set(cacheKey, { at: Date.now(), data });
+    return data;
+  };
+
+  const p = _bcTessLock.then(run, run);
+  _bcTessLock = p.catch(() => {});
+  try {
+    return await p;
+  } catch (e) {
+    const fail = { buyers: [], sellers: [], ok: false, error: e.message || 'ocr' };
+    BC_OCR_CACHE.set(cacheKey, { at: Date.now(), data: fail });
+    return fail;
+  }
+}
+async function bcEnrichAkdItem(item) {
+  // Tam tablo görsel olarak gösterilir (/bistakdimg); OCR'a gerek yok
+  return item;
+}
+
+const BC_IMG_CACHE = new Map(); // key -> { at, buf, ctype }
+function bcRgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h, s, l };
+}
+function bcThemeAkdPng(buf) {
+  let PNG;
+  try { PNG = require('pngjs').PNG; } catch (_e) { return null; }
+  let png;
+  try { png = PNG.sync.read(buf); } catch (_e) { return null; }
+  const data = png.data;
+
+  const BG     = [10, 13, 26];
+  const SURF   = [17, 23, 38];
+  const SURF2  = [22, 30, 48];
+  const SURF3  = [30, 41, 63];
+  const INK    = [234, 240, 250];
+  const INK2   = [190, 200, 218];
+  const MUTED  = [130, 145, 170];
+  const LINE   = [35, 46, 72];
+  const ACCENT = [79, 156, 249];
+  const ACCENT2= [108, 176, 255];
+  const GOOD   = [52, 211, 154];
+  const GOOD2  = [40, 180, 130];
+  const BAD    = [240, 106, 114];
+  const BAD2   = [220, 80, 90];
+  const WARN   = [243, 180, 78];
+  const GOLD   = [214, 173, 69];
+
+  const set = (i, c) => { data[i] = c[0]; data[i + 1] = c[1]; data[i + 2] = c[2]; };
+  const mix = (a, b, t) => [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t)
+  ];
+  const greyRamp = (l) => {
+    if (l >= 0.93) return BG;
+    if (l >= 0.82) return SURF;
+    if (l >= 0.70) return SURF2;
+    if (l >= 0.58) return SURF3;
+    if (l >= 0.45) return LINE;
+    if (l >= 0.32) return MUTED;
+    if (l >= 0.16) return INK2;
+    return INK;
+  };
+  const hueTheme = (h, vivid) => {
+    const deg = ((h % 1) + 1) % 1 * 360;
+    if (deg < 35 || deg >= 330) return vivid ? BAD : BAD2;
+    if (deg < 70) return WARN;
+    if (deg < 100) return GOLD;
+    if (deg < 165) return vivid ? GOOD : GOOD2;
+    if (deg < 200) return mix(GOOD, ACCENT, 0.45);
+    if (deg < 255) return vivid ? ACCENT2 : ACCENT;
+    if (deg < 295) return mix(ACCENT, BAD, 0.3);
+    return BAD;
+  };
+
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 8) continue;
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const { h, s, l } = bcRgbToHsl(r, g, b);
+
+    // Düz gri → tema yüzey / metin (yüksek kontrast)
+    if (s < 0.10) {
+      set(i, greyRamp(l));
+      continue;
+    }
+
+    const vivid = s > 0.35 && l > 0.2 && l < 0.85;
+    const theme = hueTheme(h, vivid);
+
+    // Pasta dilimi / doygun renk: temanın canlı hali
+    if (s >= 0.28 && l >= 0.25 && l <= 0.78) {
+      if (l > 0.62) set(i, mix(SURF3, theme, 0.78));
+      else if (l > 0.45) set(i, theme);
+      else set(i, mix(theme, BG, 0.12));
+      continue;
+    }
+
+    // Açık pastel hücre / dilim kenarı
+    if (l >= 0.75) {
+      set(i, mix(SURF2, theme, 0.38 + Math.min(0.35, s)));
+      continue;
+    }
+    if (l >= 0.55) {
+      set(i, mix(SURF3, theme, 0.55 + Math.min(0.3, s)));
+      continue;
+    }
+    if (l >= 0.30) {
+      set(i, mix(mix(SURF3, theme, 0.65), theme, 0.4));
+      continue;
+    }
+    set(i, mix(BG, theme, 0.7));
+  }
+  try { return PNG.sync.write(png); } catch (_e) { return null; }
+}
+async function bcThemedAkdImage(imageUrl) {
+  const url = String(imageUrl || '').trim();
+  if (!/^https:\/\/img\.borsacaddesi\.com\//i.test(url)) return null;
+  // Orijinal renkler — tema boyaması yok
+  const cacheKey = 'orig-v1:' + url;
+  const hit = BC_IMG_CACHE.get(cacheKey);
+  if (hit && (Date.now() - hit.at) < 6 * 60 * 60 * 1000) return hit;
+
+  const img = await httpsGetBuf(url, {
+    'User-Agent': BUA,
+    Accept: 'image/png,image/*',
+    Referer: 'https://borsacaddesi.com/'
+  });
+  if (!img.buf || img.status >= 400) return null;
+  const out = {
+    at: Date.now(),
+    buf: img.buf,
+    ctype: 'image/png',
+    themed: false
+  };
+  BC_IMG_CACHE.set(cacheKey, out);
+  return out;
 }
 function bcAkdKind(title, slug, tags) {
   const t = ((title || '') + ' ' + (slug || '')).toLowerCase()
@@ -659,9 +1084,11 @@ function bcPickLatest(list) {
     return tb - ta;
   })[0] || null;
 }
-async function borsaCaddesiAkd(hisse) {
+async function borsaCaddesiAkd(hisse, opts) {
   const sym = String(hisse || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const hit = BC_AKD_CACHE.get(sym);
+  const wantSlug = String((opts && opts.slug) || '').trim().replace(/^\/+/, '');
+  const cacheKey = wantSlug ? sym + '::' + wantSlug : sym;
+  const hit = BC_AKD_CACHE.get(cacheKey);
   if (hit && (Date.now() - hit.at) < 10 * 60 * 1000) return hit.data;
 
   const search = await httpsGetText('https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym), {
@@ -678,7 +1105,7 @@ async function borsaCaddesiAkd(hisse) {
   }
   if (!catSlug) {
     const miss = { ok: false, symbol: sym, error: 'not_found', source: 'borsacaddesi' };
-    BC_AKD_CACHE.set(sym, { at: Date.now(), data: miss });
+    BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data: miss });
     return miss;
   }
 
@@ -714,10 +1141,30 @@ async function borsaCaddesiAkd(hisse) {
     };
   }).filter(a => a.kind !== 'other');
 
+  // Tek kayıt (Son kayıtlar tıklaması)
+  if (wantSlug) {
+    const art = mapped.find(a => a.slug === wantSlug);
+    if (!art || art.kind === 'gun_ici_akd') {
+      const miss = { ok: false, symbol: sym, error: 'not_found', source: 'borsacaddesi' };
+      BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data: miss });
+      return miss;
+    }
+    if (art.kind === 'gun_sonu_akd' || art.kind === 'araci_kurum' || art.kind === 'takas') {
+      await bcEnrichAkdItem(art);
+    }
+    const one = {
+      ok: true,
+      symbol: sym,
+      item: art,
+      source: 'borsacaddesi'
+    };
+    BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data: one });
+    return one;
+  }
+
   const byKind = {
     gun_sonu_akd: bcPickLatest(mapped.filter(a => a.kind === 'gun_sonu_akd')),
     araci_kurum: bcPickLatest(mapped.filter(a => a.kind === 'araci_kurum')),
-    gun_ici_akd: bcPickLatest(mapped.filter(a => a.kind === 'gun_ici_akd')),
     takas: bcPickLatest(mapped.filter(a => a.kind === 'takas'))
   };
   // Gün sonu yoksa aramada bulunan güncel kapak görselli yazıyı yedekle
@@ -739,17 +1186,28 @@ async function borsaCaddesiAkd(hisse) {
     }
   }
 
+  // Kapak görseli uygulama temasında /bistakdimg ile gösterilir (OCR yok → hızlı)
+  // enrichList kaldırıldı
+
+  const recentKinds = new Set(['gun_sonu_akd', 'araci_kurum', 'takas']);
   const data = {
     ok: true,
     symbol: sym,
-    category: { slug: catSlug, name: catName, url: 'https://borsacaddesi.com/category/' + catSlug },
+    category: { slug: catSlug, name: catName },
     latest: byKind,
-    recent: mapped.slice(0, 12),
+    recent: mapped
+      .filter(a => recentKinds.has(a.kind))
+      .slice(0, 16)
+      .map(a => ({
+        kind: a.kind,
+        title: a.title,
+        slug: a.slug,
+        publishedAt: a.publishedAt
+      })),
     source: 'borsacaddesi',
-    sourceUrl: 'https://borsacaddesi.com/',
-    note: 'Kaynak: BorsaCaddesi (ücretsiz). Tablolar görsel olarak yayınlanır; özet rakamlar yazı metninden çıkarılır. Yatırım tavsiyesi değildir.'
+    note: 'Tam AKD tablosu uygulama temasında gösterilir. Yatırım tavsiyesi değildir.'
   };
-  BC_AKD_CACHE.set(sym, { at: Date.now(), data });
+  BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data });
   return data;
 }
 
@@ -1389,13 +1847,43 @@ http.createServer((req, res) => {
 
   // --- BIST Takas / Aracı Kurum Dağılımı (BorsaCaddesi — ücretsiz güncel AKD) ---
   if (urlPath === '/bistakd') {
-    const h = (new URLSearchParams(req.url.split('?')[1] || '').get('hisse') || '').trim().toUpperCase();
+    const q = new URLSearchParams(req.url.split('?')[1] || '');
+    const h = (q.get('hisse') || '').trim().toUpperCase();
+    const slug = (q.get('slug') || '').trim();
     const send = (obj) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(obj));
     };
     if (!/^[A-Z0-9]{1,12}$/.test(h)) { send({ ok: false, symbol: h, error: 'bad_symbol' }); return; }
-    borsaCaddesiAkd(h).then(send).catch(e => send({ ok: false, symbol: h, error: e.message || 'fetch' }));
+    if (slug && !/^[a-z0-9][a-z0-9\-/_]{2,160}$/i.test(slug)) { send({ ok: false, symbol: h, error: 'bad_slug' }); return; }
+    borsaCaddesiAkd(h, slug ? { slug } : null).then(send).catch(e => send({ ok: false, symbol: h, error: e.message || 'fetch' }));
+    return;
+  }
+
+  // --- AKD tablo görseli (tema uyumlu PNG, dış siteye gitmeden) ---
+  if (urlPath === '/bistakdimg') {
+    const u = (new URLSearchParams(req.url.split('?')[1] || '').get('u') || '').trim();
+    if (!/^https:\/\/img\.borsacaddesi\.com\//i.test(u)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('bad_url');
+      return;
+    }
+    bcThemedAkdImage(u).then(img => {
+      if (!img || !img.buf) {
+        res.writeHead(502, { 'Content-Type': 'text/plain' });
+        res.end('fetch_fail');
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': img.ctype || 'image/png',
+        'Cache-Control': 'public, max-age=3600',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(img.buf);
+    }).catch(() => {
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end('error');
+    });
     return;
   }
 
