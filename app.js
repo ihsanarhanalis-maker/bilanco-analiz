@@ -4479,16 +4479,23 @@ async function openInvestingForumLocale(locale){
     : (FIN.market==='BIST' ? 'IS' : (FIN.market==='US' ? 'US' : ''));
   const host=locale==='us' ? 'https://www.investing.com' : 'https://tr.investing.com';
   const fallback=host+'/search/?q='+encodeURIComponent(sym)+'&tab=quotes';
+  let target=fallback;
   try{
     const r=await fetch('/invforum?s='+encodeURIComponent(sym)
       +'&m='+encodeURIComponent(market)
       +(exch?'&x='+encodeURIComponent(exch):''));
     const j=await r.json();
     const path=(j&&j.path) || (j&&j.url ? (()=>{ try{ const u=new URL(j.url); return u.pathname+u.search; }catch(e){ return ''; } })() : '');
-    window.open(path ? (host+path) : fallback, '_blank', 'noopener');
-  }catch(e){
-    window.open(fallback, '_blank', 'noopener');
+    if(path) target=host+path;
+  }catch(e){ /* fallback */ }
+  // Telefonda Investing uygulaması Türkçe hesaba bağlıysa www linkini de TR açar.
+  // English için önce bizim köprü sayfası / Chrome Intent ile tarayıcıya zorla.
+  const mobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+  if(locale==='us' && mobile){
+    window.open('/invopen?u='+encodeURIComponent(target), '_blank', 'noopener');
+    return;
   }
+  window.open(target, '_blank', 'noopener');
 }
 function openInvestingForum(){ toggleForumMenu(); }
 document.addEventListener('click', function(){ closeForumMenu(); });

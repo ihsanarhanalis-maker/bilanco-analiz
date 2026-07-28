@@ -2015,6 +2015,68 @@ http.createServer((req, res) => {
     return;
   }
 
+  // --- Investing forum köprüsü (telefonda uygulama Türkçe hesaba zorlarsa tarayıcıda English aç) ---
+  if (urlPath === '/invopen') {
+    const raw = (new URLSearchParams(req.url.split('?')[1] || '').get('u') || '').trim();
+    let target = '';
+    try {
+      const u = new URL(raw);
+      if (u.protocol === 'https:' && /(^|\.)investing\.com$/i.test(u.hostname)) target = u.toString();
+    } catch (e) { /* bad */ }
+    if (!target) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Geçersiz Investing bağlantısı');
+      return;
+    }
+    const esc = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const jsEsc = JSON.stringify(target);
+    const html = `<!DOCTYPE html>
+<html lang="tr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Investing Forum → English</title>
+<style>
+  :root{color-scheme:dark;--bg:#0f1419;--card:#1a2332;--ink:#e8eef7;--muted:#8b9bb4;--line:#2a3548;--accent:#4f9cf9}
+  *{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--ink);padding:24px}
+  .box{max-width:420px;width:100%;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 20px}
+  h1{margin:0 0 8px;font-size:18px}p{margin:0 0 14px;color:var(--muted);font-size:13.5px;line-height:1.55}
+  a.btn,button.btn{display:block;width:100%;text-align:center;text-decoration:none;border:0;cursor:pointer;
+    padding:12px 14px;border-radius:10px;font-weight:700;font-size:14px;margin-bottom:10px}
+  a.primary,button.primary{background:linear-gradient(135deg,#4f9cf9,#2f6fd0);color:#fff}
+  a.secondary{background:transparent;color:var(--accent);border:1px solid var(--line)}
+  .tip{font-size:12px;color:var(--muted);line-height:1.5;margin-top:6px}
+</style></head><body>
+<div class="box">
+  <h1>English (USA) forum</h1>
+  <p>Telefonundaki Investing uygulaması Türkçe hesaba bağlıysa bağlantıyı Türkçe açabilir. English forum için <b>tarayıcıda</b> aç.</p>
+  <button class="btn primary" type="button" id="openBrowser">Tarayıcıda aç (English)</button>
+  <a class="btn secondary" id="openApp" rel="noopener" href="${esc}">Uygulamada aç</a>
+  <p class="tip">Hâlâ Türkçe açılıyorsa: bağlantıya basılı tut → <b>Safari/Chrome’da Aç</b>. Uygulamada kalıcı çözüm: More → bayrak → English (USA).</p>
+</div>
+<script>
+(function(){
+  var target=${jsEsc};
+  var android=/Android/i.test(navigator.userAgent);
+  function openBrowser(){
+    if(android){
+      var bare=target.replace(/^https?:\\/\\//,'');
+      location.href='intent://'+bare+'#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url='+encodeURIComponent(target)+';end';
+      return;
+    }
+    // iOS / diğer: Google yönlendirmesi Universal Link’i çoğu zaman kırar
+    location.href='https://www.google.com/url?q='+encodeURIComponent(target)+'&sa=D&source=editors&ust='+Date.now();
+  }
+  document.getElementById('openBrowser').onclick=openBrowser;
+  if(android) setTimeout(openBrowser, 250);
+})();
+</script>
+</body></html>`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(html);
+    return;
+  }
+
   // --- BIST ortaklık yapısı köprüsü (İş Yatırım OrtaklikYapisi — ortak adı + %oran) ---
   if (urlPath === '/bistown') {
     const h = new URLSearchParams(req.url.split('?')[1] || '').get('hisse') || '';
