@@ -1660,11 +1660,13 @@ function getWatch(){ try{ return JSON.parse(localStorage.getItem('bilanco_watchl
 function setWatch(w){ try{ localStorage.setItem('bilanco_watchlist', JSON.stringify(w)); }catch(e){} }
 function updateWatchStar(){
   const b=document.getElementById('watchStar');
+  const fw=document.getElementById('forumWrap');
   if(!b) return;
-  if(!FIN || !FIN.ticker){ b.classList.add('hidden'); return; }
+  if(!FIN || !FIN.ticker){ b.classList.add('hidden'); if(fw) fw.classList.add('hidden'); closeForumMenu(); return; }
   const inList=getWatch().some(x=>x.sym===FIN.ticker && x.market===FIN.market);
   b.textContent= inList?'★ Listemden Çıkar':'☆ Listeme Ekle';
   b.classList.remove('hidden');
+  if(fw) fw.classList.remove('hidden');
 }
 function toggleWatch(){
   if(!FIN || !FIN.ticker) return;
@@ -3716,6 +3718,8 @@ function hidePriceUI(){
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
   const ws=document.getElementById('watchStar'); if(ws) ws.classList.add('hidden');
+  const fw=document.getElementById('forumWrap'); if(fw) fw.classList.add('hidden');
+  closeForumMenu();
   stopNyClock();
 }
 function loadSample(){
@@ -4445,12 +4449,49 @@ function isWatched(sym, market){ return getWatchlist().some(w=>w.sym===sym && w.
 function watchSymFor(){ return FIN.market==='EU' ? FIN.ticker+'.'+FIN.euInfo.suffix : FIN.ticker; }
 function updateWatchStar(){
   const btn=document.getElementById('watchStar');
+  const forum=document.getElementById('forumWrap');
   if(!btn || !FIN) return;
   btn.classList.remove('hidden');
+  if(forum) forum.classList.remove('hidden');
   const on=isWatched(watchSymFor(), FIN.market);
   btn.innerHTML = on ? '★ Listemde' : '☆ Listeme Ekle';
   btn.classList.toggle('primary', on);
 }
+function closeForumMenu(){
+  const menu=document.getElementById('forumMenu');
+  if(menu) menu.classList.add('hidden');
+}
+function toggleForumMenu(ev){
+  if(ev){ ev.preventDefault(); ev.stopPropagation(); }
+  if(!FIN || !FIN.ticker) return;
+  const menu=document.getElementById('forumMenu');
+  if(!menu) return;
+  const willOpen=menu.classList.contains('hidden');
+  closeForumMenu();
+  if(willOpen) menu.classList.remove('hidden');
+}
+async function openInvestingForumLocale(locale){
+  closeForumMenu();
+  if(!FIN || !FIN.ticker) return;
+  const sym=FIN.ticker;
+  const market=FIN.market||'';
+  const exch=FIN.market==='EU'&&FIN.euInfo&&FIN.euInfo.suffix ? FIN.euInfo.suffix
+    : (FIN.market==='BIST' ? 'IS' : (FIN.market==='US' ? 'US' : ''));
+  const host=locale==='us' ? 'https://www.investing.com' : 'https://tr.investing.com';
+  const fallback=host+'/search/?q='+encodeURIComponent(sym)+'&tab=quotes';
+  try{
+    const r=await fetch('/invforum?s='+encodeURIComponent(sym)
+      +'&m='+encodeURIComponent(market)
+      +(exch?'&x='+encodeURIComponent(exch):''));
+    const j=await r.json();
+    const path=(j&&j.path) || (j&&j.url ? (()=>{ try{ const u=new URL(j.url); return u.pathname+u.search; }catch(e){ return ''; } })() : '');
+    window.open(path ? (host+path) : fallback, '_blank', 'noopener');
+  }catch(e){
+    window.open(fallback, '_blank', 'noopener');
+  }
+}
+function openInvestingForum(){ toggleForumMenu(); }
+document.addEventListener('click', function(){ closeForumMenu(); });
 function toggleWatch(){
   if(!FIN) return;
   let list=getWatchlist();

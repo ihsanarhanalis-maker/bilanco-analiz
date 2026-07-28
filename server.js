@@ -1577,6 +1577,187 @@ function parseEtfdbMeta(html, fallback) {
   return { longName };
 }
 
+/* Investing.com hisse forumu: investpy (ülke+sembol→slug) → API → arama yedeği */
+const INV_FORUM_CACHE = Object.create(null);
+const INV_EXCH_HINT = {
+  DE: /Xetra|Frankfurt|Germany/i, L: /London|UK|United Kingdom/i, PA: /Paris|France/i,
+  AS: /Amsterdam|Netherlands/i, BR: /Brussels|Belgium/i, MI: /Milan|Italy/i,
+  MC: /Madrid|Spain/i, SW: /Switzerland|SIX/i, ST: /Stockholm|Sweden/i,
+  CO: /Copenhagen|Denmark/i, OL: /Oslo|Norway/i, HE: /Helsinki|Finland/i,
+  TO: /Toronto|Canada/i, V: /TSX|Canada|Venture/i, TW: /Taiwan/i, T: /Tokyo|Japan/i,
+  HK: /Hong Kong/i, AX: /Australia|ASX/i, SI: /Singapore/i, KS: /Korea|KOSPI|Seoul/i,
+  KQ: /KOSDAQ|Korea/i, IS: /Istanbul|Turkey/i
+};
+const INV_COUNTRY = {
+  US: 'united states', BIST: 'turkey',
+  DE: 'germany', L: 'united kingdom', PA: 'france', AS: 'netherlands', BR: 'belgium',
+  MI: 'italy', MC: 'spain', SW: 'switzerland', ST: 'sweden', CO: 'denmark', OL: 'norway',
+  HE: 'finland', VI: 'austria', AT: 'austria', LS: 'portugal', IR: 'ireland',
+  TO: 'canada', V: 'canada', TW: 'taiwan', T: 'japan', HK: 'hong kong',
+  AX: 'australia', SI: 'singapore', KS: 'south korea', KQ: 'south korea', IS: 'turkey'
+};
+let INV_STOCKS_INDEX = null;
+let INV_STOCKS_LOADING = null;
+const INV_STOCKS_LOCAL = path.join(ROOT, 'data', 'investing-stocks.csv');
+
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (inQ) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = false;
+      } else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out;
+}
+function investpyCountryFor(market, exchHint) {
+  const m = String(market || '').toUpperCase();
+  const x = String(exchHint || '').toUpperCase();
+  if (INV_COUNTRY[m]) return INV_COUNTRY[m];
+  if (INV_COUNTRY[x]) return INV_COUNTRY[x];
+  return null;
+}
+function indexInvestingTagsCsv(body) {
+  const map = Object.create(null);
+  const lines = String(body || '').split(/\r?\n/);
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+    const p = parseCsvLine(line);
+    if (p.length < 3) continue;
+    let country, symbol, tag;
+    if (p.length >= 8) {
+      // investpy tam format: country,name,full_name,tag,isin,id,currency,symbol
+      country = String(p[0] || '').trim().toLowerCase();
+      tag = String(p[3] || '').trim();
+      symbol = String(p[p.length - 1] || '').trim().toUpperCase();
+    } else {
+      // yerli kısaltılmış: country,symbol,tag
+      country = String(p[0] || '').trim().toLowerCase();
+      symbol = String(p[1] || '').trim().toUpperCase();
+      tag = String(p[2] || '').trim();
+    }
+    if (!country || !tag || !symbol) continue;
+    const key = country + '|' + symbol;
+    const prev = map[key];
+    // Birincil kotasyon: ?cid= olmayan tag tercih edilir (ABD AMD vs Almanya AMD)
+    if (!prev || (/\?cid=/i.test(prev) && !/\?cid=/i.test(tag))) map[key] = tag;
+  }
+  return map;
+}
+async function loadInvestpyStocks() {
+  if (INV_STOCKS_INDEX) return INV_STOCKS_INDEX;
+  if (INV_STOCKS_LOADING) return INV_STOCKS_LOADING;
+  INV_STOCKS_LOADING = (async () => {
+    // 1) Yerel eşleme (her hisse için doğrudan …-commentary URL)
+    try {
+      const local = await fs.promises.readFile(INV_STOCKS_LOCAL, 'utf8');
+      const map = indexInvestingTagsCsv(local);
+      if (Object.keys(map).length > 1000) {
+        INV_STOCKS_INDEX = map;
+        return map;
+      }
+    } catch (e) { /* GitHub yedeği */ }
+    // 2) investpy GitHub CSV yedeği
+    const url = 'https://raw.githubusercontent.com/alvarobartt/investpy/master/investpy/resources/stocks.csv';
+    const r = await httpsGetText(url, { 'User-Agent': BUA, 'Accept': 'text/csv,*/*' });
+    if (r.status !== 200 || !r.body) throw new Error('investpy_csv_' + r.status);
+    const map = indexInvestingTagsCsv(r.body);
+    INV_STOCKS_INDEX = map;
+    return map;
+  })();
+  try { return await INV_STOCKS_LOADING; }
+  finally { INV_STOCKS_LOADING = null; }
+}
+function investingForumPath(path) {
+  let raw = String(path || '').trim();
+  if (!raw) return '';
+  if (raw.charAt(0) !== '/') raw = '/equities/' + raw.replace(/^equities\//i, '');
+  const m = raw.match(/^(\/(?:equities|etfs|indices|commodities|currencies)\/[a-z0-9\-]+)(?:\?(.*))?$/i);
+  if (!m) return '';
+  const base = m[1].replace(/-commentary$/i, '');
+  return base + '-commentary' + (m[2] ? '?' + m[2] : '');
+}
+function investingForumUrl(path) {
+  const p = investingForumPath(path);
+  return p ? 'https://tr.investing.com' + p : '';
+}
+function pickInvestingQuote(quotes, sym, market, exchHint) {
+  const S = String(sym || '').toUpperCase();
+  let pool = quotes.filter(q => String(q.symbol || '').toUpperCase() === S);
+  if (!pool.length) pool = quotes.filter(q => /Stock|ETF|Fund|Index/i.test(q.type || ''));
+  if (!pool.length) pool = quotes.slice();
+  if (!pool.length) return null;
+  const hintRe = exchHint && INV_EXCH_HINT[String(exchHint).toUpperCase()];
+  const score = (q) => {
+    let s = 0;
+    const ex = ((q.exchange || '') + ' ' + (q.flag || '') + ' ' + (q.type || ''));
+    if (String(q.symbol || '').toUpperCase() === S) s += 10;
+    if (market === 'BIST' && /Istanbul|Turkey/i.test(ex)) s += 20;
+    if (market === 'US' && /NASDAQ|NYSE|AMEX|USA|United States/i.test(ex)) s += 20;
+    if (hintRe && hintRe.test(ex)) s += 25;
+    return s;
+  };
+  pool.sort((a, b) => score(b) - score(a));
+  return pool[0];
+}
+async function resolveInvestingForum(sym, market, exchHint) {
+  const key = 'v3|' + (market || '') + '|' + String(sym || '').toUpperCase() + '|' + (exchHint || '');
+  const hit = INV_FORUM_CACHE[key];
+  if (hit && Date.now() - hit.at < 7 * 864e5) {
+    return { path: hit.path, url: 'https://tr.investing.com' + hit.path, source: 'cache' };
+  }
+  const fallbackPath = '/search/?q=' + encodeURIComponent(sym) + '&tab=quotes';
+
+  // 1) investpy ülke+sembol → doğru slug (ABD AMD vs Almanya AMD ayrımı)
+  try {
+    const country = investpyCountryFor(market, exchHint);
+    if (country) {
+      const idx = await loadInvestpyStocks();
+      const tag = idx[country + '|' + String(sym).toUpperCase()];
+      if (tag) {
+        const path = investingForumPath(tag);
+        if (path) {
+          INV_FORUM_CACHE[key] = { path, at: Date.now() };
+          return { path, url: 'https://tr.investing.com' + path, source: 'investpy', country };
+        }
+      }
+    }
+  } catch (e) { /* API / arama yedeği */ }
+
+  // 2) Investing arama API (erişilebilirse)
+  try {
+    const r = await httpsGetText('https://api.investing.com/api/search/v2/search?q=' + encodeURIComponent(sym), {
+      'User-Agent': BUA,
+      'Accept': 'application/json',
+      'Origin': 'https://tr.investing.com',
+      'Referer': 'https://tr.investing.com/',
+      'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8'
+    });
+    if (r.status === 200) {
+      const j = JSON.parse(r.body);
+      const quotes = Array.isArray(j.quotes) ? j.quotes : [];
+      const pick = pickInvestingQuote(quotes, sym, market, exchHint);
+      if (pick && pick.url) {
+        const path = investingForumPath(pick.url);
+        if (path) {
+          INV_FORUM_CACHE[key] = { path, at: Date.now() };
+          return { path, url: 'https://tr.investing.com' + path, source: 'api', symbol: pick.symbol, exchange: pick.exchange };
+        }
+      }
+    }
+  } catch (e) { /* arama yedeği */ }
+
+  return { path: fallbackPath, url: 'https://tr.investing.com' + fallbackPath, source: 'search' };
+}
+
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
 
@@ -1814,6 +1995,23 @@ http.createServer((req, res) => {
     });
     preq.on('error', e => { res.writeHead(502); res.end('{"data":""}'); });
     preq.write(post); preq.end();
+    return;
+  }
+
+  // --- Investing.com hisse forumu URL çözümü (arama API → …-commentary) ---
+  if (urlPath === '/invforum') {
+    const q = new URLSearchParams(req.url.split('?')[1] || '');
+    const sym = (q.get('s') || '').trim().toUpperCase();
+    const market = (q.get('m') || '').trim().toUpperCase();
+    const exch = (q.get('x') || '').trim().toUpperCase();
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (!/^[A-Z0-9.\-]{1,20}$/.test(sym)) { send({ ok: false, error: 'bad_symbol' }); return; }
+    resolveInvestingForum(sym, market, exch)
+      .then(r => send({ ok: true, symbol: sym, ...r }))
+      .catch(() => send({ ok: true, symbol: sym, url: 'https://tr.investing.com/search/?q=' + encodeURIComponent(sym) + '&tab=quotes', source: 'search' }));
     return;
   }
 
