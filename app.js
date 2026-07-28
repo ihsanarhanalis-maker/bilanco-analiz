@@ -22,7 +22,8 @@ function switchPage(p){
 }
 
 /* ---------- Hisse logoları ----------
-   Öncelik: BIST→MarketIcons (güncel), sonra FMP / CompaniesMarketCap, son çare TradingView.
+   BIST: Foreks/ForInvest CDN (fws.forinvestcdn.com — sitedeki güncel logolar) → MarketIcons → KAP PNG.
+   Diğer borsalar: FMP → CompaniesMarketCap → TradingView.
    onerror ile sıradaki kaynağa düşer; hiçbiri yoksa harf rozeti. */
 const LOGO_CACHE={};   // "MARKET|SYM" → logoid | ''
 const LOGO_YAHOO_CC={
@@ -64,13 +65,17 @@ function logoCandidates(sym, logoid, opts){
   const base=logoBaseSym(sym||opts.sym||'');
   const ysym=logoYahooSym(base, opts);
   const urls=[];
-  // FMP önce (sık güncellenir); BIST için MarketIcons yedek; TV en son (eski kalabiliyor)
+  const isBist=opts.market==='BIST' || opts.cc==='TR';
+  // BIST: Foreks/ForInvest (aynı CDN — güncel kare logolar), sonra yerel paketler
+  if(isBist && base){
+    urls.push('https://fws.forinvestcdn.com/cdn/symbol-logos/'+encodeURIComponent(base)+'.png');
+    urls.push('https://cdn.jsdelivr.net/npm/@marketicons/bist@1.0.1/svg/'+encodeURIComponent(base)+'.svg');
+    urls.push('https://cdn.jsdelivr.net/gh/ahmeterenodaci/Istanbul-Stock-Exchange--BIST--including-symbols-and-logos@HEAD/logos/'+encodeURIComponent(base)+'.png');
+  }
+  // FMP / CMC / TV — ABD+dünya birincil; BIST için yedek
   if(ysym) urls.push('https://images.financialmodelingprep.com/symbol/'+encodeURIComponent(ysym)+'.png');
   if((opts.market==='US' || opts.cc==='US') && ysym!==base)
     urls.push('https://images.financialmodelingprep.com/symbol/'+encodeURIComponent(base)+'.png');
-  if(opts.market==='BIST' || opts.cc==='TR'){
-    urls.push('https://cdn.jsdelivr.net/npm/@marketicons/bist@1.0.1/svg/'+encodeURIComponent(base)+'.svg');
-  }
   if(ysym) urls.push('https://companiesmarketcap.com/img/company-logos/64/'+encodeURIComponent(ysym)+'.webp');
   if(logoid) urls.push(logoUrl(logoid));
   return [...new Set(urls.filter(Boolean))];
