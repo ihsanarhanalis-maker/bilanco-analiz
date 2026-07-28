@@ -604,6 +604,155 @@ async function kapFloatShares(hisse) {
   return data;
 }
 
+/* ---------- BorsaCaddesi AKD / aracı kurum dağılımı (ücretsiz, güncel) ---------- */
+const BC_AKD_CACHE = new Map(); // SYM -> { at, data }
+function bcStripHtml(html) {
+  return String(html || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function bcParseAkdStats(text) {
+  const t = String(text || '');
+  const num = (s) => {
+    if (s == null) return null;
+    const n = Number(String(s).replace(/\./g, '').replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : null;
+  };
+  const net = t.match(/Net:\s*([-\d.\s]+)\s*adet/i);
+  const total = t.match(/Toplam\s*Adet:\s*([\d.\s]+)/i);
+  const top5 = t.match(/Net\s*İlk\s*5:\s*([-\d.\s]+)\s*adet/i);
+  const top5Note = t.match(/Net\s*İlk\s*5:\s*[-\d.\s]+\s*adet\s+([^.]+)/i);
+  return {
+    netLots: net ? num(net[1]) : null,
+    totalLots: total ? num(total[1]) : null,
+    top5NetLots: top5 ? num(top5[1]) : null,
+    top5Note: top5Note ? top5Note[1].trim() : null
+  };
+}
+function bcAkdKind(title, slug, tags) {
+  const t = ((title || '') + ' ' + (slug || '')).toLowerCase()
+    .replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c');
+  const tagSlugs = (tags || []).map(x => String((x && (x.slug || x.title)) || '').toLowerCase());
+  if (/\btakas\b/.test(t) || tagSlugs.some(s => s.includes('takas'))) return 'takas';
+  if (/araci\s*kurum\s*dagilim/.test(t) || /araci-kurum-dagilimi/.test(slug || '')) return 'araci_kurum';
+  if (/gun\s*sonu/.test(t) && /\bakd\b|araci/.test(t)) return 'gun_sonu_akd';
+  if (/kim\s*aldi\s*kim\s*satti/.test(t)) return 'gun_ici_akd';
+  if (/gun\s*ici/.test(t) && /\bakd\b|kurum\s*islem|araci/.test(t)) return 'gun_ici_akd';
+  // Düz "Gün Sonu/İçi İşlemleri" (AKD değil) → atla
+  if (/gun\s*sonu\s*islem/.test(t) && !/\bakd\b/.test(t)) return 'other';
+  if (/gun\s*ici\s*islem/.test(t) && !/\bakd\b|araci/.test(t)) return 'other';
+  if (tagSlugs.includes('hisse-akd')) {
+    if (/gun\s*sonu/.test(t) && /\bakd\b/.test(t)) return 'gun_sonu_akd';
+    if (/gun\s*ici/.test(t) && /\bakd\b|kim\s*aldi|araci/.test(t)) return 'gun_ici_akd';
+  }
+  return 'other';
+}
+function bcPickLatest(list) {
+  return (list || []).slice().sort((a, b) => {
+    const ta = Date.parse(a.publishedAt || a.createdAt || 0) || 0;
+    const tb = Date.parse(b.publishedAt || b.createdAt || 0) || 0;
+    return tb - ta;
+  })[0] || null;
+}
+async function borsaCaddesiAkd(hisse) {
+  const sym = String(hisse || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const hit = BC_AKD_CACHE.get(sym);
+  if (hit && (Date.now() - hit.at) < 10 * 60 * 1000) return hit.data;
+
+  const search = await httpsGetText('https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym), {
+    'User-Agent': BUA, 'Accept': 'application/json', 'Referer': 'https://borsacaddesi.com/'
+  });
+  let searchJson = null;
+  try { searchJson = JSON.parse(search.body || '{}'); } catch (_e) { searchJson = {}; }
+  const searchArts = Array.isArray(searchJson.articles) ? searchJson.articles : [];
+  let catSlug = null;
+  let catName = null;
+  for (const a of searchArts) {
+    const cat = a && a.category;
+    if (cat && cat.slug) { catSlug = cat.slug; catName = cat.name || null; break; }
+  }
+  if (!catSlug) {
+    const miss = { ok: false, symbol: sym, error: 'not_found', source: 'borsacaddesi' };
+    BC_AKD_CACHE.set(sym, { at: Date.now(), data: miss });
+    return miss;
+  }
+
+  const cat = await httpsGetText('https://borsacaddesi.com/api/categories/' + encodeURIComponent(catSlug), {
+    'User-Agent': BUA, 'Accept': 'application/json', 'Referer': 'https://borsacaddesi.com/category/' + encodeURIComponent(catSlug)
+  });
+  let catJson = null;
+  try { catJson = JSON.parse(cat.body || '{}'); } catch (_e) { catJson = {}; }
+  const rawArts = (catJson.data && Array.isArray(catJson.data.articles)) ? catJson.data.articles : [];
+
+  const mapped = rawArts.map(a => {
+    const title = a.title || '';
+    const slug = a.slug || '';
+    const text = bcStripHtml(a.content || '');
+    const stats = bcParseAkdStats(text);
+    const kind = bcAkdKind(title, slug, a.tags);
+    const summary = text
+      .replace(/Trend İndikatörleri[\s\S]*$/i, '')
+      .replace(/Yasal Uyarı:[\s\S]*$/i, '')
+      .trim()
+      .slice(0, 420);
+    return {
+      kind,
+      title,
+      slug,
+      url: 'https://borsacaddesi.com/' + slug,
+      image: a.coverImage || null,
+      publishedAt: a.createdAt || a.updatedAt || null,
+      createdAt: a.createdAt || null,
+      stats,
+      summary,
+      tags: (a.tags || []).map(t => t.slug || t.title).filter(Boolean)
+    };
+  }).filter(a => a.kind !== 'other');
+
+  const byKind = {
+    gun_sonu_akd: bcPickLatest(mapped.filter(a => a.kind === 'gun_sonu_akd')),
+    araci_kurum: bcPickLatest(mapped.filter(a => a.kind === 'araci_kurum')),
+    gun_ici_akd: bcPickLatest(mapped.filter(a => a.kind === 'gun_ici_akd')),
+    takas: bcPickLatest(mapped.filter(a => a.kind === 'takas'))
+  };
+  // Gün sonu yoksa aramada bulunan güncel kapak görselli yazıyı yedekle
+  if (!byKind.gun_sonu_akd) {
+    const fromSearch = searchArts.find(a => /gün\s*sonu.*akd|gun-sonu-akd/i.test((a.title || '') + ' ' + (a.slug || '')));
+    if (fromSearch) {
+      byKind.gun_sonu_akd = {
+        kind: 'gun_sonu_akd',
+        title: fromSearch.title,
+        slug: fromSearch.slug,
+        url: 'https://borsacaddesi.com/' + fromSearch.slug,
+        image: fromSearch.featuredImage || null,
+        publishedAt: fromSearch.publishedAt || fromSearch.createdAt || null,
+        createdAt: fromSearch.createdAt || null,
+        stats: { netLots: null, totalLots: null, top5NetLots: null, top5Note: null },
+        summary: '',
+        tags: []
+      };
+    }
+  }
+
+  const data = {
+    ok: true,
+    symbol: sym,
+    category: { slug: catSlug, name: catName, url: 'https://borsacaddesi.com/category/' + catSlug },
+    latest: byKind,
+    recent: mapped.slice(0, 12),
+    source: 'borsacaddesi',
+    sourceUrl: 'https://borsacaddesi.com/',
+    note: 'Kaynak: BorsaCaddesi (ücretsiz). Tablolar görsel olarak yayınlanır; özet rakamlar yazı metninden çıkarılır. Yatırım tavsiyesi değildir.'
+  };
+  BC_AKD_CACHE.set(sym, { at: Date.now(), data });
+  return data;
+}
+
 /* KAP YF listesi — fundClass HS = hisse senedi fonları */
 function httpsGetJson(urlStr, headers) {
   return new Promise((resolve, reject) => {
@@ -1235,6 +1384,18 @@ http.createServer((req, res) => {
     if (!/^[A-Z0-9]{1,12}$/.test(h)) { send({ symbol: h, floatShares: null, floatPct: null, source: 'kap', error: 'bad_symbol' }); return; }
     kapFloatShares(h).then(data => send(data || { symbol: h, floatShares: null, floatPct: null, source: 'kap', error: 'empty' }))
       .catch(() => send({ symbol: h, floatShares: null, floatPct: null, source: 'kap', error: 'fetch' }));
+    return;
+  }
+
+  // --- BIST Takas / Aracı Kurum Dağılımı (BorsaCaddesi — ücretsiz güncel AKD) ---
+  if (urlPath === '/bistakd') {
+    const h = (new URLSearchParams(req.url.split('?')[1] || '').get('hisse') || '').trim().toUpperCase();
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (!/^[A-Z0-9]{1,12}$/.test(h)) { send({ ok: false, symbol: h, error: 'bad_symbol' }); return; }
+    borsaCaddesiAkd(h).then(send).catch(e => send({ ok: false, symbol: h, error: e.message || 'fetch' }));
     return;
   }
 

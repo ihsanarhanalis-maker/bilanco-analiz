@@ -1,6 +1,6 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','econ','top100','scan','sect','etf','wnews'].forEach(x=>{
+  ['home','stock','takas','econ','top100','scan','sect','etf','wnews'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
@@ -14,6 +14,7 @@ function switchPage(p){
   if(p==='sect') initSectPage();
   if(p==='etf') initEtfPage();
   if(p==='wnews') initWnewsPage();
+  if(p==='takas') initTakasPage();
   if(p==='home'){
     if(DISC_REVEALED) loadDiscovery();
     if(EQCAL_REVEALED) loadEqCalendar();
@@ -5553,6 +5554,94 @@ async function loadEtf(code){
     if(!html) html='<div class="hint">Bu ETF için holdings verisi yok.</div>';
     box.innerHTML=html;
   }catch(e){ box.innerHTML='<div class="hint">ETF alınamadı: '+safeHTML(e.message)+'</div>'; }
+}
+
+/* ---------- Takas & AKD (BIST · BorsaCaddesi) ---------- */
+let TAKAS_INIT=false;
+function initTakasPage(){
+  if(TAKAS_INIT) return;
+  TAKAS_INIT=true;
+  const inp=document.getElementById('takasTicker');
+  if(inp && !inp.value){
+    const t=(document.getElementById('ticker')?.value||document.getElementById('homeTicker')?.value||'').trim().toUpperCase();
+    if(t && !/[.\s]/.test(t) && t.length<=8) inp.value=t;
+  }
+}
+function takasFmtLot(n){
+  if(n==null || !Number.isFinite(n)) return '—';
+  return Math.round(n).toLocaleString('tr-TR');
+}
+function takasCard(item, label){
+  if(!item) return '';
+  const st=item.stats||{};
+  const when=item.publishedAt?new Date(item.publishedAt).toLocaleString('tr-TR'):'';
+  const kpis=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 12px">
+    <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:120px">
+      <div class="hint" style="margin:0">Net lot</div><div style="font-weight:800;font-variant-numeric:tabular-nums">${takasFmtLot(st.netLots)}</div></div>
+    <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:120px">
+      <div class="hint" style="margin:0">Toplam adet</div><div style="font-weight:800;font-variant-numeric:tabular-nums">${takasFmtLot(st.totalLots)}</div></div>
+    <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;min-width:140px">
+      <div class="hint" style="margin:0">Net ilk 5</div><div style="font-weight:800;font-variant-numeric:tabular-nums">${takasFmtLot(st.top5NetLots)}</div>
+      ${st.top5Note?`<div class="hint" style="margin:4px 0 0">${safeHTML(st.top5Note)}</div>`:''}</div>
+  </div>`;
+  const img=item.image
+    ? `<a href="${safeHTML(item.url)}" target="_blank" rel="noopener"><img src="${safeHTML(item.image)}" alt="${safeHTML(item.title)}" style="width:100%;max-width:920px;border-radius:10px;border:1px solid var(--line);background:#fff" loading="lazy"></a>`
+    : '<div class="hint">Tablo görseli yok — kaynağa git.</div>';
+  return `<div class="card" style="margin-bottom:14px">
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;justify-content:space-between">
+      <h3 style="margin:0;font-size:16px">${safeHTML(label)}</h3>
+      <a href="${safeHTML(item.url)}" target="_blank" rel="noopener" style="font-size:12px">Kaynağı aç ↗</a>
+    </div>
+    <div class="sub" style="margin-top:4px">${safeHTML(item.title)}${when?' · '+safeHTML(when):''}</div>
+    ${kpis}
+    ${img}
+    ${item.summary?`<div class="hint" style="margin-top:10px">${safeHTML(item.summary)}${item.summary.length>=400?'…':''}</div>`:''}
+  </div>`;
+}
+async function loadTakasAkd(){
+  const inp=document.getElementById('takasTicker');
+  const st=document.getElementById('takasStatus');
+  const box=document.getElementById('takasBody');
+  const sym=String(inp?.value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!sym){ if(st) st.textContent='Hisse kodu gir.'; return; }
+  if(inp) inp.value=sym;
+  if(st) st.textContent='Yükleniyor…';
+  box.innerHTML='<div class="hint">BorsaCaddesi’nden güncel AKD çekiliyor…</div>';
+  try{
+    const r=await fetch('/bistakd?hisse='+encodeURIComponent(sym));
+    const j=await r.json();
+    if(!j || !j.ok){
+      box.innerHTML=`<div class="hint">${safeHTML(sym)} için kayıt bulunamadı. Kaynak: <a href="https://borsacaddesi.com/" target="_blank" rel="noopener">BorsaCaddesi</a></div>`;
+      if(st) st.textContent='Bulunamadı';
+      return;
+    }
+    const L=j.latest||{};
+    let html='';
+    if(j.category){
+      html+=`<div class="hint" style="margin-bottom:12px">${logoHtml(null, sym, 22, {sym, market:'BIST', cc:'TR'})} <b>${safeHTML(sym)}</b> · ${safeHTML(j.category.name||'')} · <a href="${safeHTML(j.category.url)}" target="_blank" rel="noopener">Tüm yazılar</a></div>`;
+    }
+    html+=takasCard(L.gun_sonu_akd, 'Gün sonu AKD (aracı kurum dağılımı)');
+    html+=takasCard(L.araci_kurum, 'Gün içi aracı kurum dağılımı');
+    html+=takasCard(L.gun_ici_akd, 'Gün içi AKD / kim aldı kim sattı');
+    html+=takasCard(L.takas, 'Takas');
+    if(!L.gun_sonu_akd && !L.araci_kurum && !L.gun_ici_akd && !L.takas){
+      html+='<div class="hint">Bu hisse için henüz AKD özeti yok.</div>';
+    }
+    if((j.recent||[]).length){
+      const rows=j.recent.map(a=>`<tr style="cursor:pointer" onclick="window.open('${safeHTML(a.url)}','_blank')">
+        <td style="text-align:left">${safeHTML(a.title)}</td>
+        <td>${a.publishedAt?safeHTML(new Date(a.publishedAt).toLocaleDateString('tr-TR')):'—'}</td>
+        <td style="text-align:left;color:var(--muted);font-size:12px">${safeHTML(a.kind)}</td></tr>`).join('');
+      html+=`<div class="card"><h3 style="margin-top:0">Son kayıtlar</h3>
+        <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Başlık</th><th>Tarih</th><th style="text-align:left">Tür</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="hint" style="margin-top:8px">${safeHTML(j.note||'')}</div></div>`;
+    }
+    box.innerHTML=html;
+    if(st) st.textContent='Güncel · BorsaCaddesi';
+  }catch(e){
+    box.innerHTML='<div class="hint">Alınamadı: '+safeHTML(e.message)+'</div>';
+    if(st) st.textContent='Hata';
+  }
 }
 
 /* başlangıç */

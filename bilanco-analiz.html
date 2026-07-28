@@ -472,6 +472,7 @@
 <nav class="tabs-nav no-print">
   <div class="tabs-in">
     <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
+    <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')">🏦 Takas & AKD</button>
     <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
     <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
     <button class="tab-btn" id="tabbtn-scan" onclick="switchPage('scan')">🔎 Hisse Tarayıcı</button>
@@ -901,6 +902,23 @@
     <div id="etfMeta" class="sub" style="margin-bottom:10px"></div>
     <div id="etfBody"><div class="hint">Soldan bir ETF/fon seç veya kod yaz.</div></div>
   </div>
+
+</div>
+
+<!-- ============ SAYFA: BIST TAKAS & AKD ============ -->
+<div id="page-takas" class="page">
+
+  <div class="card no-print" style="margin-bottom:16px">
+    <h2>Takas & Aracı Kurum Dağılımı — BIST</h2>
+    <div class="sub">Yalnızca Borsa İstanbul. Gün sonu / gün içi <b>aracı kurum dağılımı (AKD)</b> ve kurum işlem özetleri. Kaynak: <a href="https://borsacaddesi.com/" target="_blank" rel="noopener">BorsaCaddesi</a> (ücretsiz, güncel). Yatırım tavsiyesi değildir.</div>
+    <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="takasTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. THYAO" onkeydown="if(event.key==='Enter')loadTakasAkd()">
+      <button type="button" class="primary" onclick="loadTakasAkd()">Getir</button>
+      <span class="hint" id="takasStatus"></span>
+    </div>
+  </div>
+
+  <div id="takasBody"><div class="hint">BIST hisse kodu yaz (THYAO, ASELS, GARAN…) — güncel AKD tabloları ve özet rakamlar gelir.</div></div>
 
 </div>
 
