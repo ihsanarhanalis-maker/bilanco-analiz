@@ -1872,7 +1872,7 @@ http.createServer((req, res) => {
     return;
   }
 
-  // --- StockTwits hisse yorumları (güncel sosyal akış; Cloudflare için Referer şart) ---
+  // --- StockTwits hisse yorumları (CF bazı Render IP'lerini 403'ler → UA retry + kardeş köprü) ---
   if (urlPath === '/stocktwits') {
     const sym = (new URLSearchParams(req.url.split('?')[1] || '').get('s') || '').trim().toUpperCase();
     const send = (obj) => {
@@ -1881,12 +1881,11 @@ http.createServer((req, res) => {
     };
     if (!/^[A-Z0-9.\-]{1,20}$/.test(sym)) { send({ ok: false, symbol: sym, messages: [], error: 'bad_symbol' }); return; }
     const stUrl = 'https://api.stocktwits.com/api/2/streams/symbol/' + encodeURIComponent(sym) + '.json';
-    const stHeaders = {
-      'User-Agent': BUA,
-      'Accept': 'application/json',
-      'Referer': 'https://stocktwits.com/symbol/' + encodeURIComponent(sym),
-      'Origin': 'https://stocktwits.com'
-    };
+    const uaList = [
+      BUA,
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+    ];
     const mapMsgs = (j) => {
       const msgs = Array.isArray(j.messages) ? j.messages : [];
       const mapped = msgs.slice(0, 40).map(m => {
@@ -1895,7 +1894,9 @@ http.createServer((req, res) => {
         const sent = m.entities && m.entities.sentiment && m.entities.sentiment.basic;
         return {
           id: m.id,
-          body: String(m.body || '').replace(/\s+/g, ' ').trim(),
+          body: String(m.body || '').replace(/\s+/g, ' ').trim()
+            .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCharCode(+n); } catch (e) { return ''; } })
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"'),
           user: (m.user && m.user.username) || '?',
           avatar: (m.user && (m.user.avatar_url_ssl || m.user.avatar_url)) || '',
           created: m.created_at || null,
@@ -1915,29 +1916,57 @@ http.createServer((req, res) => {
         source: 'stocktwits'
       };
     };
-    const pull = (attempt) => {
-      https.get(stUrl, { headers: stHeaders }, pr => {
+    const pullDirect = (uaIdx) => new Promise((resolve) => {
+      const headers = {
+        'User-Agent': uaList[uaIdx] || BUA,
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://stocktwits.com/symbol/' + encodeURIComponent(sym),
+        'Origin': 'https://stocktwits.com'
+      };
+      https.get(stUrl, { headers }, pr => {
+        let body = '';
+        pr.on('data', c => body += c);
+        pr.on('end', () => resolve({ code: pr.statusCode, body }));
+      }).on('error', () => resolve({ code: 0, body: '' }));
+    });
+    // Bazı Render IP'leri CF 403 yer → çalışan kardeş köprü (döngü yok: X-ST-Via)
+    const pullFallback = () => new Promise((resolve) => {
+      if (req.headers['x-st-via']) { resolve(null); return; }
+      const fb = (process.env.ST_FALLBACK || 'https://bilanco-analiz.onrender.com').replace(/\/$/, '');
+      const host = (req.headers.host || '').toLowerCase();
+      if (!fb || host && fb.includes(host)) { resolve(null); return; }
+      https.get(fb + '/stocktwits?s=' + encodeURIComponent(sym), {
+        headers: { 'User-Agent': BUA, 'Accept': 'application/json', 'X-ST-Via': '1' }
+      }, pr => {
         let body = '';
         pr.on('data', c => body += c);
         pr.on('end', () => {
-          // 503/429: kısa bekleyip bir kez daha dene (StockTwits ara sıra rate-limit)
-          if ((pr.statusCode === 503 || pr.statusCode === 429) && attempt < 2) {
-            setTimeout(() => pull(attempt + 1), 600 * attempt);
-            return;
-          }
-          if (pr.statusCode !== 200) {
-            send({ ok: false, symbol: sym, messages: [], error: 'http_' + pr.statusCode });
-            return;
-          }
-          try { send(mapMsgs(JSON.parse(body))); }
-          catch (e) { send({ ok: false, symbol: sym, messages: [], error: 'parse' }); }
+          if (pr.statusCode !== 200) { resolve(null); return; }
+          try { resolve(JSON.parse(body)); } catch (e) { resolve(null); }
         });
-      }).on('error', () => {
-        if (attempt < 2) setTimeout(() => pull(attempt + 1), 600 * attempt);
-        else send({ ok: false, symbol: sym, messages: [], error: 'fetch' });
-      });
-    };
-    pull(1);
+      }).on('error', () => resolve(null));
+    });
+    (async () => {
+      for (let i = 0; i < uaList.length; i++) {
+        const r = await pullDirect(i);
+        if (r.code === 200) {
+          try { send(mapMsgs(JSON.parse(r.body))); return; }
+          catch (e) { /* dene sonraki */ }
+        }
+        if (r.code === 503 || r.code === 429) {
+          await new Promise(res => setTimeout(res, 500));
+          const r2 = await pullDirect(i);
+          if (r2.code === 200) {
+            try { send(mapMsgs(JSON.parse(r2.body))); return; }
+            catch (e) { /* */ }
+          }
+        }
+      }
+      const fb = await pullFallback();
+      if (fb && fb.ok && fb.messages && fb.messages.length) { send(fb); return; }
+      send({ ok: false, symbol: sym, messages: [], error: 'http_403' });
+    })();
     return;
   }
 

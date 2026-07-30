@@ -3739,16 +3739,27 @@ async function loadStockTwits(){
   document.getElementById('stTabRecent')?.classList.add('active');
   document.getElementById('stTabPopular')?.classList.remove('active');
   try{
-    const r=await fetch('/stocktwits?s='+encodeURIComponent(sym)+'&_='+Date.now(), { cache:'no-store' });
-    const j=await r.json().catch(()=>null);
+    /* Bazı Render IP'leri StockTwits CF 403 yer — önce kendi köprü, olmazsa yedek köprü */
+    const stFetch=async(url)=>{
+      const r=await fetch(url, { cache:'no-store' });
+      const j=await r.json().catch(()=>null);
+      return { r, j };
+    };
+    let { r, j }=await stFetch('/stocktwits?s='+encodeURIComponent(sym)+'&_='+Date.now());
+    if((!j||!j.ok||!(j.messages&&j.messages.length)) && /403|503|429|fetch/i.test(String((j&&j.error)||r.status))){
+      try{
+        const fb=await stFetch('https://bilanco-analiz.onrender.com/stocktwits?s='+encodeURIComponent(sym)+'&_='+Date.now());
+        if(fb.j&&fb.j.ok&&fb.j.messages&&fb.j.messages.length){ j=fb.j; r=fb.r; }
+      }catch(e0){ /* yedek köprü yoksa orijinal hata kalır */ }
+    }
     if(myGen!==ST_GEN) return;
     if(!j||!j.ok||!(j.messages&&j.messages.length)){
       const err=j&&j.error?String(j.error):('http_'+r.status);
       const is404=/404/.test(err);
       if(status) status.textContent=sym+(is404?' — StockTwits’te yok':' — yorum yok');
       box.innerHTML=is404
-        ? '<div class="hint"><b>'+safeHTML(sym)+'</b> StockTwits’te yok (BIST/TR hisseleri genelde yok). ABD kodu dene: <b>AAPL</b>, <b>NVDA</b>, <b>TSLA</b>, <b>AMD</b>.</div>'
-        : '<div class="hint">Yorum alınamadı ('+safeHTML(err)+'). Birkaç saniye sonra tekrar dene — ABD ticker: AAPL, NVDA, TSLA.</div>';
+        ? '<div class="hint"><b>'+safeHTML(sym)+'</b> StockTwits’te yok. ABD kodu dene: <b>AAPL</b>, <b>NVDA</b>, <b>TSLA</b>, <b>AMD</b>.</div>'
+        : '<div class="hint">Yorum alınamadı ('+safeHTML(err)+'). Hard refresh (Ctrl+F5) yapıp ABD ticker dene: AAPL, NVDA, TSLA.</div>';
       return;
     }
     ST_CACHE=j;
