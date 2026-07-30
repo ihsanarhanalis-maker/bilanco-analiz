@@ -157,6 +157,82 @@ async function fetchTvLiveQuote(sym, market, euInfo){
     return { price:+row.d[0], changePct:row.d[1]!=null?+row.d[1]:null, logoid:row.d[2]||'', tv:row.s };
   }catch(_e){ return null; }
 }
+/* Canlı fiyat döngüsü: TV scanner ~1 sn (sekme görünürken). */
+let LIVE_PRICE_TIMER=null, LIVE_PRICE_STATE=null, LIVE_PRICE_BUSY=false;
+function stopLivePrice(){
+  if(LIVE_PRICE_TIMER){ clearInterval(LIVE_PRICE_TIMER); LIVE_PRICE_TIMER=null; }
+  LIVE_PRICE_STATE=null;
+  LIVE_PRICE_BUSY=false;
+}
+function paintLivePrice(sym, live, ch){
+  const lp=document.getElementById('livePrice');
+  if(!lp || live==null) return;
+  const cls=ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
+  const ar=ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
+  const valEl=lp.querySelector('.lp-val');
+  const chgEl=lp.querySelector('.lp-chg');
+  const liveEl=lp.querySelector('.lp-live');
+  if(valEl){
+    const prev=LIVE_PRICE_STATE&&LIVE_PRICE_STATE.lastPrice;
+    valEl.textContent=fmtUSD(live);
+    if(prev!=null && Number(prev)!==Number(live)){
+      valEl.classList.remove('lp-flash-up','lp-flash-down');
+      void valEl.offsetWidth;
+      valEl.classList.add(live>prev?'lp-flash-up':'lp-flash-down');
+    }
+    if(chgEl){
+      chgEl.className='lp-chg '+cls;
+      chgEl.textContent=ch==null?'':(ar+' '+pct(ch));
+    }else if(ch!=null){
+      valEl.insertAdjacentHTML('afterend', `<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`);
+    }
+    if(liveEl) liveEl.classList.add('on');
+  }else{
+    lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26, logoOptsFromFin())+
+      `<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
+      (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
+      `<span class="lp-live on">● canlı</span>`;
+  }
+  lp.classList.remove('hidden');
+  if(LIVE_PRICE_STATE) LIVE_PRICE_STATE.lastPrice=live;
+  // BIST piyasa değeri rozetini canlı fiyatla güncelle
+  if(LIVE_PRICE_STATE&&LIVE_PRICE_STATE.shares!=null&&FIN&&FIN.market==='BIST'){
+    const badge=document.getElementById('hdBadge');
+    if(badge){
+      const mcap=live*LIVE_PRICE_STATE.shares;
+      badge.className='hd-badge mcap';
+      badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
+      badge.classList.remove('hidden');
+    }
+  }
+}
+async function tickLivePrice(){
+  const st=LIVE_PRICE_STATE;
+  if(!st || LIVE_PRICE_BUSY) return;
+  if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym){ stopLivePrice(); return; }
+  if(document.hidden) return;
+  LIVE_PRICE_BUSY=true;
+  try{
+    const q=await fetchTvLiveQuote(st.sym, st.market, st.euInfo);
+    if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym) return;
+    if(q&&q.price!=null){
+      if(q.logoid) FIN.logoid=q.logoid;
+      paintLivePrice(st.sym, q.price, q.changePct);
+    }
+  }finally{ LIVE_PRICE_BUSY=false; }
+}
+function startLivePrice(sym, market, euInfo, myGen, shares){
+  stopLivePrice();
+  LIVE_PRICE_STATE={ sym, market, euInfo:euInfo||null, myGen, shares:shares!=null?shares:null, lastPrice:null };
+  LIVE_PRICE_TIMER=setInterval(tickLivePrice, 1000);
+  if(!window._livePriceVisBound){
+    document.addEventListener('visibilitychange', onLivePriceVisibility);
+    window._livePriceVisBound=true;
+  }
+}
+function onLivePriceVisibility(){
+  if(!document.hidden && LIVE_PRICE_STATE) tickLivePrice();
+}
 function logoOptsFromFin(){
   if(!FIN) return {};
   return { sym:FIN.ticker, market:FIN.market, euInfo:FIN.euInfo,
@@ -3212,15 +3288,13 @@ async function fetchPrice(sym, cik, myGen, opts){
     }
     if(tvLive&&tvLive.logoid&&FIN) FIN.logoid=tvLive.logoid;
     if(live!=null){
-      const cls = ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
-      const ar  = ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
-      lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26, logoOptsFromFin())+
-        `<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
-        (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
-        `<span class="lp-live">● canlı</span>`;
-      lp.classList.remove('hidden');
+      startLivePrice(sym, FIN&&FIN.market, FIN&&FIN.euInfo, myGen!=null?myGen:REQ_GEN, shares);
+      paintLivePrice(sym, live, ch);
       if(FIN) applyStockLogo(REQ_GEN);
-    }else lp.classList.add('hidden');
+    }else{
+      stopLivePrice();
+      lp.classList.add('hidden');
+    }
     const mcap = (live!=null && shares) ? live*shares : null;
     const isBist = (FIN&&FIN.market==='BIST') || /\.IS$/i.test(ysym);
     const badge=document.getElementById('hdBadge');
@@ -3243,7 +3317,7 @@ async function fetchPrice(sym, cik, myGen, opts){
         <b style="color:var(--ink);margin-left:5px;font-variant-numeric:tabular-nums">${fmtUSD(price)}</b></div>`;
     pn.innerHTML = chip('Cari dönem fiyatı', fd0, pCur, 'var(--accent)') + chip('Önceki dönem fiyatı', fd1, pPrev, 'var(--muted)');
     pn.classList.toggle('hidden', !pn.innerHTML.trim());
-  }catch(e){ lp.classList.add('hidden'); }
+  }catch(e){ stopLivePrice(); lp.classList.add('hidden'); }
 }
 
 /* Değerleme oranları (canlı): F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak.
@@ -3725,6 +3799,7 @@ function setPeriodHeaders(curDate, prevDate){
   if(th2) th2.innerHTML = 'Önceki Dönem' + (prevDate?`<br><span class="thd">${prevDate}</span>`:'');
 }
 function hidePriceUI(){
+  stopLivePrice();
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
   const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard'), kc=document.getElementById('kapCard');
   const yc=document.getElementById('ydfCard');
