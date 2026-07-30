@@ -136,6 +136,27 @@ async function resolveLogoid(sym, market, euInfo){
     return '';
   }
 }
+/* TradingView scanner — canlı fiyat + günlük % değişim (header #livePrice). */
+async function fetchTvLiveQuote(sym, market, euInfo){
+  try{
+    let scan='america', tickers=['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
+    if(market==='BIST'){ scan='turkey'; tickers=['BIST:'+sym]; }
+    else if(market==='EU' && euInfo){
+      scan=euInfo.scan||'germany';
+      tickers=[euInfo.tv+':'+euTvBase(euInfo)];
+    }
+    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',{
+      method:'POST',
+      body:JSON.stringify({symbols:{tickers},columns:['close','change','logoid']})
+    });
+    if(!r.ok) return null;
+    const j=await r.json();
+    const row=((j&&j.data)||[]).find(x=>x.d&&x.d[0]!=null);
+    if(!row) return null;
+    if(row.d[2]) rememberLogoid(sym, market, row.d[2]);
+    return { price:+row.d[0], changePct:row.d[1]!=null?+row.d[1]:null, logoid:row.d[2]||'', tv:row.s };
+  }catch(_e){ return null; }
+}
 function logoOptsFromFin(){
   if(!FIN) return {};
   return { sym:FIN.ticker, market:FIN.market, euInfo:FIN.euInfo,
@@ -3145,7 +3166,8 @@ async function fetchShares(cik){
   }
   return null;
 }
-/* opts: { ysym: Yahoo sembolü (BIST için "THYAO.IS"), shares: hazır pay adedi (BIST: ödenmiş sermaye) } */
+/* opts: { ysym: Yahoo sembolü (BIST için "THYAO.IS"), shares: hazır pay adedi (BIST: ödenmiş sermaye) }
+   Canlı fiyat: TradingView scanner (close/change). Geçmiş kapanışlar: Yahoo chart (dönem fiyatları). */
 async function fetchPrice(sym, cik, myGen, opts){
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote');
   const fd0=FIN&&FIN.filedD0, fd1=FIN&&FIN.filedD1;
@@ -3154,8 +3176,8 @@ async function fetchPrice(sym, cik, myGen, opts){
     const now=Math.floor(Date.now()/1000)+86400;
     const earliest = fd1||fd0||'2015-01-01';
     const p1=Math.floor(new Date(earliest).getTime()/1000) - 10*86400;
-    // Canlı (range=1d) + geçmiş (tarih aralığı) + dolaşımdaki pay sayısı paralel
-    const [liveR, histR, shares]=await Promise.all([
+    const [tvLive, liveR, histR, shares]=await Promise.all([
+      fetchTvLiveQuote(sym, FIN&&FIN.market, FIN&&FIN.euInfo),
       fetch(`/price?s=${encodeURIComponent(ysym)}&range=1d`).then(x=>x.json()).catch(()=>null),
       fetch(`/price?s=${encodeURIComponent(ysym)}&p1=${p1}&p2=${now}`).then(x=>x.json()).catch(()=>null),
       (opts&&opts.shares!=null)? Promise.resolve(opts.shares) : (cik? fetchShares(cik) : Promise.resolve(null))
@@ -3163,29 +3185,33 @@ async function fetchPrice(sym, cik, myGen, opts){
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const res = histR&&histR.chart&&histR.chart.result&&histR.chart.result[0];
     const liveRes = liveR&&liveR.chart&&liveR.chart.result&&liveR.chart.result[0];
-    if(!res && !liveRes){ lp.classList.add('hidden'); return; }
+    if(!tvLive && !res && !liveRes){ lp.classList.add('hidden'); return; }
     const m=(liveRes&&liveRes.meta) || (res&&res.meta) || {};
     const ts=(res&&res.timestamp)||[];
     let closes=(res&&res.indicators&&res.indicators.quote&&res.indicators.quote[0].close)||[];
-    // Londra borsası (LSE) fiyatları peni (GBp) cinsinden gelir, pound değil — 100'e bölünmezse
-    // piyasa değeri 100 kat şişer. m.currency==='GBp' olduğunda tüm fiyatları poundlaştır.
+    // Londra borsası (LSE) Yahoo fiyatları peni (GBp) — geçmiş seri için poundlaştır.
     if(m.currency==='GBp'){
       if(m.regularMarketPrice!=null) m.regularMarketPrice/=100;
       if(m.chartPreviousClose!=null) m.chartPreviousClose/=100;
       closes=closes.map(c=>c==null?c:c/100);
     }
-    // Belirli tarihteki (veya bir önceki işlem günündeki) kapanış
     const closeOn=iso=>{
       if(!iso) return null;
-      const tgt=new Date(iso).getTime()/1000 + 86400;   // gün sonu
+      const tgt=new Date(iso).getTime()/1000 + 86400;
       let best=null;
       for(let i=0;i<ts.length;i++){ if(ts[i]<=tgt){ if(closes[i]!=null) best=closes[i]; } else break; }
       return best;
     };
-    // Canlı fiyat (sağ üst)
-    const live=m.regularMarketPrice, prevC=m.chartPreviousClose;
+    // Canlı fiyat (sağ üst) — birincil: TradingView; yedek: Yahoo
+    let live=tvLive&&tvLive.price!=null ? tvLive.price : null;
+    let ch=tvLive&&tvLive.changePct!=null ? tvLive.changePct : null;
+    if(live==null && m.regularMarketPrice!=null){
+      live=m.regularMarketPrice;
+      const prevC=m.chartPreviousClose;
+      ch=prevC ? (live-prevC)/prevC*100 : null;
+    }
+    if(tvLive&&tvLive.logoid&&FIN) FIN.logoid=tvLive.logoid;
     if(live!=null){
-      const ch = (prevC? (live-prevC)/prevC*100 : null);
       const cls = ch==null?'neutral':(Math.abs(ch)<0.005?'neutral':(ch>0?'up':'down'));
       const ar  = ch==null?'':(ch>0?'▲':ch<0?'▼':'→');
       lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26, logoOptsFromFin())+
@@ -3195,7 +3221,6 @@ async function fetchPrice(sym, cik, myGen, opts){
       lp.classList.remove('hidden');
       if(FIN) applyStockLogo(REQ_GEN);
     }else lp.classList.add('hidden');
-    // Piyasa değeri: yalnız BIST — canlı fiyatın altında rozet (diğer 24 ülkede gösterilmez)
     const mcap = (live!=null && shares) ? live*shares : null;
     const isBist = (FIN&&FIN.market==='BIST') || /\.IS$/i.test(ysym);
     const badge=document.getElementById('hdBadge');
@@ -3209,10 +3234,8 @@ async function fetchPrice(sym, cik, myGen, opts){
         badge.textContent='';
       }
     }
-    // Değerleme oranları (canlı): F/K, PD/DD — en güncel piyasa değeri + SEC verisiyle
     renderValuation(mcap);
     renderYdf(mcap);
-    // Dönemsel fiyatlar (açıklandığı gün) — Bilanço Verisi
     const pCur=closeOn(fd0), pPrev=closeOn(fd1);
     const chip=(lbl,date,price,color)=> price==null?'' :
       `<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;padding:7px 11px;font-size:12px">
