@@ -1,6 +1,6 @@
 ﻿/* Bilan├ğo Analiz ÔÇö PWA service worker
    Statik kabu─şu ├Ânbelle─şe al─▒r; API k├Âpr├╝leri (/price, /bist, /secÔÇĞ) her zaman a─şdan gelir. */
-const CACHE = 'bilanco-shell-v123';
+const CACHE = 'bilanco-shell-v124';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
@@ -33,8 +33,8 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // API / köprü istekleri: ağa öncelik, önbelleğe alma
-  const isApi = /^\/(sec|secw|secfilings|bist|bistown|price|quotes|news|tr|trcal|tefas|targets|tvt|econ|investcal|ifrs|yfin|yfsearch|yscr|yqs|ycal|ynews)(\/|\?|$)/.test(url.pathname);
+  // API / köprü istekleri: her zaman ağ (asla HTML kabuğuna düşmesin)
+  const isApi = /^\/(sec|secw|secfilings|bist|bistown|price|quotes|news|tr|trcal|tefas|targets|tvt|econ|investcal|ifrs|yfin|yfsearch|yscr|yqs|ycal|ynews|stocktwits|tvlive|invforum|invopen)(\/|\?|$)/.test(url.pathname);
   if (isApi) {
     event.respondWith(fetch(req).catch(() => new Response(JSON.stringify({ error: 'offline' }), {
       status: 503,

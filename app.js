@@ -3734,16 +3734,21 @@ async function loadStockTwits(){
   const myGen=++ST_GEN;
   ST_CACHE=null; ST_MODE='recent';
   if(status) status.textContent='Yükleniyor…';
-  box.innerHTML='<div class="hint">StockTwits yorumları yükleniyor…</div>';
+  box.innerHTML='<div class="hint">Yorumlar yükleniyor…</div>';
   if(link) link.href='https://stocktwits.com/symbol/'+encodeURIComponent(sym);
   document.getElementById('stTabRecent')?.classList.add('active');
   document.getElementById('stTabPopular')?.classList.remove('active');
   try{
-    const j=await fetch('/stocktwits?s='+encodeURIComponent(sym)).then(r=>r.json());
+    const r=await fetch('/stocktwits?s='+encodeURIComponent(sym)+'&_='+Date.now(), { cache:'no-store' });
+    const j=await r.json().catch(()=>null);
     if(myGen!==ST_GEN) return;
     if(!j||!j.ok||!(j.messages&&j.messages.length)){
-      if(status) status.textContent=sym+' — yorum yok';
-      box.innerHTML='<div class="hint">Bu hisse için StockTwits yorumu bulunamadı. ABD ticker’ı dene (örn. AAPL, NVDA, TSLA).</div>';
+      const err=j&&j.error?String(j.error):('http_'+r.status);
+      const is404=/404/.test(err);
+      if(status) status.textContent=sym+(is404?' — StockTwits’te yok':' — yorum yok');
+      box.innerHTML=is404
+        ? '<div class="hint"><b>'+safeHTML(sym)+'</b> StockTwits’te yok (BIST/TR hisseleri genelde yok). ABD kodu dene: <b>AAPL</b>, <b>NVDA</b>, <b>TSLA</b>, <b>AMD</b>.</div>'
+        : '<div class="hint">Yorum alınamadı ('+safeHTML(err)+'). Birkaç saniye sonra tekrar dene — ABD ticker: AAPL, NVDA, TSLA.</div>';
       return;
     }
     ST_CACHE=j;
@@ -3751,10 +3756,11 @@ async function loadStockTwits(){
     if(status) status.textContent=title+' · '+(j.messages.length)+' yorum';
     if(link && j.symbol) link.href='https://stocktwits.com/symbol/'+encodeURIComponent(j.symbol);
     renderStockTwits('recent');
+    box.scrollIntoView({ behavior:'smooth', block:'nearest' });
   }catch(e){
     if(myGen!==ST_GEN) return;
     if(status) status.textContent='Hata';
-    box.innerHTML='<div class="hint">StockTwits alınamadı: '+safeHTML(e.message||'bağlantı')+'</div>';
+    box.innerHTML='<div class="hint">Bağlantı hatası: '+safeHTML(e.message||'ağ')+'. Sayfayı yenileyip ABD kodu dene (AAPL).</div>';
   }
 }
 window.loadStockTwits=loadStockTwits;

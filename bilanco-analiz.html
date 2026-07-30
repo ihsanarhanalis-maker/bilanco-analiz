@@ -1007,9 +1007,9 @@
 
   <div class="card no-print" style="margin-bottom:16px">
     <h2>hisseX</h2>
-    <div class="sub">Hisse kodunu yaz — <a href="https://stocktwits.com/" target="_blank" rel="noopener">StockTwits</a> üzerindeki en güncel ve popüler yorumlar (X tarzı sosyal akış). ABD hisselerinde en zengin; diğer piyasalarda sembol varsa gelir.</div>
+    <div class="sub">Hisse kodunu yaz — <a href="https://stocktwits.com/" target="_blank" rel="noopener">StockTwits</a> üzerindeki en güncel ve popüler yorumlar. Şimdilik <b>ABD hisseleri</b> (AAPL, NVDA, TSLA…). BIST kodları (THYAO vb.) StockTwits’te yok.</div>
     <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="stTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. AAPL, NVDA" onkeydown="if(event.key==='Enter')loadStockTwits()">
+      <input id="stTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. AAPL, NVDA, TSLA" onkeydown="if(event.key==='Enter')loadStockTwits()">
       <button type="button" class="primary" onclick="loadStockTwits()">Ara</button>
       <span class="hint" id="stStatus"></span>
     </div>
