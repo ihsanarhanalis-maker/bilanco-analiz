@@ -1758,6 +1758,92 @@ async function resolveInvestingForum(sym, market, exchHint) {
   return { path: fallbackPath, url: 'https://tr.investing.com' + fallbackPath, source: 'search' };
 }
 
+/* TradingView gerçek zamanlı kotasyon (guest WS → lp/chp). Scanner polling'den birebir canlı. */
+function tvWsPack(msg) {
+  const s = typeof msg === 'string' ? msg : JSON.stringify(msg);
+  return '~m~' + s.length + '~m~' + s;
+}
+function tvWsUnpack(raw) {
+  const out = [];
+  const str = String(raw);
+  let i = 0;
+  while (i < str.length) {
+    if (str.slice(i, i + 3) !== '~m~') break;
+    i += 3;
+    const j = str.indexOf('~m~', i);
+    if (j < 0) break;
+    const n = parseInt(str.slice(i, j), 10);
+    if (!isFinite(n) || n < 0) break;
+    i = j + 3;
+    out.push(str.slice(i, i + n));
+    i += n;
+  }
+  return out;
+}
+function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
+  if (typeof WebSocket === 'undefined') {
+    if (onStatus) onStatus('no_ws');
+    return { close: function () {} };
+  }
+  let closed = false;
+  let ws;
+  try {
+    ws = new WebSocket('wss://data.tradingview.com/socket.io/websocket', {
+      headers: {
+        Origin: 'https://www.tradingview.com',
+        'User-Agent': BUA
+      }
+    });
+  } catch (e) {
+    if (onStatus) onStatus('ws_fail');
+    return { close: function () {} };
+  }
+  const qs = 'qs_' + Math.random().toString(36).slice(2, 14);
+  const send = (obj) => { try { if (ws.readyState === 1) ws.send(tvWsPack(obj)); } catch (_e) {} };
+  ws.addEventListener('open', () => {
+    send({ m: 'set_auth_token', p: ['unauthorized_user_token'] });
+    send({ m: 'quote_create_session', p: [qs] });
+    send({
+      m: 'quote_set_fields',
+      p: [qs, 'lp', 'chp', 'ch', 'volume', 'short_name', 'pro_name', 'currency_code', 'current_session', 'update_mode']
+    });
+    send({ m: 'quote_add_symbols', p: [qs, tvSymbol] });
+    send({ m: 'quote_fast_symbols', p: [qs, tvSymbol] });
+    if (onStatus) onStatus('open');
+  });
+  ws.addEventListener('message', (ev) => {
+    if (closed) return;
+    const parts = tvWsUnpack(ev.data);
+    for (let k = 0; k < parts.length; k++) {
+      const part = parts[k];
+      if (part.indexOf('~h~') === 0) { send(part); continue; }
+      try {
+        const j = JSON.parse(part);
+        if (j.m === 'qsd' && j.p && j.p[1] && j.p[1].v) {
+          const v = j.p[1].v;
+          if (v.lp != null || v.chp != null) {
+            onQuote({
+              symbol: j.p[1].n || tvSymbol,
+              lp: v.lp != null ? +v.lp : null,
+              chp: v.chp != null ? +v.chp : null,
+              ch: v.ch != null ? +v.ch : null,
+              mode: v.update_mode || null
+            });
+          }
+        }
+      } catch (_e) {}
+    }
+  });
+  ws.addEventListener('error', () => { if (onStatus) onStatus('error'); });
+  ws.addEventListener('close', () => { if (onStatus) onStatus('close'); });
+  return {
+    close: function () {
+      closed = true;
+      try { ws.close(); } catch (_e) {}
+    }
+  };
+}
+
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
 
@@ -2012,6 +2098,43 @@ http.createServer((req, res) => {
     resolveInvestingForum(sym, market, exch)
       .then(r => send({ ok: true, symbol: sym, ...r }))
       .catch(() => send({ ok: true, symbol: sym, url: 'https://tr.investing.com/search/?q=' + encodeURIComponent(sym) + '&tab=quotes', source: 'search' }));
+    return;
+  }
+
+  // --- TradingView canlı kotasyon akışı (guest WebSocket → SSE; lp/chp birebir) ---
+  if (urlPath === '/tvlive') {
+    const q = new URLSearchParams(req.url.split('?')[1] || '');
+    const tv = (q.get('tv') || '').trim().toUpperCase();
+    if (!/^[A-Z0-9_]{1,16}:[A-Z0-9._\-]{1,32}$/.test(tv)) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('bad_symbol');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'X-Accel-Buffering': 'no'
+    });
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    const writeEvt = (obj) => {
+      try { res.write('data: ' + JSON.stringify(obj) + '\n\n'); } catch (_e) {}
+    };
+    writeEvt({ ok: true, tv: tv, status: 'connecting' });
+    let lastLp = null, lastChp = null;
+    const sock = openTvQuoteSocket(tv, (quote) => {
+      if (quote.lp == null && quote.chp == null) return;
+      if (quote.lp != null) lastLp = quote.lp;
+      if (quote.chp != null) lastChp = quote.chp;
+      writeEvt({ ok: true, tv: quote.symbol || tv, lp: lastLp, chp: lastChp, ch: quote.ch, mode: quote.mode || 'streaming' });
+    }, (st) => {
+      writeEvt({ ok: true, tv: tv, status: st });
+    });
+    const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch (_e) {} }, 15000);
+    const cleanup = () => { clearInterval(hb); sock.close(); };
+    req.on('close', cleanup);
+    req.on('aborted', cleanup);
     return;
   }
 

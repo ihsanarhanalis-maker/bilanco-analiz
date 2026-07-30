@@ -157,10 +157,11 @@ async function fetchTvLiveQuote(sym, market, euInfo){
     return { price:+row.d[0], changePct:row.d[1]!=null?+row.d[1]:null, logoid:row.d[2]||'', tv:row.s };
   }catch(_e){ return null; }
 }
-/* Canlı fiyat döngüsü: TV scanner ~1 sn (sekme görünürken). */
-let LIVE_PRICE_TIMER=null, LIVE_PRICE_STATE=null, LIVE_PRICE_BUSY=false;
+/* Canlı fiyat: TradingView WebSocket akışı (SSE /tvlive) — scanner yedek. */
+let LIVE_PRICE_TIMER=null, LIVE_PRICE_ES=null, LIVE_PRICE_STATE=null, LIVE_PRICE_BUSY=false;
 function stopLivePrice(){
   if(LIVE_PRICE_TIMER){ clearInterval(LIVE_PRICE_TIMER); LIVE_PRICE_TIMER=null; }
+  if(LIVE_PRICE_ES){ try{ LIVE_PRICE_ES.close(); }catch(_e){} LIVE_PRICE_ES=null; }
   LIVE_PRICE_STATE=null;
   LIVE_PRICE_BUSY=false;
 }
@@ -195,7 +196,6 @@ function paintLivePrice(sym, live, ch){
   }
   lp.classList.remove('hidden');
   if(LIVE_PRICE_STATE) LIVE_PRICE_STATE.lastPrice=live;
-  // BIST piyasa değeri rozetini canlı fiyatla güncelle
   if(LIVE_PRICE_STATE&&LIVE_PRICE_STATE.shares!=null&&FIN&&FIN.market==='BIST'){
     const badge=document.getElementById('hdBadge');
     if(badge){
@@ -208,7 +208,7 @@ function paintLivePrice(sym, live, ch){
 }
 async function tickLivePrice(){
   const st=LIVE_PRICE_STATE;
-  if(!st || LIVE_PRICE_BUSY) return;
+  if(!st || LIVE_PRICE_BUSY || LIVE_PRICE_ES) return;
   if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym){ stopLivePrice(); return; }
   if(document.hidden) return;
   LIVE_PRICE_BUSY=true;
@@ -217,21 +217,61 @@ async function tickLivePrice(){
     if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym) return;
     if(q&&q.price!=null){
       if(q.logoid) FIN.logoid=q.logoid;
+      if(q.tv && !st.tv){ st.tv=q.tv; startLivePriceStream(st); return; }
       paintLivePrice(st.sym, q.price, q.changePct);
     }
   }finally{ LIVE_PRICE_BUSY=false; }
 }
-function startLivePrice(sym, market, euInfo, myGen, shares){
-  stopLivePrice();
-  LIVE_PRICE_STATE={ sym, market, euInfo:euInfo||null, myGen, shares:shares!=null?shares:null, lastPrice:null };
+function startLivePricePoll(){
+  if(LIVE_PRICE_TIMER) return;
   LIVE_PRICE_TIMER=setInterval(tickLivePrice, 1000);
+}
+function startLivePriceStream(st){
+  if(!st || !st.tv || typeof EventSource==='undefined'){ startLivePricePoll(); return; }
+  if(LIVE_PRICE_ES){ try{ LIVE_PRICE_ES.close(); }catch(_e){} LIVE_PRICE_ES=null; }
+  if(LIVE_PRICE_TIMER){ clearInterval(LIVE_PRICE_TIMER); LIVE_PRICE_TIMER=null; }
+  const es=new EventSource('/tvlive?tv='+encodeURIComponent(st.tv));
+  LIVE_PRICE_ES=es;
+  let gotTick=false;
+  es.onmessage=function(ev){
+    if(!LIVE_PRICE_STATE || LIVE_PRICE_STATE!==st) return;
+    if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym){ stopLivePrice(); return; }
+    if(document.hidden) return;
+    try{
+      const j=JSON.parse(ev.data);
+      if(j&&j.lp!=null){
+        gotTick=true;
+        paintLivePrice(st.sym, j.lp, j.chp!=null?j.chp:null);
+      }
+    }catch(_e){}
+  };
+  es.onerror=function(){
+    if(LIVE_PRICE_ES!==es) return;
+    try{ es.close(); }catch(_e){}
+    LIVE_PRICE_ES=null;
+    // Akış koparsa scanner polling yedeği
+    startLivePricePoll();
+  };
+  // 4 sn içinde tick gelmezse yedek poll
+  setTimeout(function(){
+    if(LIVE_PRICE_ES===es && !gotTick){ try{ es.close(); }catch(_e){} LIVE_PRICE_ES=null; startLivePricePoll(); }
+  }, 4000);
+}
+function startLivePrice(sym, market, euInfo, myGen, shares, tvSymbol){
+  stopLivePrice();
+  const st={ sym, market, euInfo:euInfo||null, myGen, shares:shares!=null?shares:null, lastPrice:null, tv:tvSymbol||null };
+  LIVE_PRICE_STATE=st;
   if(!window._livePriceVisBound){
     document.addEventListener('visibilitychange', onLivePriceVisibility);
     window._livePriceVisBound=true;
   }
+  if(st.tv) startLivePriceStream(st);
+  else startLivePricePoll();
 }
 function onLivePriceVisibility(){
-  if(!document.hidden && LIVE_PRICE_STATE) tickLivePrice();
+  if(document.hidden || !LIVE_PRICE_STATE) return;
+  if(LIVE_PRICE_ES) return; // akış zaten açık
+  tickLivePrice();
 }
 function logoOptsFromFin(){
   if(!FIN) return {};
@@ -3288,7 +3328,7 @@ async function fetchPrice(sym, cik, myGen, opts){
     }
     if(tvLive&&tvLive.logoid&&FIN) FIN.logoid=tvLive.logoid;
     if(live!=null){
-      startLivePrice(sym, FIN&&FIN.market, FIN&&FIN.euInfo, myGen!=null?myGen:REQ_GEN, shares);
+      startLivePrice(sym, FIN&&FIN.market, FIN&&FIN.euInfo, myGen!=null?myGen:REQ_GEN, shares, tvLive&&tvLive.tv);
       paintLivePrice(sym, live, ch);
       if(FIN) applyStockLogo(REQ_GEN);
     }else{
