@@ -1872,6 +1872,66 @@ http.createServer((req, res) => {
     return;
   }
 
+  // --- StockTwits hisse yorumları (güncel sosyal akış; Cloudflare için Referer şart) ---
+  if (urlPath === '/stocktwits') {
+    const sym = (new URLSearchParams(req.url.split('?')[1] || '').get('s') || '').trim().toUpperCase();
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (!/^[A-Z0-9.\-]{1,20}$/.test(sym)) { send({ ok: false, symbol: sym, messages: [], error: 'bad_symbol' }); return; }
+    const stUrl = 'https://api.stocktwits.com/api/2/streams/symbol/' + encodeURIComponent(sym) + '.json';
+    https.get(stUrl, {
+      headers: {
+        'User-Agent': BUA,
+        'Accept': 'application/json',
+        'Referer': 'https://stocktwits.com/symbol/' + encodeURIComponent(sym),
+        'Origin': 'https://stocktwits.com'
+      }
+    }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        if (pr.statusCode !== 200) {
+          send({ ok: false, symbol: sym, messages: [], error: 'http_' + pr.statusCode });
+          return;
+        }
+        try {
+          const j = JSON.parse(body);
+          const msgs = Array.isArray(j.messages) ? j.messages : [];
+          const mapped = msgs.slice(0, 40).map(m => {
+            const likes = (m.likes && (m.likes.total != null ? m.likes.total : m.likes)) || 0;
+            const reshares = (m.reshares && m.reshares.reshared_count) || 0;
+            const sent = m.entities && m.entities.sentiment && m.entities.sentiment.basic;
+            return {
+              id: m.id,
+              body: String(m.body || '').replace(/\s+/g, ' ').trim(),
+              user: (m.user && m.user.username) || '?',
+              avatar: (m.user && (m.user.avatar_url_ssl || m.user.avatar_url)) || '',
+              created: m.created_at || null,
+              likes: +likes || 0,
+              reshares: +reshares || 0,
+              sentiment: sent === 'Bullish' ? 'bull' : (sent === 'Bearish' ? 'bear' : null),
+              url: m.id ? ('https://stocktwits.com/' + encodeURIComponent((m.user && m.user.username) || 'user') + '/message/' + m.id) : ('https://stocktwits.com/symbol/' + encodeURIComponent(sym))
+            };
+          }).filter(m => m.body);
+          const popular = mapped.slice().sort((a, b) => (b.likes + b.reshares * 2) - (a.likes + a.reshares * 2) || (Date.parse(b.created || 0) - Date.parse(a.created || 0)));
+          send({
+            ok: true,
+            symbol: (j.symbol && j.symbol.symbol) || sym,
+            title: (j.symbol && j.symbol.title) || '',
+            messages: mapped,
+            popular: popular.slice(0, 20),
+            source: 'stocktwits'
+          });
+        } catch (e) {
+          send({ ok: false, symbol: sym, messages: [], error: 'parse' });
+        }
+      });
+    }).on('error', () => send({ ok: false, symbol: sym, messages: [], error: 'fetch' }));
+    return;
+  }
+
   // --- Fiyat köprüsü (Yahoo Finance, anahtarsız) ---
   if (urlPath === '/price') {
     const qs  = new URLSearchParams(req.url.split('?')[1] || '');

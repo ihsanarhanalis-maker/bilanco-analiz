@@ -1,6 +1,6 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','takas','econ','top100','scan','sect','etf','wnews'].forEach(x=>{
+  ['home','stock','takas','econ','top100','scan','sect','etf','wnews','st'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
@@ -15,6 +15,7 @@ function switchPage(p){
   if(p==='etf') initEtfPage();
   if(p==='wnews') initWnewsPage();
   if(p==='takas') initTakasPage();
+  if(p==='st') initStPage();
   if(p==='home'){
     if(DISC_REVEALED) loadDiscovery();
     if(EQCAL_REVEALED) loadEqCalendar();
@@ -3643,6 +3644,122 @@ async function fetchNews(sym, myGen){
 }
 /* Haber başlığına tıklayınca özeti aç/kapat */
 function toggleNews(el){ el.classList.toggle('open'); }
+
+/* ---------- StockTwits sekmesi (güncel + popüler X tarzı yorumlar) ---------- */
+let ST_CACHE=null, ST_MODE='recent', ST_GEN=0;
+function initStPage(){
+  const inp=document.getElementById('stTicker');
+  if(inp && !inp.value) setTimeout(()=>inp.focus(), 50);
+}
+function stRelTime(iso){
+  if(!iso) return '';
+  const t=Date.parse(iso); if(!isFinite(t)) return '';
+  const sec=Math.max(0, Math.floor((Date.now()-t)/1000));
+  if(sec<60) return sec+' sn';
+  if(sec<3600) return Math.floor(sec/60)+' dk';
+  if(sec<86400) return Math.floor(sec/3600)+' sa';
+  return Math.floor(sec/86400)+' gün';
+}
+function renderStockTwits(mode){
+  const box=document.getElementById('stBody');
+  if(!box||!ST_CACHE) return;
+  ST_MODE=mode||ST_MODE||'recent';
+  document.getElementById('stTabRecent')?.classList.toggle('active', ST_MODE==='recent');
+  document.getElementById('stTabPopular')?.classList.toggle('active', ST_MODE==='popular');
+  const list=ST_MODE==='popular' ? (ST_CACHE.popular||[]) : (ST_CACHE.messages||[]);
+  if(!list.length){ box.innerHTML='<div class="hint">Bu hisse için StockTwits yorumu bulunamadı.</div>'; return; }
+  box.innerHTML=list.slice(0,30).map(m=>{
+    const sent=m.sentiment==='bull'?'<span class="st-sent bull">Bullish</span>':(m.sentiment==='bear'?'<span class="st-sent bear">Bearish</span>':'');
+    const stats=[];
+    if(m.likes) stats.push('♥ '+m.likes);
+    if(m.reshares) stats.push('↻ '+m.reshares);
+    return `<div class="st-item">
+      <div class="st-meta"><span class="st-user">@${safeHTML(m.user)}</span>${sent}<span>${safeHTML(stRelTime(m.created))}</span></div>
+      <div class="st-body">${safeHTML(m.body)}</div>
+      <div class="st-tr hidden"></div>
+      <div class="st-stats">
+        <span>${stats.join(' · ')}</span>
+        <button type="button" class="st-tr-btn" onclick="translateStItem(this)">Çevir</button>
+        ${m.url?`<a href="${safeHTML(m.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Twit →</a>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+async function translateStItem(btn){
+  if(!btn) return;
+  const item=btn.closest('.st-item');
+  if(!item) return;
+  const body=item.querySelector('.st-body');
+  const trBox=item.querySelector('.st-tr');
+  if(!body||!trBox) return;
+  if(trBox.dataset.tr && !trBox.classList.contains('hidden')){
+    trBox.classList.add('hidden');
+    btn.textContent='Çevir';
+    return;
+  }
+  if(trBox.dataset.tr){
+    trBox.classList.remove('hidden');
+    btn.textContent='Gizle';
+    return;
+  }
+  const orig=(body.textContent||'').trim();
+  if(!orig) return;
+  btn.disabled=true;
+  btn.textContent='…';
+  try{
+    const tr=await translateOne(orig);
+    trBox.textContent=tr||orig;
+    trBox.dataset.tr='1';
+    trBox.classList.remove('hidden');
+    btn.textContent='Gizle';
+  }catch(e){
+    btn.textContent='Çevir';
+  }finally{
+    btn.disabled=false;
+  }
+}
+async function loadStockTwits(){
+  const inp=document.getElementById('stTicker');
+  const box=document.getElementById('stBody');
+  const status=document.getElementById('stStatus');
+  const link=document.getElementById('stOpenLink');
+  if(!inp||!box) return;
+  const sym=String(inp.value||'').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g,'');
+  inp.value=sym;
+  if(!sym){
+    if(status) status.textContent='Hisse kodu yaz.';
+    box.innerHTML='<div class="hint">Hisse kodu yazıp Ara’ya bas — güncel ve popüler yorumlar burada listelenir.</div>';
+    return;
+  }
+  const myGen=++ST_GEN;
+  ST_CACHE=null; ST_MODE='recent';
+  if(status) status.textContent='Yükleniyor…';
+  box.innerHTML='<div class="hint">StockTwits yorumları yükleniyor…</div>';
+  if(link) link.href='https://stocktwits.com/symbol/'+encodeURIComponent(sym);
+  document.getElementById('stTabRecent')?.classList.add('active');
+  document.getElementById('stTabPopular')?.classList.remove('active');
+  try{
+    const j=await fetch('/stocktwits?s='+encodeURIComponent(sym)).then(r=>r.json());
+    if(myGen!==ST_GEN) return;
+    if(!j||!j.ok||!(j.messages&&j.messages.length)){
+      if(status) status.textContent=sym+' — yorum yok';
+      box.innerHTML='<div class="hint">Bu hisse için StockTwits yorumu bulunamadı. ABD ticker’ı dene (örn. AAPL, NVDA, TSLA).</div>';
+      return;
+    }
+    ST_CACHE=j;
+    const title=j.title ? (j.symbol+' — '+j.title) : (j.symbol||sym);
+    if(status) status.textContent=title+' · '+(j.messages.length)+' yorum';
+    if(link && j.symbol) link.href='https://stocktwits.com/symbol/'+encodeURIComponent(j.symbol);
+    renderStockTwits('recent');
+  }catch(e){
+    if(myGen!==ST_GEN) return;
+    if(status) status.textContent='Hata';
+    box.innerHTML='<div class="hint">StockTwits alınamadı: '+safeHTML(e.message||'bağlantı')+'</div>';
+  }
+}
+window.loadStockTwits=loadStockTwits;
+window.renderStockTwits=renderStockTwits;
+window.translateStItem=translateStItem;
 
 /* ---------- Dünya Haberleri sekmesi ----------
    Şirket haberleri kartıyla AYNI makine (Bing News RSS köprüsü + parseNewsXML + istemci

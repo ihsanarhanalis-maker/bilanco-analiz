@@ -332,6 +332,27 @@
   .news.open .news-sum{display:block}
   .news-sum a{display:inline-block;margin-top:8px;font-weight:600;font-size:12px}
 
+  /* StockTwits yorumları */
+  .st-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+  .st-toolbar .scan-chip{cursor:pointer}
+  .st-item{padding:12px 14px;border:1px solid var(--line);border-radius:11px;margin-bottom:9px;background:var(--surface-2)}
+  .st-item:hover{border-color:var(--line-2)}
+  .st-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:11.5px;color:var(--muted)}
+  .st-user{font-weight:700;color:var(--accent-2)}
+  .st-body{color:var(--ink);font-size:13.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+  .st-sent{font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em}
+  .st-sent.bull{background:var(--good-bg);color:var(--good)}
+  .st-sent.bear{background:var(--bad-bg);color:var(--bad)}
+  .st-stats{margin-top:8px;font-size:11.5px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .st-stats a{font-weight:600}
+  .st-tr-btn{border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:10.5px;font-weight:700;
+    padding:2px 7px;border-radius:6px;cursor:pointer;line-height:1.3}
+  .st-tr-btn:hover{color:var(--accent-2);border-color:var(--accent)}
+  .st-tr-btn:disabled{opacity:.55;cursor:wait}
+  .st-tr{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);color:var(--ink-2);font-size:13px;line-height:1.5;
+    white-space:pre-wrap;word-break:break-word}
+  .st-tr::before{content:'TR · ';font-size:10px;font-weight:800;color:var(--accent-2);letter-spacing:.04em}
+
   /* Analist hedef fiyatları */
   .tgt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px}
   .tgt-box{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
@@ -518,6 +539,7 @@
     <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')">🏦 Aracı Kurum Dağılımı</button>
     <button class="tab-btn" id="tabbtn-etf" onclick="switchPage('etf')">📦 ETF</button>
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')">🌎 Dünya Haberleri</button>
+    <button class="tab-btn" id="tabbtn-st" onclick="switchPage('st')">💬 hisseX</button>
   </div>
 </nav>
 
@@ -976,6 +998,30 @@
     <div class="sub">Dünyanın en kaliteli kaynaklarından (Bloomberg, Reuters, Financial Times, WSJ, The Economist, BBC, AP…) en güncel haberler — başlık ve özet <b>Türkçe</b>. Konu seç, başlığa tıklayınca Türkçe özet uygulama içinde açılır; "Orijinal habere git" ile kaynağa gidersin.</div>
     <div class="toolbar" id="wnewsTopics" style="margin-bottom:14px"></div>
     <div id="wnewsList"><div class="hint">—</div></div>
+  </div>
+
+</div>
+
+<!-- ============ SAYFA: STOCKTWITS YORUMLARI ============ -->
+<div id="page-st" class="page">
+
+  <div class="card no-print" style="margin-bottom:16px">
+    <h2>hisseX</h2>
+    <div class="sub">Hisse kodunu yaz — <a href="https://stocktwits.com/" target="_blank" rel="noopener">StockTwits</a> üzerindeki en güncel ve popüler yorumlar (X tarzı sosyal akış). ABD hisselerinde en zengin; diğer piyasalarda sembol varsa gelir.</div>
+    <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="stTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. AAPL, NVDA" onkeydown="if(event.key==='Enter')loadStockTwits()">
+      <button type="button" class="primary" onclick="loadStockTwits()">Ara</button>
+      <span class="hint" id="stStatus"></span>
+    </div>
+  </div>
+
+  <div class="card no-print">
+    <div class="st-toolbar">
+      <button type="button" class="scan-chip active" id="stTabRecent" onclick="renderStockTwits('recent')">Güncel</button>
+      <button type="button" class="scan-chip" id="stTabPopular" onclick="renderStockTwits('popular')">Popüler</button>
+      <a id="stOpenLink" class="hint" href="https://stocktwits.com/" target="_blank" rel="noopener" style="margin-left:auto">StockTwits’te aç →</a>
+    </div>
+    <div id="stBody"><div class="hint">Hisse kodu yazıp Ara’ya bas — güncel ve popüler yorumlar burada listelenir.</div></div>
   </div>
 
 </div>
