@@ -523,7 +523,9 @@ const VOICE_SCAN_QF_LABEL={
   rsi_os:'RSI ≤ 30', rsi_ob:'RSI ≥ 70', mom:'Momentum+',
   value:'Value', quality:'Quality', relvol:'Hacim ↑'
 };
+const VOICE_LISTEN_MS=20000; /* konuşulmazsa en fazla 20 sn dinle */
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
+let _homeVoiceTimer=null, _homeVoiceDeadline=0, _homeVoiceGotResult=false;
 let _voiceCcMap=null, _voiceSectMap=null;
 
 function getSpeechRecognition(){
@@ -920,7 +922,12 @@ function setHomeVoiceUi(on){
     btn.setAttribute('aria-pressed', _homeVoiceOn?'true':'false');
   });
 }
+function clearHomeVoiceTimer(){
+  if(_homeVoiceTimer){ clearTimeout(_homeVoiceTimer); _homeVoiceTimer=null; }
+}
 function stopHomeVoice(){
+  clearHomeVoiceTimer();
+  _homeVoiceGotResult=true; /* yeniden başlatmayı engelle */
   _homeVoiceEpoch++; /* gecikmiş onresult bu oturuma ait sayılmasın */
   try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){
     try{ _homeVoiceRec&&_homeVoiceRec.stop(); }catch(_e2){}
@@ -941,62 +948,96 @@ function toggleHomeVoice(){
   REQ_GEN++;
   const epoch=++_homeVoiceEpoch;
   const onStock=voiceOnStockPage();
-  try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
-  _homeVoiceRec=new SR();
-  _homeVoiceRec.lang='tr-TR';
-  _homeVoiceRec.interimResults=false;
-  _homeVoiceRec.maxAlternatives=5;
-  _homeVoiceRec.continuous=false;
-  _homeVoiceRec.onstart=()=>{
-    if(epoch!==_homeVoiceEpoch) return;
-    setHomeVoiceUi(true);
-    if(st){
-      st.style.color='';
-      st.textContent=onStock
-        ?'🎙️ Dinleniyor… örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”'
-        :'🎙️ Dinleniyor… örn. “AMD NVDA yıllık karşılaştır”, “AMD kazançlar”';
-    }
-  };
-  _homeVoiceRec.onend=()=>{
-    if(epoch===_homeVoiceEpoch) setHomeVoiceUi(false);
-  };
-  _homeVoiceRec.onerror=e=>{
-    if(epoch!==_homeVoiceEpoch) return;
+  _homeVoiceGotResult=false;
+  _homeVoiceDeadline=Date.now()+VOICE_LISTEN_MS;
+  clearHomeVoiceTimer();
+  _homeVoiceTimer=setTimeout(()=>{
+    if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
+    _homeVoiceGotResult=true;
+    try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
+    _homeVoiceRec=null;
     setHomeVoiceUi(false);
-    if(!st) return;
-    const err=e&&e.error;
-    if(err==='not-allowed'||err==='service-not-allowed')
-      st.textContent='Mikrofon izni gerekli — tarayıcı ayarlarından izin verin.';
-    else if(err==='no-speech')
-      st.textContent='Ses algılanamadı — tekrar deneyin.';
-    else if(err==='aborted')
-      st.textContent='';
-    else
-      st.textContent='Sesli komut hatası — tekrar deneyin.';
-  };
-  _homeVoiceRec.onresult=ev=>{
-    if(epoch!==_homeVoiceEpoch) return; /* eski dinleme sonucu */
-    const transcripts=voiceTranscriptsFromEvent(ev);
-    setHomeVoiceUi(false);
-    if(epoch!==_homeVoiceEpoch) return;
-    if(!handleHomeVoiceCommand(transcripts, st)){
-      if(st) st.textContent=onStock
-        ?'Anlaşılamadı — örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”.'
-        :'Anlaşılamadı — örn. “AMD NVDA AMZN yıllık karşılaştır”, “AMD kazançlar”.';
-    }
-  };
+    if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
+  }, VOICE_LISTEN_MS);
 
-  try{
-    _homeVoiceRec.start();
-  }catch(_e){
-    setTimeout(()=>{
+  const listenHint=onStock
+    ?'🎙️ Dinleniyor (20 sn)… örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”'
+    :'🎙️ Dinleniyor (20 sn)… örn. “AMD NVDA yıllık karşılaştır”, “AMD kazançlar”';
+
+  try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
+  _homeVoiceRec=null;
+
+  function armRec(){
+    if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
+    if(Date.now()>=_homeVoiceDeadline){
+      setHomeVoiceUi(false);
+      if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
+      return;
+    }
+    const rec=new SR();
+    _homeVoiceRec=rec;
+    rec.lang='tr-TR';
+    rec.interimResults=false;
+    rec.maxAlternatives=5;
+    rec.continuous=false;
+    rec.onstart=()=>{
       if(epoch!==_homeVoiceEpoch) return;
-      try{ _homeVoiceRec.start(); }catch(_e3){
-        if(st) st.textContent='Mikrofon başlatılamadı.';
+      setHomeVoiceUi(true);
+      if(st){ st.style.color=''; st.textContent=listenHint; }
+    };
+    /* Tarayıcı ~5–8 sn no-speech ile kapanır — 20 sn dolana kadar yeniden aç */
+    rec.onend=()=>{
+      if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
+      if(Date.now()<_homeVoiceDeadline) setTimeout(armRec, 100);
+      else{
         setHomeVoiceUi(false);
+        if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
       }
-    }, 140);
+    };
+    rec.onerror=e=>{
+      if(epoch!==_homeVoiceEpoch) return;
+      const err=e&&e.error;
+      /* no-speech / aborted → onend yeniden başlatır (süre bitene kadar) */
+      if(err==='no-speech'||err==='aborted') return;
+      clearHomeVoiceTimer();
+      _homeVoiceGotResult=true;
+      setHomeVoiceUi(false);
+      if(!st) return;
+      if(err==='not-allowed'||err==='service-not-allowed')
+        st.textContent='Mikrofon izni gerekli — tarayıcı ayarlarından izin verin.';
+      else
+        st.textContent='Sesli komut hatası — tekrar deneyin.';
+    };
+    rec.onresult=ev=>{
+      if(epoch!==_homeVoiceEpoch) return;
+      _homeVoiceGotResult=true;
+      clearHomeVoiceTimer();
+      const transcripts=voiceTranscriptsFromEvent(ev);
+      setHomeVoiceUi(false);
+      try{ rec.stop(); }catch(_e){}
+      if(epoch!==_homeVoiceEpoch) return;
+      if(!handleHomeVoiceCommand(transcripts, st)){
+        if(st) st.textContent=onStock
+          ?'Anlaşılamadı — örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”.'
+          :'Anlaşılamadı — örn. “AMD NVDA AMZN yıllık karşılaştır”, “AMD kazançlar”.';
+      }
+    };
+    try{ rec.start(); }
+    catch(_e){
+      setTimeout(()=>{
+        if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
+        try{ rec.start(); }catch(_e3){
+          if(Date.now()<_homeVoiceDeadline) setTimeout(armRec, 200);
+          else{
+            clearHomeVoiceTimer();
+            if(st) st.textContent='Mikrofon başlatılamadı.';
+            setHomeVoiceUi(false);
+          }
+        }
+      }, 140);
+    }
   }
+  armRec();
 }
 function initHomeVoice(){
   const ok=!!getSpeechRecognition();
