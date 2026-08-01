@@ -436,6 +436,28 @@ const VOICE_SCAN_CAP={
   tumu:'all', tümü:'all', hepsi:'all', all:'all'
 };
 const VOICE_SCAN_CAP_LABEL={ all:'Tümü', mega:'Mega', large:'Large', mid:'Mid', small:'Small', micro:'Micro' };
+/* Trend (SMA) + Quant filtre chip'leri */
+const VOICE_SCAN_MA={
+  'fiyat sma 50':'sma50', 'fiyat sma50':'sma50', 'sma 50':'sma50', sma50:'sma50',
+  '50 gunluk':'sma50', '50 günlük':'sma50', 'elli gunluk':'sma50',
+  'fiyat sma 200':'sma200', 'fiyat sma200':'sma200', 'sma 200':'sma200', sma200:'sma200',
+  '200 gunluk':'sma200', '200 günlük':'sma200'
+};
+const VOICE_SCAN_MA_LABEL={ sma50:'Fiyat > SMA50', sma200:'Fiyat > SMA200' };
+const VOICE_SCAN_QF={
+  'rsi 30':'rsi_os', 'rsi ≤ 30':'rsi_os', 'rsi <= 30':'rsi_os', 'rsi dusuk':'rsi_os', 'rsi düşük':'rsi_os',
+  'asiri satim':'rsi_os', 'aşırı satım':'rsi_os', oversold:'rsi_os',
+  'rsi 70':'rsi_ob', 'rsi ≥ 70':'rsi_ob', 'rsi >= 70':'rsi_ob', 'rsi yuksek':'rsi_ob', 'rsi yüksek':'rsi_ob',
+  'asiri alim':'rsi_ob', 'aşırı alım':'rsi_ob', overbought:'rsi_ob',
+  'momentum plus':'mom', 'momentum+':'mom', momentum:'mom',
+  value:'value', deger:'value', değer:'value',
+  quality:'quality', kalite:'quality',
+  'hacim artan':'relvol', 'yuksek hacim':'relvol', 'yüksek hacim':'relvol', hacim:'relvol', relvol:'relvol'
+};
+const VOICE_SCAN_QF_LABEL={
+  rsi_os:'RSI ≤ 30', rsi_ob:'RSI ≥ 70', mom:'Momentum+',
+  value:'Value', quality:'Quality', relvol:'Hacim ↑'
+};
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
 let _voiceCcMap=null, _voiceSectMap=null;
 
@@ -481,6 +503,22 @@ function voiceLongestMatch(s, map){
   }
   return best?{ value:best, key:bestKey, len:bestLen }:null;
 }
+/* Birden fazla filtre (SMA50 + RSI30 + Momentum…) */
+function voiceAllMatches(s, map){
+  const hits=[];
+  const keys=Object.keys(map).sort((a,b)=>b.length-a.length);
+  let left=(' '+s+' ');
+  for(const k of keys){
+    const esc=k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const re=new RegExp('(^|\\s)'+esc+'(\\s|$)');
+    if(re.test(left)){
+      const v=map[k];
+      if(!hits.some(h=>h.value===v)) hits.push({ value:v, key:k });
+      left=left.replace(re,' ');
+    }
+  }
+  return hits;
+}
 function extractVoiceTicker(s){
   if(!s) return '';
   const joined=s.replace(/[\s.-]+/g,'');
@@ -523,13 +561,19 @@ function parseVoiceIntent(raw){
 
   const ccHit=voiceLongestMatch(s, voiceCcMap());
   const secHit=voiceLongestMatch(s, voiceSectMap());
-  const sortHit=voiceLongestMatch(s, VOICE_SCAN_SORT);
   const capHit=voiceLongestMatch(s, VOICE_SCAN_CAP);
+  const maHits=voiceAllMatches(s, VOICE_SCAN_MA);
+  const qfHits=voiceAllMatches(s, VOICE_SCAN_QF);
+  /* Filtre anahtarlarını çıkarıp sırala eşle — "rsi 30" sıralama RSI olmasın */
+  let sForSort=s;
+  for(const h of [...maHits, ...qfHits]) sForSort=sForSort.split(h.key).join(' ');
+  sForSort=sForSort.replace(/\s+/g,' ').trim();
+  const sortHit=voiceLongestMatch(sForSort, VOICE_SCAN_SORT);
   const cc=ccHit?ccHit.value:null;
   const sector=secHit?secHit.value:null;
   const saidSirala=/\bs[ıi]rala\b/.test(s) || /\bs[ıi]ralama\b/.test(s);
   const wantSort=!!sortHit || saidSirala;
-  const wantScan=wantSort || !!capHit;
+  const wantScan=wantSort || !!capHit || maHits.length>0 || qfHits.length>0;
 
   let rest=s;
   if(pageKey) rest=rest.split(pageKey).join(' ');
@@ -537,6 +581,7 @@ function parseVoiceIntent(raw){
   if(secHit) rest=rest.split(secHit.key).join(' ');
   if(sortHit) rest=rest.split(sortHit.key).join(' ');
   if(capHit) rest=rest.split(capHit.key).join(' ');
+  for(const h of [...maHits, ...qfHits]) rest=rest.split(h.key).join(' ');
   rest=rest.replace(/\bs[ıi]rala(ma)?\b/g,' ').replace(/\s+/g,' ').trim();
   /* Yalnız kalan metinden hisse çıkar — tam cümleden çekmek "ABD"yi hisse sanır */
   const sym=extractVoiceTicker(rest);
@@ -552,10 +597,12 @@ function parseVoiceIntent(raw){
     else return null;
   }
 
-  let sort=null, cap=null;
+  let sort=null, cap=null, ma=[], qf=[];
   if(page==='scan'){
-    sort=sortHit ? sortHit.value : (wantSort || cc || capHit ? 'mcap-desc' : null);
+    sort=sortHit ? sortHit.value : (wantSort || cc || capHit || maHits.length || qfHits.length ? 'mcap-desc' : null);
     cap=capHit ? capHit.value : 'all';
+    ma=maHits.map(h=>h.value);
+    qf=qfHits.map(h=>h.value);
   }
 
   return {
@@ -563,7 +610,7 @@ function parseVoiceIntent(raw){
     cc: (cc==='GLOBAL' && page!=='sect') ? null : cc,
     sector: page==='sect' ? sector : null,
     sym: (page==='takas'||page==='st') ? sym : null,
-    sort, cap
+    sort, cap, ma, qf
   };
 }
 function runVoiceIntent(intent){
@@ -633,8 +680,12 @@ function runVoiceIntent(intent){
       const sortEl=document.getElementById('scanSort');
       const sortVal=intent.sort||'mcap-desc';
       const capVal=intent.cap||'all';
+      const maList=Array.isArray(intent.ma)?intent.ma:[];
+      const qfList=Array.isArray(intent.qf)?intent.qf:[];
       if(sortEl) sortEl.value=sortVal;
       setScanCapsVoice(capVal);
+      setScanMaVoice(maList);
+      setScanQfVoice(qfList);
       const cc=intent.cc||'TR';
       selectScanCountry(cc);
       /* YDF sırası TR dışı ülkede gizlenebilir — selectScanCountry sonrası tekrar yaz */
@@ -645,6 +696,8 @@ function runVoiceIntent(intent){
       const nm=(ECON_COUNTRIES.find(x=>x[0]===cc)||[])[1]||cc;
       bits.unshift(nm);
       if(capVal && capVal!=='all') bits.push(VOICE_SCAN_CAP_LABEL[capVal]||capVal);
+      maList.forEach(id=> bits.push(VOICE_SCAN_MA_LABEL[id]||id));
+      qfList.forEach(id=> bits.push(VOICE_SCAN_QF_LABEL[id]||id));
       bits.push(VOICE_SCAN_SORT_LABEL[sortVal]||sortVal);
       break;
     }
@@ -3189,6 +3242,20 @@ function setScanCapsVoice(cap){
   SCAN_CAPS=new Set([c]);
   document.querySelectorAll('#page-scan .scan-chip[data-cap]').forEach(b=>{
     b.classList.toggle('active', b.dataset.cap===c);
+  });
+}
+function setScanMaVoice(ids){
+  const ok=new Set(['sma50','sma200']);
+  SCAN_MA=new Set((ids||[]).filter(x=>ok.has(x)));
+  document.querySelectorAll('#page-scan .scan-chip[data-ma]').forEach(b=>{
+    b.classList.toggle('active', SCAN_MA.has(b.dataset.ma));
+  });
+}
+function setScanQfVoice(ids){
+  const ok=new Set(['rsi_os','rsi_ob','mom','value','quality','relvol']);
+  SCAN_QF=new Set((ids||[]).filter(x=>ok.has(x)));
+  document.querySelectorAll('#page-scan .scan-chip[data-qf]').forEach(b=>{
+    b.classList.toggle('active', SCAN_QF.has(b.dataset.qf));
   });
 }
 function toggleScanCap(btn){
