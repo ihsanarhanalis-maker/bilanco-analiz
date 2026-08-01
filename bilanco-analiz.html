@@ -353,6 +353,24 @@
     white-space:pre-wrap;word-break:break-word}
   .st-tr::before{content:'TR · ';font-size:10px;font-weight:800;color:var(--accent-2);letter-spacing:.04em}
 
+  /* Kazançlar (EPS gerçekleşen / tahmin) — dolgun panel */
+  .earn-dot{display:inline-block;width:12px;height:12px;border-radius:50%;vertical-align:middle;margin-right:5px}
+  .earn-dot.act{background:#26a69a;border:2px solid #26a69a}
+  .earn-dot.est{background:transparent;border:2.5px solid var(--ink-2)}
+  .earn-legend{font-size:13.5px!important;font-weight:600}
+  #earnChart{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;padding:18px 12px 8px;margin-bottom:4px}
+  #earnChart svg{max-width:100%!important;height:auto!important;min-height:300px}
+  .earn-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:18px}
+  .earn-tile{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
+    border-radius:13px;padding:16px 18px;min-height:88px;display:flex;flex-direction:column;justify-content:center}
+  .earn-tile .k{color:var(--muted);font-size:12.5px;font-weight:600;margin-bottom:8px;line-height:1.35}
+  .earn-tile .v{font-weight:800;color:var(--ink);font-size:22px;line-height:1.25;letter-spacing:-.02em;word-break:break-word}
+  @media(max-width:560px){
+    .earn-meta{grid-template-columns:1fr}
+    .earn-tile .v{font-size:19px}
+    #earnChart svg{min-height:260px}
+  }
+
   /* Analist hedef fiyatları */
   .tgt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:16px}
   .tgt-box{background:linear-gradient(160deg,var(--surface-2),var(--surface));border:1px solid var(--line);
@@ -714,6 +732,18 @@
       <div id="chartBody"><div class="hint">—</div></div>
     </div>
 
+    <div class="card hidden" id="earnCard">
+      <h2>Kazançlar</h2>
+      <div class="sub">HBK (EPS) gerçekleşen vs analist tahmini. Kaynak: <b>TradingView</b>.</div>
+      <div class="toolbar" style="margin-bottom:14px;gap:10px;flex-wrap:wrap;align-items:center">
+        <button type="button" class="scan-chip" id="earnTabFY" onclick="setEarnMode('annual')" style="padding:8px 16px;font-size:13.5px">Yıllık</button>
+        <button type="button" class="scan-chip active" id="earnTabQ" onclick="setEarnMode('quarter')" style="padding:8px 16px;font-size:13.5px">Üç aylık</button>
+        <span class="earn-legend" style="margin-left:auto;color:var(--muted)"><span class="earn-dot act"></span> Güncel <span class="earn-dot est" style="margin-left:14px"></span> Tahmin</span>
+      </div>
+      <div id="earnChart"><div class="hint">—</div></div>
+      <div id="earnMeta"></div>
+    </div>
+
     <div class="card hidden" id="ownerCard">
       <h2>Ortaklık Yapısı</h2>
       <div class="sub" id="ownerSub">Şirketin payları kimde — halka açıklık oranı ve büyük ortaklar, pasta dilimiyle. ABD’de kurumsal (13F) sahipler listelenir. <b>BIST / ABD:</b> fiili dolaşımdaki senet = ödenmiş sermaye ÷ halka açıklık oranı.</div>
@@ -1045,8 +1075,8 @@
 
 </div>
 
-<script src="cik-map.js?v=125"></script>
-<script src="app.js?v=125"></script>
+<script src="cik-map.js?v=129"></script>
+<script src="app.js?v=129"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

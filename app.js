@@ -1336,7 +1336,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym, shares:R.shares });
     fetchTargetsEU(sym, euInfo, myGen);
-    fetchNextEarnings(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan });
+    fetchNextEarnings(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, ysym });
     fetchPriceChart(sym, ysym, myGen);
     fetchSectorComparison(sym, 'EU', myGen, { tv:tvTicker, scan:euInfo.scan, sector:R.sector });
     TECH_SHORT=null;   // kısa pozisyon verisi (Finviz) yalnızca ABD'de var
@@ -1651,37 +1651,262 @@ function startEuExchangeClock(euInfo){
   startExchangeClock({flag:euInfo.flag,city:euInfo.city,tz:euInfo.tz,open:euInfo.open,close:euInfo.close});
 }
 
-/* ---------- Sonraki bilanço tarihi (üç pazar) ----------
-   Kaynak: TradingView scanner `earnings_release_next_date` (beklenen açıklanma tarihi,
-   Unix saniye). BIST için turkey/scan + BIST:SYM; ABD için america/scan — borsa öneki
-   bilinmediğinden NASDAQ/NYSE/AMEX üçü birden sorulur; Avrupa'da borsa zaten kesin bilindiği
-   için euOpt={tv,scan} doğrudan kullanılır. Tarayıcıdan çağrılır (Content-Type başlıksız
-   POST = preflight'sız; TV Origin yansıtır). */
+/* ---------- Kazançlar paneli (TradingView EPS gerçekleşen/tahmin) ----------
+   Scanner: dilüe HBK geçmişi (fq_h/fy_h), mali dönem sonları, sonraki HBK/gelir tahmini. */
+let EARN_CACHE=null, EARN_MODE='quarter';
+function setEarnMode(mode){
+  EARN_MODE=mode==='annual'?'annual':'quarter';
+  document.getElementById('earnTabFY')?.classList.toggle('active', EARN_MODE==='annual');
+  document.getElementById('earnTabQ')?.classList.toggle('active', EARN_MODE==='quarter');
+  if(EARN_CACHE) renderEarnPanel(EARN_CACHE);
+}
+function fmtEarnCcy(v, ccy){
+  if(v==null||!isFinite(v)) return '—';
+  const a=Math.abs(v), c=ccy||'USD';
+  if(a>=1e12) return (v/1e12).toLocaleString('tr-TR',{maximumFractionDigits:2})+' T '+c;
+  if(a>=1e9) return (v/1e9).toLocaleString('tr-TR',{maximumFractionDigits:2})+' B '+c;
+  if(a>=1e6) return (v/1e6).toLocaleString('tr-TR',{maximumFractionDigits:2})+' M '+c;
+  return v.toLocaleString('tr-TR',{maximumFractionDigits:2})+' '+c;
+}
+function fmtEarnEps(v, ccy){
+  if(v==null||!isFinite(v)) return '—';
+  return Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+(ccy||'USD');
+}
+function earnQLabel(s){
+  if(s==null||s==='') return '';
+  const str=String(s);
+  let m=str.match(/^(20\d{2})-Q([1-4])$/i);
+  if(m) return 'Q'+m[2]+" '"+m[1].slice(2);
+  m=str.match(/^(\d)Q(20\d{2})$/i);
+  if(m) return 'Q'+m[1]+" '"+m[2].slice(2);
+  m=str.match(/^Q(\d)\s*'?(20)?(\d{2})$/i);
+  if(m) return 'Q'+m[1]+" '"+m[3];
+  m=str.match(/^(20\d{2})$/);
+  if(m) return m[1];
+  return str;
+}
+/* TradingView tarzı: "Q4, 2026" */
+function fmtEarnPeriod(q, y){
+  if(!q||!y) return '';
+  return 'Q'+q+', '+y;
+}
+function chartQLabel(q, y){
+  return 'Q'+q+" '"+String(y).slice(2);
+}
+function parseFiscalQY(s){
+  if(s==null||s==='') return null;
+  const str=String(s);
+  let m=str.match(/^(20\d{2})-Q([1-4])$/i);
+  if(m) return { q:+m[2], y:+m[1] };
+  m=str.match(/^(\d)Q(20\d{2})$/i);
+  if(m) return { q:+m[1], y:+m[2] };
+  m=str.match(/^Q(\d)[^\d]*(20\d{2}|\d{2})$/i);
+  if(m) return { q:+m[1], y:m[2].length===2?2000+(+m[2]):+m[2] };
+  return null;
+}
+/* TV scanner: en yeni önce dilüe HBK dizisi + mali yıl/çeyrek sonu → etiketler */
+function buildTvQuarterPoints(epsH, lastFQ, nextEps, lastEst){
+  if(!Array.isArray(epsH)||!epsH.length||!lastFQ) return [];
+  const n=Math.min(4, epsH.length);
+  const pts=[];
+  for(let i=n-1;i>=0;i--){
+    const pq=addFiscalQ(lastFQ.q, lastFQ.y, -i);
+    const actual=+epsH[i];
+    pts.push({
+      label:chartQLabel(pq.q, pq.y),
+      actual:isFinite(actual)?actual:null,
+      estimate:(i===0 && lastEst!=null && isFinite(lastEst))?+lastEst:null
+    });
+  }
+  if(nextEps!=null&&isFinite(nextEps)){
+    const nq=addFiscalQ(lastFQ.q, lastFQ.y, 1);
+    pts.push({ label:chartQLabel(nq.q, nq.y), actual:null, estimate:+nextEps });
+  }
+  return pts;
+}
+function addFiscalQ(q, y, n){
+  let qq=q+n, yy=y;
+  while(qq>4){ qq-=4; yy++; }
+  while(qq<1){ qq+=4; yy--; }
+  return { q:qq, y:yy };
+}
+/* Çeyrek sonu tarihi + mali yıl bitiş ayı → mali çeyrek (TV ile uyumlu) */
+function fiscalFromPeriodEnd(endDateStr, fyeMonth){
+  if(!endDateStr||!fyeMonth) return null;
+  const d=new Date(String(endDateStr).slice(0,10)+'T12:00:00Z');
+  if(!isFinite(d.getTime())) return null;
+  const m=d.getUTCMonth()+1, y=d.getUTCFullYear();
+  const fy=m<=fyeMonth?y:y+1;
+  const monthsIntoFy=(m-fyeMonth-1+12)%12;
+  const q=Math.floor(monthsIntoFy/3)+1;
+  return { q, y:fy };
+}
+function inferFyeMonth(fiscalQ, endMonth){
+  if(!fiscalQ||!endMonth) return null;
+  let m=endMonth+3*(4-fiscalQ);
+  while(m>12) m-=12;
+  while(m<1) m+=12;
+  return m;
+}
+function unwrapY(v){
+  if(v==null) return null;
+  if(typeof v==='number') return isFinite(v)?v:null;
+  if(typeof v==='object' && v.raw!=null){ const n=+v.raw; return isFinite(n)?n:null; }
+  const n=+v; return isFinite(n)?n:null;
+}
+function drawEarnChart(points){
+  const box=document.getElementById('earnChart');
+  if(!box) return;
+  if(!points||!points.length){ box.innerHTML='<div class="hint">Bu dönem için grafik serisi yok.</div>'; return; }
+  const W=720, H=340, padL=52, padR=28, padT=28, padB=48;
+  const vals=points.flatMap(p=>[p.actual,p.estimate].filter(v=>v!=null&&isFinite(v)));
+  if(!vals.length){ box.innerHTML='<div class="hint">Grafik verisi yok.</div>'; return; }
+  let yMin=Math.min(0, ...vals), yMax=Math.max(...vals);
+  if(yMax===yMin) yMax=yMin+1;
+  const pad=(yMax-yMin)*0.14; yMin-=pad; yMax+=pad;
+  const n=points.length;
+  const X=i=> padL+((n===1?0.5:i/(n-1))*(W-padL-padR));
+  const Y=v=> padT+(yMax-v)/((yMax-yMin)||1)*(H-padT-padB);
+  let grid='', ylbl='';
+  for(let g=0;g<=4;g++){
+    const v=yMin+(yMax-yMin)*g/4, yy=Y(v).toFixed(1);
+    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1.2"/>`;
+    ylbl+=`<text x="${padL-10}" y="${(+yy+4).toFixed(1)}" font-size="13" font-weight="600" fill="var(--muted)" text-anchor="end">${v.toFixed(2)}</text>`;
+  }
+  let dots='', xl='', valsLbl='';
+  points.forEach((p,i)=>{
+    const x=X(i);
+    xl+=`<text x="${x.toFixed(1)}" y="${H-14}" font-size="14" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${safeHTML(p.label)}</text>`;
+    if(p.estimate!=null&&isFinite(p.estimate)){
+      const ey=Y(p.estimate);
+      dots+=`<circle cx="${x.toFixed(1)}" cy="${ey.toFixed(1)}" r="11" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="2.8"><title>Tahmin: ${p.estimate}</title></circle>`;
+    }
+    if(p.actual!=null&&isFinite(p.actual)){
+      const ay=Y(p.actual);
+      dots+=`<circle cx="${x.toFixed(1)}" cy="${ay.toFixed(1)}" r="9.5" fill="#26a69a" stroke="#1e8e82" stroke-width="1.5"><title>Güncel: ${p.actual}</title></circle>`;
+      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ay-16).toFixed(1)}" font-size="12" font-weight="700" fill="#26a69a" text-anchor="middle">${Number(p.actual).toFixed(2)}</text>`;
+    }else if(p.estimate!=null&&isFinite(p.estimate)){
+      const ey=Y(p.estimate);
+      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ey-16).toFixed(1)}" font-size="12" font-weight="700" fill="var(--muted)" text-anchor="middle">${Number(p.estimate).toFixed(2)}</text>`;
+    }
+  });
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" height="340" preserveAspectRatio="xMidYMid meet" style="display:block">${grid}${ylbl}${dots}${valsLbl}${xl}</svg>`;
+}
+function renderEarnPanel(data){
+  const card=document.getElementById('earnCard'), meta=document.getElementById('earnMeta');
+  if(!card||!meta||!data) return;
+  card.classList.remove('hidden');
+  document.getElementById('earnTabFY')?.classList.toggle('active', EARN_MODE==='annual');
+  document.getElementById('earnTabQ')?.classList.toggle('active', EARN_MODE==='quarter');
+  const ccy=data.ccy||'USD';
+  drawEarnChart(EARN_MODE==='annual' ? (data.annual||[]) : (data.quarterly||[]));
+  const rows=[];
+  if(data.nextDate){
+    const d=new Date(data.nextDate*1000);
+    rows.push(['Bir sonraki kazanç raporu', d.toLocaleDateString('tr-TR',{day:'numeric',month:'short',year:'numeric'})]);
+  }
+  if(data.nextPeriod) rows.push(['Rapor dönemi', data.nextPeriod]);
+  if(data.nextEps!=null) rows.push(['HBK beklenti', fmtEarnEps(data.nextEps, ccy)]);
+  if(data.nextRev!=null) rows.push(['Gelir tahmini', fmtEarnCcy(data.nextRev, ccy)]);
+  if(data.lastEps!=null && data.lastEpsEst!=null)
+    rows.push(['Son HBK (gerç. / tah.)', fmtEarnEps(data.lastEps, ccy)+' / '+fmtEarnEps(data.lastEpsEst, ccy)]);
+  meta.innerHTML=rows.length
+    ? `<div class="earn-meta">${rows.map(([k,v])=>`<div class="earn-tile"><div class="k">${safeHTML(k)}</div><div class="v">${safeHTML(v)}</div></div>`).join('')}</div>`
+    : '<div class="hint">Özet veri yok.</div>';
+}
 async function fetchNextEarnings(sym, market, myGen, euOpt){
   const el=document.getElementById('earnNote');
-  if(!el) return;
-  el.classList.add('hidden'); el.innerHTML='';
+  const card=document.getElementById('earnCard');
+  if(el){ el.classList.add('hidden'); el.innerHTML=''; }
+  if(card) card.classList.add('hidden');
+  EARN_CACHE=null; EARN_MODE='quarter';
   try{
     const scan = euOpt ? euOpt.scan : (market==='BIST' ? 'turkey' : 'america');
     const tickers = euOpt ? [euOpt.tv] : (market==='BIST' ? ['BIST:'+sym] : ['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym]);
-    const r=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
-      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:['earnings_release_next_date']})});
-    if(!r.ok) return;
-    const j=await r.json();
-    if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
-    const row=(j.data||[]).find(x=>x.d && x.d[0]!=null);
-    const ts=row && row.d[0];
-    if(!ts) return;
-    const d=new Date(ts*1000);
-    const days=Math.round((d-Date.now())/86400000);
-    const ds=d.toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'});
-    el.innerHTML=`<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:9px;padding:7px 11px;font-size:12px;display:inline-block">
-      <span style="color:var(--muted)">📅 Sonraki bilanço (beklenen):</span>
-      <b style="color:var(--ink);margin-left:5px">${ds}</b>
-      ${days>=0?`<span style="color:var(--muted);margin-left:5px">· ${days===0?'bugün':days+' gün sonra'}</span>`:''}</div>`;
-    el.classList.remove('hidden');
+    /* Tüm grafik + özet: TradingView scanner (Yahoo mali etiketleri TV ile kayıyor) */
+    const cols=[
+      'earnings_release_next_date',
+      'fiscal_period_end_fq','fiscal_period_end_fy',
+      'earnings_per_share_fq','earnings_per_share_forecast_fq','earnings_per_share_forecast_next_fq',
+      'earnings_per_share_diluted_fq_h','earnings_per_share_diluted_fy_h','fiscal_period_fy_h',
+      'earnings_per_share_forecast_next_fy','revenue_forecast_next_fq','currency'
+    ];
+    const tvj=await fetch('https://scanner.tradingview.com/'+scan+'/scan',
+      {method:'POST',body:JSON.stringify({symbols:{tickers},columns:cols})}).then(r=>r.json()).catch(()=>null);
+    if(myGen!=null && myGen!==REQ_GEN) return;
+
+    const row=(tvj&&tvj.data||[]).find(x=>x.d&&x.d.some(v=>v!=null));
+    const d=row&&row.d||[];
+    const tv={
+      nextDate:d[0],
+      periodEndFq:d[1], periodEndFy:d[2],
+      epsFq:d[3], epsEstFq:d[4], epsEstNext:d[5],
+      epsFqH:d[6], epsFyH:d[7], periodFyH:d[8],
+      epsEstNextFy:d[9], revEstNext:d[10], ccy:d[11]||'USD'
+    };
+
+    const fyeMonth=tv.periodEndFy
+      ? (new Date(tv.periodEndFy*1000).getUTCMonth()+1)
+      : null;
+    const lastFQ=tv.periodEndFq&&fyeMonth
+      ? fiscalFromPeriodEnd(new Date(tv.periodEndFq*1000).toISOString().slice(0,10), fyeMonth)
+      : null;
+
+    let quarterly=buildTvQuarterPoints(tv.epsFqH, lastFQ, tv.epsEstNext, tv.epsEstFq);
+    /* Dilüe dizi yoksa skaler son HBK + sonraki tahmin */
+    if(!quarterly.length && lastFQ && (tv.epsFq!=null||tv.epsEstNext!=null)){
+      if(tv.epsFq!=null){
+        quarterly.push({ label:chartQLabel(lastFQ.q, lastFQ.y), actual:+tv.epsFq, estimate:tv.epsEstFq!=null?+tv.epsEstFq:null });
+      }
+      if(tv.epsEstNext!=null){
+        const nq=addFiscalQ(lastFQ.q, lastFQ.y, 1);
+        quarterly.push({ label:chartQLabel(nq.q, nq.y), actual:null, estimate:+tv.epsEstNext });
+      }
+    }
+
+    const nextFQ=lastFQ?addFiscalQ(lastFQ.q, lastFQ.y, 1):null;
+    const nextPeriod=nextFQ?fmtEarnPeriod(nextFQ.q, nextFQ.y):'';
+    const nextDate=tv.nextDate||null;
+    const nextEps=tv.epsEstNext!=null?tv.epsEstNext:null;
+    const nextRev=tv.revEstNext!=null?tv.revEstNext:null;
+
+    const annual=[];
+    const fyH=Array.isArray(tv.epsFyH)?tv.epsFyH:[];
+    const fyP=Array.isArray(tv.periodFyH)?tv.periodFyH:[];
+    const nFy=Math.min(4, fyH.length);
+    for(let i=nFy-1;i>=0;i--){
+      const ylbl=fyP[i]!=null?String(fyP[i]):'';
+      const a=+fyH[i];
+      annual.push({ label:ylbl, actual:isFinite(a)?a:null, estimate:null });
+    }
+    if(tv.epsEstNextFy!=null){
+      const nextY=fyP[0]!=null?(+fyP[0]+1):null;
+      annual.push({ label:nextY?String(nextY):'Sonraki FY', actual:null, estimate:+tv.epsEstNextFy });
+    }
+
+    const lastDone=quarterly.filter(p=>p.actual!=null).slice(-1)[0];
+    const lastEps=tv.epsFq!=null?tv.epsFq:(lastDone&&lastDone.actual);
+    const lastEpsEst=tv.epsEstFq!=null?tv.epsEstFq:(lastDone&&lastDone.estimate);
+
+    const payload={ ccy:tv.ccy||'USD', nextDate, nextPeriod, nextEps, nextRev, lastEps, lastEpsEst, quarterly, annual };
+    if(!quarterly.length && !annual.length && nextDate==null && nextEps==null) return;
+    EARN_CACHE=payload;
+    renderEarnPanel(payload);
+
+    if(el && nextDate){
+      const dt=new Date(nextDate*1000);
+      const days=Math.round((dt-Date.now())/86400000);
+      const ds=dt.toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'});
+      el.innerHTML=`<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:9px;padding:7px 11px;font-size:12px;display:inline-block">
+        <span style="color:var(--muted)">📅 Sonraki kazanç:</span>
+        <b style="color:var(--ink);margin-left:5px">${ds}</b>
+        ${days>=0?`<span style="color:var(--muted);margin-left:5px">· ${days===0?'bugün':days+' gün sonra'}</span>`:''}
+        ${nextEps!=null?`<span style="color:var(--muted);margin-left:8px">HBK tah. <b style="color:var(--ink)">${fmtEarnEps(nextEps, payload.ccy)}</b></span>`:''}</div>`;
+      el.classList.remove('hidden');
+    }
   }catch(e){}
 }
+window.setEarnMode=setEarnMode;
 
 /* ---------- Fiyat Grafiği (Yahoo kapanışları, SVG çizgi; 1 Ay/6 Ay/1 Yıl/5 Yıl) ---------- */
 let CHART_SYM='', CHART_YSYM='', CHART_RANGE='1y';
@@ -3978,6 +4203,7 @@ function hidePriceUI(){
   const tc=document.getElementById('targetCard'), vc=document.getElementById('valCard'), kc=document.getElementById('kapCard');
   const yc=document.getElementById('ydfCard');
   const en=document.getElementById('earnNote');
+  const ec=document.getElementById('earnCard');
   if(lp) lp.classList.add('hidden');
   if(pn){ pn.classList.add('hidden'); pn.innerHTML=''; }
   if(bd){ bd.className='hd-badge hidden'; bd.textContent=''; }
@@ -3986,6 +4212,7 @@ function hidePriceUI(){
   if(yc) yc.classList.add('hidden');
   if(kc) kc.classList.add('hidden');
   if(en){ en.classList.add('hidden'); en.innerHTML=''; }
+  if(ec){ ec.classList.add('hidden'); const echart=document.getElementById('earnChart'), em=document.getElementById('earnMeta'); if(echart) echart.innerHTML=''; if(em) em.innerHTML=''; EARN_CACHE=null; }
   ['chartCard','sectorCard','insiderCard','ownerCard','techCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   TECH_SHORT=null;
   const tss=document.getElementById('techShortSrc'); if(tss) tss.textContent='';
