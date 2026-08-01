@@ -650,6 +650,28 @@ function runVoiceCompare(intent){
   const modeLbl=intent.mode==='quarter'?'Çeyreklik':'Yıllık';
   return 'Karşılaştır: <b>'+safeHTML(intent.syms.join(', '))+'</b> · '+modeLbl;
 }
+/* Varsayılan çeyreklik; "AMD yıllık" → yıllık */
+function parseVoicePeriod(s){
+  if(/\b(y[ıi]ll[ıi]k|annual)\b/.test(s)) return 'annual';
+  if(/\b([cç]eyreklik|quarter(?:ly)?)\b/.test(s)) return 'quarter';
+  return null;
+}
+function stripVoicePeriod(s){
+  return String(s||'')
+    .replace(/\b(y[ıi]ll[ıi]k|annual|[cç]eyreklik|quarter(?:ly)?)\b/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+function applyVoicePeriod(mode){
+  const m=mode==='annual'?'annual':'quarter';
+  const hp=document.getElementById('homePeriod');
+  const pt=document.getElementById('periodType');
+  if(hp) hp.value=m;
+  if(pt) pt.value=m;
+  return m;
+}
+function voicePeriodLabel(mode){
+  return mode==='annual'?'Yıllık':'Çeyreklik';
+}
 function parseVoiceIntent(raw){
   let s=normalizeVoiceText(raw);
   if(!s) return null;
@@ -661,12 +683,15 @@ function parseVoiceIntent(raw){
   const cmpIntent=parseVoiceCompare(s);
   if(cmpIntent) return cmpIntent;
 
-  /* "AMD kazançlar" / "AMD özet" — hisse + kart (sekme/ülke eşlemesinden önce) */
-  const cardHit=matchVoiceStockCard(s);
+  const period=parseVoicePeriod(s)||'quarter';
+  const sNP=stripVoicePeriod(s);
+
+  /* "AMD kazançlar" / "AMD yıllık özet" — hisse + kart (sekme/ülke eşlemesinden önce) */
+  const cardHit=matchVoiceStockCard(sNP);
   if(cardHit){
-    const rest=s.split(cardHit.key).join(' ').replace(/\s+/g,' ').trim();
+    const rest=sNP.split(cardHit.key).join(' ').replace(/\s+/g,' ').trim();
     const cardSym=extractVoiceTicker(rest);
-    if(cardSym) return { type:'card', id:cardHit.id, label:cardHit.label, sym:cardSym };
+    if(cardSym) return { type:'card', id:cardHit.id, label:cardHit.label, sym:cardSym, mode:period };
     if(voiceOnStockPage()) return { type:'card', id:cardHit.id, label:cardHit.label };
   }
 
@@ -699,7 +724,7 @@ function parseVoiceIntent(raw){
   const wantSort=!!sortHit || saidSirala;
   const wantScan=wantSort || !!capHit || maHits.length>0 || qfHits.length>0;
 
-  let rest=s;
+  let rest=sNP;
   if(pageKey) rest=rest.split(pageKey).join(' ');
   if(ccHit) rest=rest.split(ccHit.key).join(' ');
   if(secHit) rest=rest.split(secHit.key).join(' ');
@@ -717,7 +742,7 @@ function parseVoiceIntent(raw){
     else if(cc && /\bilk\s*(100|y[uü]z)\b/.test(s)){ page='top100'; pageLabel='İlk 100 Şirket'; }
     else if(sym && /\b(arac[iı]\s*kurum|takas)\b/.test(s)){ page='takas'; pageLabel='Aracı Kurum Dağılımı'; }
     else if(sym && /\b(hissex|hisse\s*x|stock\s*twits|stocktwits)\b/.test(s)){ page='st'; pageLabel='hisseX'; }
-    else if(sym) return { type:'search', sym, label:sym };
+    else if(sym) return { type:'search', sym, label:sym, mode:period };
     else return null;
   }
 
@@ -745,25 +770,28 @@ function runVoiceIntent(intent){
   if(intent.type==='card'){
     if(intent.sym){
       const want=String(intent.sym).toUpperCase();
+      const mode=applyVoicePeriod(intent.mode||'quarter');
       const results=document.getElementById('results');
       const same=FIN && String(FIN.ticker).toUpperCase()===want
+        && FIN.mode===mode
         && results && !results.classList.contains('hidden');
       if(same){
-        return '<b>'+safeHTML(want)+'</b> · '+scrollVoiceStockCard(intent);
+        return '<b>'+safeHTML(want)+'</b> · '+voicePeriodLabel(mode)+' · '+scrollVoiceStockCard(intent);
       }
       _voicePendingCard={ id:intent.id, label:intent.label, sym:want };
       const inp=document.getElementById('homeTicker');
       if(inp) inp.value=want;
       homeSearch(want);
-      return 'Duyulan: <b>'+safeHTML(want)+'</b> · <b>'+safeHTML(intent.label)+'</b>';
+      return 'Duyulan: <b>'+safeHTML(want)+'</b> · '+voicePeriodLabel(mode)+' · <b>'+safeHTML(intent.label)+'</b>';
     }
     return scrollVoiceStockCard(intent);
   }
   if(intent.type==='search'){
+    const mode=applyVoicePeriod(intent.mode||'quarter');
     const inp=document.getElementById('homeTicker');
     if(inp) inp.value=intent.sym;
     homeSearch(intent.sym);
-    return 'Duyulan: <b>'+safeHTML(intent.sym)+'</b>';
+    return 'Duyulan: <b>'+safeHTML(intent.sym)+'</b> · '+voicePeriodLabel(mode);
   }
   const bits=[intent.pageLabel||intent.page];
   switch(intent.page){

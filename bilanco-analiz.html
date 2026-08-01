@@ -607,8 +607,8 @@
         </button>
       </div>
       <select id="homePeriod">
+        <option value="quarter" selected>Çeyreklik</option>
         <option value="annual">Yıllık</option>
-        <option value="quarter">Çeyreklik</option>
       </select>
       <button class="primary" onclick="homeSearch()">Ara →</button>
     </div>
@@ -673,8 +673,8 @@
         </button>
       </div>
       <select id="periodType" class="cell" style="width:auto">
+        <option value="quarter" selected>Çeyreklik</option>
         <option value="annual">Yıllık</option>
-        <option value="quarter">Çeyreklik</option>
       </select>
       <button class="primary" onclick="fetchTicker()">Ara →</button>
       <button id="watchStar" class="hidden" onclick="toggleWatch()" title="İzleme listesine ekle/çıkar">☆ Listeme Ekle</button>
@@ -1117,7 +1117,7 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="app.js?v=143"></script>
+<script src="app.js?v=144"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">
