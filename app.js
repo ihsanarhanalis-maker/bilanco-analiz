@@ -331,8 +331,8 @@ function discCcFromPick(pick){
   return discCcFromCode(pick.code);
 }
 
-/* ---------- Ana sayfa sesli komut (hisse ara + sekme aç; Web Speech API, bas-konuş) ---------- */
-const VOICE_FILLER=/^(aç|ac|getir|ara|hisse|bak|göster|goster|lütfen|lutfen|bir|tane|kodu|hissesini|hissesi|analiz|et|yap|için|icin|sekme|sekmesi|git|gidelim)$/i;
+/* ---------- Ana sayfa sesli komut (bileşik: ülke+sekme+filtre/hisse; bas-konuş) ---------- */
+const VOICE_FILLER=/^(aç|ac|getir|ara|hisse|bak|göster|goster|lütfen|lutfen|bir|tane|kodu|hissesini|hissesi|analiz|et|yap|için|icin|sekme|sekmesi|git|gidelim|göre|gore|olan|daki|deki)$/i;
 const VOICE_ALIASES={
   apple:'AAPL', aapl:'AAPL',
   nvidia:'NVDA', nvda:'NVDA',
@@ -352,20 +352,49 @@ const VOICE_ALIASES={
   koc:'KCHOL', kchol:'KCHOL',
   samsung:'005930'
 };
-/* Uzun anahtar önce eşleşsin diye keys uzunluğa göre taranır */
 const VOICE_PAGES=[
   { page:'home', label:'Ana Sayfa', keys:['ana sayfa','anasayfa','home','giriş','giris','başlangıç','baslangic'] },
   { page:'stock', label:'Bilanço Analizi', keys:['bilanço analizi','bilanco analizi','bilanço','bilanco','mali tablo'] },
   { page:'econ', label:'Ekonomik Takvim', keys:['ekonomik takvim','ekonomi takvimi','ekonomi takvim','takvim'] },
   { page:'top100', label:'İlk 100 Şirket', keys:['ilk 100 şirket','ilk yüz şirket','ilk 100','ilk yüz','top 100','top100'] },
   { page:'scan', label:'Hisse Tarayıcı', keys:['hisse tarayıcı','hisse tarayici','tarayıcı','tarayici','scanner','scan'] },
-  { page:'sect', label:'Sektör Devleri', keys:['sektör devleri','sektor devleri','sektörler','sektorler','sektör','sektor'] },
+  { page:'sect', label:'Sektör Devleri', keys:['sektör devleri','sektor devleri','sektörler','sektorler'] },
   { page:'takas', label:'Aracı Kurum Dağılımı', keys:['aracı kurum dağılımı','araci kurum dagilimi','aracı kurum','araci kurum','takas'] },
   { page:'etf', label:'ETF', keys:['etf','e t f'] },
   { page:'wnews', label:'Dünya Haberleri', keys:['dünya haberleri','dunya haberleri','haberler','world news'] },
   { page:'st', label:'hisseX', keys:['hissex','hisse x','hisse iks','stocktwits','stock twits'] }
 ];
+const VOICE_CC_EXTRA={
+  abd:'US', amerika:'US', 'amerika birleşik devletleri':'US', 'amerika birlesik devletleri':'US', usa:'US', us:'US',
+  ingiltere:'GB', uk:'GB', britain:'GB', 'birleşik krallık':'GB', 'birlesik krallik':'GB',
+  almanya:'DE', germany:'DE',
+  turkiye:'TR', türkiye:'TR', turkey:'TR', tr:'TR',
+  fransa:'FR', france:'FR', italya:'IT', italy:'IT', ispanya:'ES', spain:'ES',
+  hollanda:'NL', belcika:'BE', belçika:'BE', portekiz:'PT', isvicre:'CH', isviçre:'CH',
+  isvec:'SE', isveç:'SE', danimarka:'DK', norvec:'NO', norveç:'NO', finlandiya:'FI',
+  avusturya:'AT', polonya:'PL', 'guney kore':'KR', 'güney kore':'KR', kore:'KR',
+  japonya:'JP', japan:'JP', cin:'CN', çin:'CN', 'hong kong':'HK', tayvan:'TW',
+  kanada:'CA', canada:'CA', avustralya:'AU', singapur:'SG',
+  'butun dunya':'GLOBAL', 'bütün dünya':'GLOBAL', dunya:'GLOBAL', dünya:'GLOBAL', global:'GLOBAL'
+};
+const VOICE_SECTOR_EXTRA={
+  teknoloji:'teknoloji', technology:'teknoloji', tech:'teknoloji',
+  yazilim:'yazilim', yazılım:'yazilim', software:'yazilim',
+  banka:'banka', bankalar:'banka', banks:'banka',
+  otomobil:'oto', oto:'oto', 'otomobil ureticileri':'oto',
+  ilac:'ilac', ilaç:'ilac', pharma:'ilac',
+  eticaret:'eticaret', 'e ticaret':'eticaret',
+  saglik:'saglik', sağlık:'saglik',
+  medya:'medya', sigorta:'sigorta',
+  yemek:'yemek', icecek:'yemek', içecek:'yemek',
+  yariiletken:'yariiletken', 'yari iletken':'yariiletken', 'yarı iletken':'yariiletken', semiconductor:'yariiletken',
+  finans:'finans', petrol:'petrol', yatirim:'yatirim', yatırım:'yatirim',
+  telekom:'telekom', perakende:'perakende', internet:'internet',
+  oyun:'oyun', 'video oyunu':'oyun', gaming:'oyun',
+  ai:'ai', 'yapay zeka':'ai', 'yapay zekâ':'ai'
+};
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
+let _voiceCcMap=null, _voiceSectMap=null;
 
 function getSpeechRecognition(){
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
@@ -376,27 +405,40 @@ function normalizeVoiceText(raw){
     .replace(/\s+/g,' ')
     .trim();
 }
-function parseVoicePage(raw){
-  let s=normalizeVoiceText(raw);
-  if(!s) return null;
-  s=s.replace(/\b(aç|ac|getir|git|gidelim|göster|goster|sekmesi|sekme|lütfen|lutfen)\b/g,' ')
-    .replace(/\s+/g,' ').trim();
-  if(!s) return null;
-  let best=null, bestLen=0;
-  for(const row of VOICE_PAGES){
-    for(const k of row.keys){
-      if(k.length>bestLen && (s===k || s.includes(k))){
-        best=row; bestLen=k.length;
-      }
-    }
-  }
-  return best; /* { page, label } veya null */
+function voiceWordHas(s, phrase){
+  if(!phrase) return false;
+  const esc=phrase.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  return new RegExp('(^|\\s)'+esc+'(\\s|$)').test(s);
 }
-function parseVoiceTicker(raw){
-  if(!raw) return '';
-  /* Sekme komutuysa hisse sanma */
-  if(parseVoicePage(raw)) return '';
-  let s=normalizeVoiceText(raw);
+function voiceCcMap(){
+  if(_voiceCcMap) return _voiceCcMap;
+  const m=Object.assign({}, VOICE_CC_EXTRA);
+  if(typeof ECON_COUNTRIES!=='undefined'){
+    ECON_COUNTRIES.forEach(([cc,name])=>{ m[normalizeVoiceText(name)]=cc; });
+  }
+  _voiceCcMap=m;
+  return m;
+}
+function voiceSectMap(){
+  if(_voiceSectMap) return _voiceSectMap;
+  const m=Object.assign({}, VOICE_SECTOR_EXTRA);
+  if(typeof SECT_SECTORS!=='undefined'){
+    SECT_SECTORS.forEach(([id,,name])=>{
+      m[normalizeVoiceText(name)]=id;
+      m[normalizeVoiceText(id)]=id;
+    });
+  }
+  _voiceSectMap=m;
+  return m;
+}
+function voiceLongestMatch(s, map){
+  let best=null, bestLen=0, bestKey='';
+  for(const [k,v] of Object.entries(map)){
+    if(k.length>bestLen && voiceWordHas(s,k)){ best=v; bestLen=k.length; bestKey=k; }
+  }
+  return best?{ value:best, key:bestKey, len:bestLen }:null;
+}
+function extractVoiceTicker(s){
   if(!s) return '';
   const joined=s.replace(/[\s.-]+/g,'');
   if(VOICE_ALIASES[joined]) return VOICE_ALIASES[joined];
@@ -410,12 +452,151 @@ function parseVoiceTicker(raw){
     const tok=w.toUpperCase().replace(/[^A-Z0-9.]/g,'');
     if(tok && /^[A-Z0-9]{1,6}(\.[A-Z]{1,3})?$/.test(tok)) return tok;
   }
-  /* Harf harf söylenmiş: "a m d" → AMD */
   if(parts.length>=2 && parts.length<=6 && parts.every(p=>/^[\p{L}]$/u.test(p))){
     const spelled=parts.map(p=>p.toLocaleUpperCase('en-US')).join('').replace(/[^A-Z0-9]/g,'');
     if(spelled.length>=1 && spelled.length<=6) return spelled;
   }
   return '';
+}
+function parseVoiceIntent(raw){
+  let s=normalizeVoiceText(raw);
+  if(!s) return null;
+  s=s.replace(/\b(aç|ac|getir|git|gidelim|göster|goster|sekmesi|sekme|lütfen|lutfen)\b/g,' ')
+    .replace(/\s+/g,' ').trim();
+  if(!s) return null;
+
+  let page=null, pageLabel='', pageKey='', pageLen=0;
+  for(const row of VOICE_PAGES){
+    for(const k of row.keys){
+      if(k.length>pageLen && (s===k || s.includes(k))){
+        page=row.page; pageLabel=row.label; pageKey=k; pageLen=k.length;
+      }
+    }
+  }
+  /* "sektör" tek başına da Sektör Devleri */
+  if(!page && (voiceWordHas(s,'sektör') || voiceWordHas(s,'sektor'))){
+    page='sect'; pageLabel='Sektör Devleri'; pageKey='sektör'; pageLen=6;
+  }
+
+  const ccHit=voiceLongestMatch(s, voiceCcMap());
+  const secHit=voiceLongestMatch(s, voiceSectMap());
+  const cc=ccHit?ccHit.value:null;
+  const sector=secHit?secHit.value:null;
+  const wantSort=/\bpiyasa\s*de[gğ]eri\b/.test(s) || /\bmarket\s*cap\b/.test(s)
+    || /\bs[ıi]rala\b/.test(s) || /\bs[ıi]ralama\b/.test(s);
+
+  let rest=s;
+  if(pageKey) rest=rest.split(pageKey).join(' ');
+  if(ccHit) rest=rest.split(ccHit.key).join(' ');
+  if(secHit) rest=rest.split(secHit.key).join(' ');
+  rest=rest.replace(/\bpiyasa\s*de[gğ]eri\b/g,' ').replace(/\bmarket\s*cap\b/g,' ')
+    .replace(/\bs[ıi]rala(ma)?\b/g,' ').replace(/\s+/g,' ').trim();
+  /* Yalnız kalan metinden hisse çıkar — tam cümleden çekmek "ABD"yi hisse sanır */
+  const sym=extractVoiceTicker(rest);
+
+  if(!page){
+    if(sector){ page='sect'; pageLabel='Sektör Devleri'; }
+    else if(cc && wantSort){ page='scan'; pageLabel='Hisse Tarayıcı'; }
+    else if(cc && /\btakvim\b/.test(s)){ page='econ'; pageLabel='Ekonomik Takvim'; }
+    else if(cc && /\bilk\s*(100|y[uü]z)\b/.test(s)){ page='top100'; pageLabel='İlk 100 Şirket'; }
+    else if(sym && /\b(arac[iı]\s*kurum|takas)\b/.test(s)){ page='takas'; pageLabel='Aracı Kurum Dağılımı'; }
+    else if(sym && /\b(hissex|hisse\s*x|stock\s*twits|stocktwits)\b/.test(s)){ page='st'; pageLabel='hisseX'; }
+    else if(sym) return { type:'search', sym, label:sym };
+    else return null;
+  }
+
+  /* Sayfa + bağlam: ülke/sektör/hisse/sıra */
+  if(page==='sect' && !sector && secHit) { /* already set */ }
+  if(page==='scan' && wantSort){ /* sort set below */ }
+  if((page==='takas'||page==='st') && !sym){
+    /* yalnız sekme adı söylendiyse sayfayı aç */
+  }
+
+  return {
+    type:'page', page, pageLabel,
+    cc: (cc==='GLOBAL' && page!=='sect') ? null : cc,
+    sector: page==='sect' ? sector : null,
+    sym: (page==='takas'||page==='st') ? sym : null,
+    sort: (page==='scan' && wantSort) ? 'mcap-desc' : (page==='scan' && cc ? 'mcap-desc' : null)
+  };
+}
+function runVoiceIntent(intent){
+  if(!intent) return '';
+  if(intent.type==='search'){
+    const inp=document.getElementById('homeTicker');
+    if(inp) inp.value=intent.sym;
+    homeSearch(intent.sym);
+    return 'Duyulan: <b>'+safeHTML(intent.sym)+'</b>';
+  }
+  const bits=[intent.pageLabel||intent.page];
+  switch(intent.page){
+    case 'econ':{
+      switchPage('econ');
+      if(intent.cc){
+        if(!ECON_PANELS[intent.cc]) toggleEconCountry(intent.cc);
+        const nm=(ECON_COUNTRIES.find(x=>x[0]===intent.cc)||[])[1]||intent.cc;
+        bits.unshift(nm);
+      }
+      break;
+    }
+    case 'top100':{
+      switchPage('top100');
+      if(intent.cc){
+        if(TOP100_OPEN!==intent.cc) toggleTopCountry(intent.cc);
+        const nm=(ECON_COUNTRIES.find(x=>x[0]===intent.cc)||[])[1]||intent.cc;
+        bits.unshift(nm);
+      }
+      break;
+    }
+    case 'sect':{
+      switchPage('sect');
+      const cc=intent.cc||'GLOBAL';
+      selectSectCountry(cc);
+      if(intent.sector){
+        if(SECT_OPEN!==intent.sector) toggleSectSector(intent.sector);
+        else loadSectPanel();
+        const sn=(SECT_SECTORS.find(x=>x[0]===intent.sector)||[])[2]||intent.sector;
+        bits.push(sn);
+      }
+      const nm=cc==='GLOBAL'?'Bütün Dünya':((ECON_COUNTRIES.find(x=>x[0]===cc)||[])[1]||cc);
+      bits.unshift(nm);
+      break;
+    }
+    case 'takas':{
+      switchPage('takas');
+      if(intent.sym){
+        const inp=document.getElementById('takasTicker');
+        if(inp) inp.value=intent.sym;
+        loadTakasAkd();
+        bits.unshift(intent.sym);
+      }
+      break;
+    }
+    case 'st':{
+      switchPage('st');
+      if(intent.sym){
+        const inp=document.getElementById('stTicker');
+        if(inp) inp.value=intent.sym;
+        loadStockTwits();
+        bits.unshift(intent.sym);
+      }
+      break;
+    }
+    case 'scan':{
+      switchPage('scan');
+      const sortEl=document.getElementById('scanSort');
+      if(sortEl && intent.sort) sortEl.value=intent.sort;
+      const cc=intent.cc||'TR';
+      selectScanCountry(cc);
+      const nm=(ECON_COUNTRIES.find(x=>x[0]===cc)||[])[1]||cc;
+      bits.unshift(nm);
+      if(intent.sort==='mcap-desc') bits.push('piyasa değeri ↓');
+      break;
+    }
+    default:
+      switchPage(intent.page);
+  }
+  return 'Açıldı: <b>'+safeHTML(bits.filter(Boolean).join(' · '))+'</b>';
 }
 function voiceTranscriptsFromEvent(ev){
   const out=[];
@@ -434,20 +615,10 @@ function voiceTranscriptsFromEvent(ev){
 }
 function handleHomeVoiceCommand(transcripts, st){
   for(const t of transcripts){
-    const pg=parseVoicePage(t);
-    if(pg){
-      switchPage(pg.page);
-      if(st){ st.style.color=''; st.innerHTML='🎙️ Sekme: <b>'+safeHTML(pg.label)+'</b>'; }
-      return true;
-    }
-  }
-  for(const t of transcripts){
-    const sym=parseVoiceTicker(t);
-    if(sym){
-      const inp=document.getElementById('homeTicker');
-      if(inp) inp.value=sym;
-      if(st){ st.style.color=''; st.innerHTML='🎙️ Duyulan: <b>'+safeHTML(sym)+'</b>'; }
-      homeSearch(sym);
+    const intent=parseVoiceIntent(t);
+    if(intent){
+      const msg=runVoiceIntent(intent);
+      if(st){ st.style.color=''; st.innerHTML='🎙️ '+msg; }
       return true;
     }
   }
@@ -491,7 +662,7 @@ function toggleHomeVoice(){
   _homeVoiceRec.onstart=()=>{
     if(epoch!==_homeVoiceEpoch) return;
     setHomeVoiceUi(true);
-    if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… hisse (AMD) veya sekme (tarayıcı, hisseX, takvim…)'; }
+    if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… örn. “ABD takvim”, “İngiltere ilk 100”, “AAPL hisseX”, “ASELSAN aracı kurum”'; }
   };
   _homeVoiceRec.onend=()=>{
     if(epoch===_homeVoiceEpoch) setHomeVoiceUi(false);
@@ -516,7 +687,7 @@ function toggleHomeVoice(){
     setHomeVoiceUi(false);
     if(epoch!==_homeVoiceEpoch) return;
     if(!handleHomeVoiceCommand(transcripts, st)){
-      if(st) st.textContent='Anlaşılamadı — örn. “NVDA”, “tarayıcı aç”, “hisseX”, “takvim”.';
+      if(st) st.textContent='Anlaşılamadı — örn. “ABD ekonomik takvim”, “Almanya teknoloji”, “Türkiye piyasa değeri sırala”.';
     }
   };
 
