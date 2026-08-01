@@ -426,6 +426,16 @@ const VOICE_SCAN_SORT_LABEL={
   'perf3m-desc':'3A getiri ↓', 'vol-asc':'Volatilite ↑', 'beta-asc':'Beta ↑',
   'ydf-desc':'YDF ↓', 'earn-asc':'Yaklaşan kazanç tarihi'
 };
+/* Hisse Tarayıcı piyasa değeri dilimleri (Mega/Large/Mid/Small/Micro/Tümü) */
+const VOICE_SCAN_CAP={
+  'mega cap':'mega', mega:'mega',
+  'large cap':'large', large:'large', buyuk:'large', büyük:'large',
+  'mid cap':'mid', mid:'mid', middle:'mid', orta:'mid',
+  'small cap':'small', small:'small', kucuk:'small', küçük:'small',
+  'micro cap':'micro', micro:'micro', mikro:'micro',
+  tumu:'all', tümü:'all', hepsi:'all', all:'all'
+};
+const VOICE_SCAN_CAP_LABEL={ all:'Tümü', mega:'Mega', large:'Large', mid:'Mid', small:'Small', micro:'Micro' };
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
 let _voiceCcMap=null, _voiceSectMap=null;
 
@@ -514,23 +524,26 @@ function parseVoiceIntent(raw){
   const ccHit=voiceLongestMatch(s, voiceCcMap());
   const secHit=voiceLongestMatch(s, voiceSectMap());
   const sortHit=voiceLongestMatch(s, VOICE_SCAN_SORT);
+  const capHit=voiceLongestMatch(s, VOICE_SCAN_CAP);
   const cc=ccHit?ccHit.value:null;
   const sector=secHit?secHit.value:null;
   const saidSirala=/\bs[ıi]rala\b/.test(s) || /\bs[ıi]ralama\b/.test(s);
   const wantSort=!!sortHit || saidSirala;
+  const wantScan=wantSort || !!capHit;
 
   let rest=s;
   if(pageKey) rest=rest.split(pageKey).join(' ');
   if(ccHit) rest=rest.split(ccHit.key).join(' ');
   if(secHit) rest=rest.split(secHit.key).join(' ');
   if(sortHit) rest=rest.split(sortHit.key).join(' ');
+  if(capHit) rest=rest.split(capHit.key).join(' ');
   rest=rest.replace(/\bs[ıi]rala(ma)?\b/g,' ').replace(/\s+/g,' ').trim();
   /* Yalnız kalan metinden hisse çıkar — tam cümleden çekmek "ABD"yi hisse sanır */
   const sym=extractVoiceTicker(rest);
 
   if(!page){
     if(sector){ page='sect'; pageLabel='Sektör Devleri'; }
-    else if(wantSort || (cc && saidSirala)){ page='scan'; pageLabel='Hisse Tarayıcı'; }
+    else if(wantScan || (cc && saidSirala)){ page='scan'; pageLabel='Hisse Tarayıcı'; }
     else if(cc && /\btakvim\b/.test(s)){ page='econ'; pageLabel='Ekonomik Takvim'; }
     else if(cc && /\bilk\s*(100|y[uü]z)\b/.test(s)){ page='top100'; pageLabel='İlk 100 Şirket'; }
     else if(sym && /\b(arac[iı]\s*kurum|takas)\b/.test(s)){ page='takas'; pageLabel='Aracı Kurum Dağılımı'; }
@@ -539,9 +552,10 @@ function parseVoiceIntent(raw){
     else return null;
   }
 
-  let sort=null;
+  let sort=null, cap=null;
   if(page==='scan'){
-    sort=sortHit ? sortHit.value : (wantSort || cc ? 'mcap-desc' : null);
+    sort=sortHit ? sortHit.value : (wantSort || cc || capHit ? 'mcap-desc' : null);
+    cap=capHit ? capHit.value : 'all';
   }
 
   return {
@@ -549,7 +563,7 @@ function parseVoiceIntent(raw){
     cc: (cc==='GLOBAL' && page!=='sect') ? null : cc,
     sector: page==='sect' ? sector : null,
     sym: (page==='takas'||page==='st') ? sym : null,
-    sort
+    sort, cap
   };
 }
 function runVoiceIntent(intent){
@@ -618,7 +632,9 @@ function runVoiceIntent(intent){
       switchPage('scan');
       const sortEl=document.getElementById('scanSort');
       const sortVal=intent.sort||'mcap-desc';
+      const capVal=intent.cap||'all';
       if(sortEl) sortEl.value=sortVal;
+      setScanCapsVoice(capVal);
       const cc=intent.cc||'TR';
       selectScanCountry(cc);
       /* YDF sırası TR dışı ülkede gizlenebilir — selectScanCountry sonrası tekrar yaz */
@@ -628,6 +644,7 @@ function runVoiceIntent(intent){
       }
       const nm=(ECON_COUNTRIES.find(x=>x[0]===cc)||[])[1]||cc;
       bits.unshift(nm);
+      if(capVal && capVal!=='all') bits.push(VOICE_SCAN_CAP_LABEL[capVal]||capVal);
       bits.push(VOICE_SCAN_SORT_LABEL[sortVal]||sortVal);
       break;
     }
@@ -3167,6 +3184,13 @@ function updateScanYdfUi(){
   }
 }
 function scanYdfMarket(){ return SCAN_CC==='TR' || SCAN_CC==='US'; }
+function setScanCapsVoice(cap){
+  const c=['mega','large','mid','small','micro','all'].includes(cap)?cap:'all';
+  SCAN_CAPS=new Set([c]);
+  document.querySelectorAll('#page-scan .scan-chip[data-cap]').forEach(b=>{
+    b.classList.toggle('active', b.dataset.cap===c);
+  });
+}
 function toggleScanCap(btn){
   const cap=btn.dataset.cap;
   if(cap==='all'){
