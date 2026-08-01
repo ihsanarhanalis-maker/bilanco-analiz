@@ -393,6 +393,39 @@ const VOICE_SECTOR_EXTRA={
   oyun:'oyun', 'video oyunu':'oyun', gaming:'oyun',
   ai:'ai', 'yapay zeka':'ai', 'yapay zekâ':'ai'
 };
+/* Hisse Tarayıcı #scanSort — tüm seçenekler (uzun anahtar önce) */
+const VOICE_SCAN_SORT={
+  'piyasa degeri artan':'mcap-asc', 'piyasa değeri artan':'mcap-asc',
+  'piyasa degeri azalan':'mcap-desc', 'piyasa değeri azalan':'mcap-desc',
+  'piyasa degeri yukselen':'mcap-asc', 'piyasa değeri yükselen':'mcap-asc',
+  'piyasa degeri dusen':'mcap-desc', 'piyasa değeri düşen':'mcap-desc',
+  'piyasa degeri':'mcap-desc', 'piyasa değeri':'mcap-desc', 'market cap':'mcap-desc',
+  'gunluk degisim':'chg-desc', 'günlük değişim':'chg-desc', 'gunluk degisiklik':'chg-desc',
+  'degisim':'chg-desc', 'değişim':'chg-desc', 'yuzde degisim':'chg-desc', 'yüzde değişim':'chg-desc',
+  'kod a z':'name-asc', 'kod az':'name-asc', 'isme gore':'name-asc', 'isme göre':'name-asc',
+  'alfabetik':'name-asc', 'a dan z':'name-asc', 'a z':'name-asc',
+  'f k artan':'pe-asc', 'fk artan':'pe-asc', 'f/k':'pe-asc', 'fk':'pe-asc', 'fiyat kazanc':'pe-asc', 'fiyat kazanç':'pe-asc',
+  'roe':'roe-desc', 'ozkaynak karliligi':'roe-desc', 'özkaynak karlılığı':'roe-desc',
+  'temettu':'div-desc', 'temettü':'div-desc', 'dividend':'div-desc',
+  'rsi artan':'rsi-asc', 'rsi yukselen':'rsi-asc', 'rsi yükselen':'rsi-asc',
+  'rsi azalan':'rsi-desc', 'rsi dusen':'rsi-desc', 'rsi düşen':'rsi-desc', 'rsi':'rsi-desc',
+  'quant skor':'quant-desc', 'quant':'quant-desc', 'kuant':'quant-desc',
+  '3a getiri':'perf3m-desc', '3 ay getiri':'perf3m-desc', 'uc ay getiri':'perf3m-desc', 'üç ay getiri':'perf3m-desc',
+  'getiri':'perf3m-desc', 'performans':'perf3m-desc',
+  'volatilite':'vol-asc', 'oynaklik':'vol-asc', 'oynaklık':'vol-asc',
+  'beta':'beta-asc',
+  'ydf':'ydf-desc', 'yabanci':'ydf-desc', 'yabancı':'ydf-desc',
+  'yaklasan kazanc':'earn-asc', 'yaklaşan kazanç':'earn-asc', 'kazanc tarihi':'earn-asc', 'kazanç tarihi':'earn-asc',
+  'bilanco tarihi':'earn-asc', 'bilanço tarihi':'earn-asc', 'earnings':'earn-asc'
+};
+const VOICE_SCAN_SORT_LABEL={
+  'mcap-desc':'Piyasa değeri ↓', 'mcap-asc':'Piyasa değeri ↑',
+  'chg-desc':'Günlük değişim ↓', 'name-asc':'Kod A→Z',
+  'pe-asc':'F/K ↑', 'roe-desc':'ROE ↓', 'div-desc':'Temettü ↓',
+  'rsi-desc':'RSI ↓', 'rsi-asc':'RSI ↑', 'quant-desc':'Quant skor ↓',
+  'perf3m-desc':'3A getiri ↓', 'vol-asc':'Volatilite ↑', 'beta-asc':'Beta ↑',
+  'ydf-desc':'YDF ↓', 'earn-asc':'Yaklaşan kazanç tarihi'
+};
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
 let _voiceCcMap=null, _voiceSectMap=null;
 
@@ -480,23 +513,24 @@ function parseVoiceIntent(raw){
 
   const ccHit=voiceLongestMatch(s, voiceCcMap());
   const secHit=voiceLongestMatch(s, voiceSectMap());
+  const sortHit=voiceLongestMatch(s, VOICE_SCAN_SORT);
   const cc=ccHit?ccHit.value:null;
   const sector=secHit?secHit.value:null;
-  const wantSort=/\bpiyasa\s*de[gğ]eri\b/.test(s) || /\bmarket\s*cap\b/.test(s)
-    || /\bs[ıi]rala\b/.test(s) || /\bs[ıi]ralama\b/.test(s);
+  const saidSirala=/\bs[ıi]rala\b/.test(s) || /\bs[ıi]ralama\b/.test(s);
+  const wantSort=!!sortHit || saidSirala;
 
   let rest=s;
   if(pageKey) rest=rest.split(pageKey).join(' ');
   if(ccHit) rest=rest.split(ccHit.key).join(' ');
   if(secHit) rest=rest.split(secHit.key).join(' ');
-  rest=rest.replace(/\bpiyasa\s*de[gğ]eri\b/g,' ').replace(/\bmarket\s*cap\b/g,' ')
-    .replace(/\bs[ıi]rala(ma)?\b/g,' ').replace(/\s+/g,' ').trim();
+  if(sortHit) rest=rest.split(sortHit.key).join(' ');
+  rest=rest.replace(/\bs[ıi]rala(ma)?\b/g,' ').replace(/\s+/g,' ').trim();
   /* Yalnız kalan metinden hisse çıkar — tam cümleden çekmek "ABD"yi hisse sanır */
   const sym=extractVoiceTicker(rest);
 
   if(!page){
     if(sector){ page='sect'; pageLabel='Sektör Devleri'; }
-    else if(cc && wantSort){ page='scan'; pageLabel='Hisse Tarayıcı'; }
+    else if(wantSort || (cc && saidSirala)){ page='scan'; pageLabel='Hisse Tarayıcı'; }
     else if(cc && /\btakvim\b/.test(s)){ page='econ'; pageLabel='Ekonomik Takvim'; }
     else if(cc && /\bilk\s*(100|y[uü]z)\b/.test(s)){ page='top100'; pageLabel='İlk 100 Şirket'; }
     else if(sym && /\b(arac[iı]\s*kurum|takas)\b/.test(s)){ page='takas'; pageLabel='Aracı Kurum Dağılımı'; }
@@ -505,11 +539,9 @@ function parseVoiceIntent(raw){
     else return null;
   }
 
-  /* Sayfa + bağlam: ülke/sektör/hisse/sıra */
-  if(page==='sect' && !sector && secHit) { /* already set */ }
-  if(page==='scan' && wantSort){ /* sort set below */ }
-  if((page==='takas'||page==='st') && !sym){
-    /* yalnız sekme adı söylendiyse sayfayı aç */
+  let sort=null;
+  if(page==='scan'){
+    sort=sortHit ? sortHit.value : (wantSort || cc ? 'mcap-desc' : null);
   }
 
   return {
@@ -517,7 +549,7 @@ function parseVoiceIntent(raw){
     cc: (cc==='GLOBAL' && page!=='sect') ? null : cc,
     sector: page==='sect' ? sector : null,
     sym: (page==='takas'||page==='st') ? sym : null,
-    sort: (page==='scan' && wantSort) ? 'mcap-desc' : (page==='scan' && cc ? 'mcap-desc' : null)
+    sort
   };
 }
 function runVoiceIntent(intent){
@@ -585,12 +617,18 @@ function runVoiceIntent(intent){
     case 'scan':{
       switchPage('scan');
       const sortEl=document.getElementById('scanSort');
-      if(sortEl && intent.sort) sortEl.value=intent.sort;
+      const sortVal=intent.sort||'mcap-desc';
+      if(sortEl) sortEl.value=sortVal;
       const cc=intent.cc||'TR';
       selectScanCountry(cc);
+      /* YDF sırası TR dışı ülkede gizlenebilir — selectScanCountry sonrası tekrar yaz */
+      if(sortEl && sortVal==='ydf-desc' && sortEl.querySelector('option[value="ydf-desc"]')){
+        sortEl.value='ydf-desc';
+        onScanSortChange();
+      }
       const nm=(ECON_COUNTRIES.find(x=>x[0]===cc)||[])[1]||cc;
       bits.unshift(nm);
-      if(intent.sort==='mcap-desc') bits.push('piyasa değeri ↓');
+      bits.push(VOICE_SCAN_SORT_LABEL[sortVal]||sortVal);
       break;
     }
     default:
