@@ -696,7 +696,7 @@
   <!-- ŞİRKET KARŞILAŞTIRMA -->
   <div class="card no-print" id="cmpCard">
     <h2>Şirket Karşılaştırma</h2>
-    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (farklı ülkeler karışık olabilir). Örnek: <b>AAPL, D05.SI, BHP.AX</b> veya <b>2330.TW, SHOP.TO</b>. Not: farklı para birimlerinde mutlak tutarları değil oranları (marj, ROE) karşılaştırın.</div>
+    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (farklı ülkeler karışık olabilir). Örnek: <b>AAPL, D05.SI, BHP.AX</b> veya <b>2330.TW, SHOP.TO</b>. Mikrofon: <b>AMD NVDA çeyreklik karşılaştır</b>, <b>AMD NVDA AMZN yıllık karşılaştır</b>. Not: farklı para birimlerinde mutlak tutarları değil oranları (marj, ROE) karşılaştırın.</div>
     <div class="toolbar" style="align-items:center">
       <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
       <select id="cmpPeriod" class="cell" style="width:auto">
@@ -1117,7 +1117,7 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="app.js?v=142"></script>
+<script src="app.js?v=143"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

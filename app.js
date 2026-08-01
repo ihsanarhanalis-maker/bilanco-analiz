@@ -604,12 +604,62 @@ function extractVoiceTicker(s){
   }
   return '';
 }
+/* Birden fazla hisse kodu (karşılaştırma) */
+function extractVoiceTickersAll(s){
+  if(!s) return [];
+  const out=[], seen=new Set();
+  const add=t=>{
+    const u=String(t||'').toUpperCase();
+    if(!u||seen.has(u)) return;
+    seen.add(u); out.push(u);
+  };
+  const parts=String(s).split(/[\s,;]+/).filter(w=>w && !VOICE_FILLER.test(w));
+  for(const w of parts){
+    const key=w.replace(/[.-]/g,'');
+    if(VOICE_ALIASES[key]||VOICE_ALIASES[w]){ add(VOICE_ALIASES[key]||VOICE_ALIASES[w]); continue; }
+    const tok=w.toUpperCase().replace(/[^A-Z0-9.]/g,'');
+    if(tok && /^[A-Z0-9]{1,6}(\.[A-Z]{1,3})?$/.test(tok)) add(tok);
+  }
+  return out;
+}
+/* "AMD NVDA çeyreklik karşılaştır" / "AMD NVDA AMZN yıllık karşılaştır" */
+function parseVoiceCompare(s){
+  if(!/\b(kar[sş][ıi]la[sş]t[ıi]r(?:ma)?|compare|k[ıi]yasla)\b/.test(s)) return null;
+  /* "sektör karşılaştırması" kartı — fiil değil, dokunma */
+  if(/\bsekt[oö]r\b/.test(s) && !/\b(kar[sş][ıi]la[sş]t[ıi]r|compare|k[ıi]yasla)\b/.test(s)) return null;
+  let mode=null;
+  if(/\b(y[ıi]ll[ıi]k|annual)\b/.test(s)) mode='annual';
+  else if(/\b([cç]eyreklik|quarter(?:ly)?)\b/.test(s)) mode='quarter';
+  const rest=s
+    .replace(/\b(kar[sş][ıi]la[sş]t[ıi]r(?:ma)?|compare|k[ıi]yasla)\b/g,' ')
+    .replace(/\b(y[ıi]ll[ıi]k|annual|[cç]eyreklik|quarter(?:ly)?)\b/g,' ')
+    .replace(/\b([sş]irket)\b/g,' ')
+    .replace(/\s+/g,' ').trim();
+  const syms=extractVoiceTickersAll(rest).slice(0,4);
+  if(syms.length<2) return null;
+  return { type:'compare', syms, mode: mode||'annual' };
+}
+function runVoiceCompare(intent){
+  switchPage('stock');
+  const inp=document.getElementById('cmpTickers');
+  const per=document.getElementById('cmpPeriod');
+  if(inp) inp.value=intent.syms.join(', ');
+  if(per) per.value=intent.mode==='quarter'?'quarter':'annual';
+  scrollVoiceStockCard({ id:'cmpCard', label:'Şirket Karşılaştırma' });
+  compareTickers();
+  const modeLbl=intent.mode==='quarter'?'Çeyreklik':'Yıllık';
+  return 'Karşılaştır: <b>'+safeHTML(intent.syms.join(', '))+'</b> · '+modeLbl;
+}
 function parseVoiceIntent(raw){
   let s=normalizeVoiceText(raw);
   if(!s) return null;
   s=s.replace(/\b(aç|ac|getir|git|gidelim|göster|goster|sekmesi|sekme|lütfen|lutfen|kart|karta)\b/g,' ')
     .replace(/\s+/g,' ').trim();
   if(!s) return null;
+
+  /* "AMD NVDA çeyreklik karşılaştır" — kart/sekmeden önce */
+  const cmpIntent=parseVoiceCompare(s);
+  if(cmpIntent) return cmpIntent;
 
   /* "AMD kazançlar" / "AMD özet" — hisse + kart (sekme/ülke eşlemesinden önce) */
   const cardHit=matchVoiceStockCard(s);
@@ -689,6 +739,9 @@ function parseVoiceIntent(raw){
 }
 function runVoiceIntent(intent){
   if(!intent) return '';
+  if(intent.type==='compare'){
+    return runVoiceCompare(intent);
+  }
   if(intent.type==='card'){
     if(intent.sym){
       const want=String(intent.sym).toUpperCase();
@@ -872,8 +925,8 @@ function toggleHomeVoice(){
     if(st){
       st.style.color='';
       st.textContent=onStock
-        ?'🎙️ Dinleniyor… örn. “AMD kazançlar”, “AMD özet”, “AMD fiyat grafiği”'
-        :'🎙️ Dinleniyor… örn. “AMD kazançlar”, “ABD takvim”, “AAPL hisseX”';
+        ?'🎙️ Dinleniyor… örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”'
+        :'🎙️ Dinleniyor… örn. “AMD NVDA yıllık karşılaştır”, “AMD kazançlar”';
     }
   };
   _homeVoiceRec.onend=()=>{
@@ -900,8 +953,8 @@ function toggleHomeVoice(){
     if(epoch!==_homeVoiceEpoch) return;
     if(!handleHomeVoiceCommand(transcripts, st)){
       if(st) st.textContent=onStock
-        ?'Anlaşılamadı — örn. “AMD kazançlar”, “AMD özet”, “AMD analist hedef fiyatları”.'
-        :'Anlaşılamadı — örn. “AMD kazançlar”, “ABD ekonomik takvim”, “Türkiye piyasa değeri sırala”.';
+        ?'Anlaşılamadı — örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”.'
+        :'Anlaşılamadı — örn. “AMD NVDA AMZN yıllık karşılaştır”, “AMD kazançlar”.';
     }
   };
 
