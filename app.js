@@ -361,9 +361,74 @@ const VOICE_PAGES=[
   { page:'sect', label:'Sektör Devleri', keys:['sektör devleri','sektor devleri','sektörler','sektorler'] },
   { page:'takas', label:'Aracı Kurum Dağılımı', keys:['aracı kurum dağılımı','araci kurum dagilimi','aracı kurum','araci kurum','takas'] },
   { page:'etf', label:'ETF', keys:['etf','e t f'] },
-  { page:'wnews', label:'Dünya Haberleri', keys:['dünya haberleri','dunya haberleri','haberler','world news'] },
+  { page:'wnews', label:'Dünya Haberleri', keys:['dünya haberleri','dunya haberleri','world news'] },
   { page:'st', label:'hisseX', keys:['hissex','hisse x','hisse iks','stocktwits','stock twits'] }
 ];
+/* Bilanço Analizi kartları — "AMD kazançlar", "AMD özet" → hisse + karta kaydır */
+const VOICE_STOCK_CARDS=[
+  { id:'inputDataCard', label:'Bilanço Verisi', keys:['bilanço verisi','bilanco verisi'] },
+  { id:'summaryCard', label:'Özet', keys:['özet','ozet'] },
+  { id:'valCard', label:'Değerleme Oranları', keys:['değerleme oranları','degerleme oranlari','değerleme','degerleme'] },
+  { id:'ydfCard', label:'Yedekler & YDF', keys:['yedekler ve ydf','yedekler ydf','yedekler','ydf'] },
+  { id:'chartCard', label:'Fiyat Grafiği', keys:['fiyat grafiği','fiyat grafigi','fiyat grafik','grafik'] },
+  { id:'earnCard', label:'Kazançlar', keys:['kazançlar','kazanclar','kazanç','kazanc'] },
+  { id:'ownerCard', label:'Ortaklık Yapısı', keys:['ortaklık yapısı','ortaklik yapisi','ortaklık','ortaklik'] },
+  { id:'techCard', label:'Teknik Görünüm', keys:['teknik görünüm','teknik gorunum','teknik analiz','teknik'] },
+  { id:'incomeCard', label:'Gelir Tablosu', keys:['gelir tablosu','gelir'] },
+  { id:'cashCard', label:'Nakit Akışı', keys:['nakit akışı','nakit akisi','nakit'] },
+  { id:'trendCard', label:'Çok Yıllı Trend', keys:['çok yıllı trend','cok yilli trend','çok yılı trend','cok yili trend','çok yıllı','cok yilli','çok yılı','cok yili','yıllı trend','yilli trend'] },
+  { id:'newsCard', label:'Güncel Haberler', keys:['güncel haberler','guncel haberler','haberler'] },
+  { id:'kapCard', label:'KAP Bildirimleri', keys:['kap bildirimleri','kap'] },
+  { id:'targetCard', label:'Analist Hedef Fiyatları', keys:['analist hedef fiyatları','analist hedef fiyatlari','analist hedefleri','hedef fiyatları','hedef fiyatlari','analist'] },
+  { id:'sectorCard', label:'Sektör Karşılaştırması', keys:['sektör karşılaştırması','sektor karsilastirmasi','sektör karşılaştırma','sektor karsilastirma'] },
+  { id:'insiderCard', label:'İçeriden Alım-Satım', keys:['içeriden alım satım','iceriden alim satim','içeriden alım-satım','iceriden alim-satim','içeriden','iceriden'] },
+  { id:'ratiosCard', label:'Finansal Oranlar', keys:['finansal oranlar','oranlar'] },
+  { id:'healthCard', label:'Sağlık Karnesi', keys:['sağlık karnesi','saglik karnesi'] },
+  { id:'varianceCard', label:'Önemli Değişimler', keys:['önemli değişimler','onemli degisimler'] },
+  { id:'verticalCard', label:'Dikey Analiz', keys:['dikey analiz'] },
+  { id:'flagsCard', label:'Otomatik Yorum', keys:['otomatik yorum','risk işaretleri','risk isaretleri'] }
+];
+let _voicePendingCard=null;
+function voiceOnStockPage(){
+  return !!document.getElementById('page-stock')?.classList.contains('active');
+}
+function matchVoiceStockCard(s){
+  let best=null, bestLen=0, bestKey='';
+  for(const card of VOICE_STOCK_CARDS){
+    for(const k of card.keys){
+      if(k.length>bestLen && (s===k || voiceWordHas(s,k))){
+        best=card; bestLen=k.length; bestKey=k;
+      }
+    }
+  }
+  return best?{ id:best.id, label:best.label, key:bestKey }:null;
+}
+function scrollVoiceStockCard(card){
+  const wasStock=voiceOnStockPage();
+  if(!wasStock) switchPage('stock');
+  const el=document.getElementById(card.id);
+  if(!el) return 'Kart bulunamadı';
+  const go=()=>{
+    el.scrollIntoView({ behavior:'smooth', block:'start' });
+    el.classList.add('voice-card-flash');
+    setTimeout(()=>el.classList.remove('voice-card-flash'), 1800);
+  };
+  /* switchPage tepeye kaydırır — kart scroll'unu sonra yap */
+  setTimeout(go, wasStock ? 40 : 320);
+  const hidden=el.classList.contains('hidden');
+  return 'Kart: <b>'+safeHTML(card.label)+'</b>'+(hidden?' <span style="opacity:.75">(analiz yüklenince görünür)</span>':'');
+}
+function flushVoicePendingCard(sym){
+  const p=_voicePendingCard;
+  if(!p) return;
+  if(p.sym && sym && String(sym).toUpperCase()!==String(p.sym).toUpperCase()) return;
+  _voicePendingCard=null;
+  setTimeout(()=>{
+    scrollVoiceStockCard(p);
+    const st=voiceStatusEl();
+    if(st) st.innerHTML='🎙️ <b>'+safeHTML(p.sym||'')+'</b> · Kart: <b>'+safeHTML(p.label)+'</b>';
+  }, 220);
+}
 const VOICE_CC_EXTRA={
   abd:'US', amerika:'US', 'amerika birleşik devletleri':'US', 'amerika birlesik devletleri':'US', usa:'US', us:'US',
   ingiltere:'GB', uk:'GB', britain:'GB', 'birleşik krallık':'GB', 'birlesik krallik':'GB',
@@ -542,9 +607,18 @@ function extractVoiceTicker(s){
 function parseVoiceIntent(raw){
   let s=normalizeVoiceText(raw);
   if(!s) return null;
-  s=s.replace(/\b(aç|ac|getir|git|gidelim|göster|goster|sekmesi|sekme|lütfen|lutfen)\b/g,' ')
+  s=s.replace(/\b(aç|ac|getir|git|gidelim|göster|goster|sekmesi|sekme|lütfen|lutfen|kart|karta)\b/g,' ')
     .replace(/\s+/g,' ').trim();
   if(!s) return null;
+
+  /* "AMD kazançlar" / "AMD özet" — hisse + kart (sekme/ülke eşlemesinden önce) */
+  const cardHit=matchVoiceStockCard(s);
+  if(cardHit){
+    const rest=s.split(cardHit.key).join(' ').replace(/\s+/g,' ').trim();
+    const cardSym=extractVoiceTicker(rest);
+    if(cardSym) return { type:'card', id:cardHit.id, label:cardHit.label, sym:cardSym };
+    if(voiceOnStockPage()) return { type:'card', id:cardHit.id, label:cardHit.label };
+  }
 
   let page=null, pageLabel='', pageKey='', pageLen=0;
   for(const row of VOICE_PAGES){
@@ -615,6 +689,23 @@ function parseVoiceIntent(raw){
 }
 function runVoiceIntent(intent){
   if(!intent) return '';
+  if(intent.type==='card'){
+    if(intent.sym){
+      const want=String(intent.sym).toUpperCase();
+      const results=document.getElementById('results');
+      const same=FIN && String(FIN.ticker).toUpperCase()===want
+        && results && !results.classList.contains('hidden');
+      if(same){
+        return '<b>'+safeHTML(want)+'</b> · '+scrollVoiceStockCard(intent);
+      }
+      _voicePendingCard={ id:intent.id, label:intent.label, sym:want };
+      const inp=document.getElementById('homeTicker');
+      if(inp) inp.value=want;
+      homeSearch(want);
+      return 'Duyulan: <b>'+safeHTML(want)+'</b> · <b>'+safeHTML(intent.label)+'</b>';
+    }
+    return scrollVoiceStockCard(intent);
+  }
   if(intent.type==='search'){
     const inp=document.getElementById('homeTicker');
     if(inp) inp.value=intent.sym;
@@ -732,13 +823,21 @@ function handleHomeVoiceCommand(transcripts, st){
   }
   return false;
 }
+function voiceStatusEl(){
+  if(voiceOnStockPage()){
+    return document.getElementById('fetchStatus')||document.getElementById('homeSearchStatus');
+  }
+  return document.getElementById('homeSearchStatus')||document.getElementById('fetchStatus');
+}
 function setHomeVoiceUi(on){
   _homeVoiceOn=!!on;
-  const btn=document.getElementById('homeVoiceBtn');
-  if(!btn) return;
-  btn.classList.toggle('listening', _homeVoiceOn);
-  btn.title=_homeVoiceOn?'Dinleniyor… durdur':'Sesli komut (hisse veya sekme)';
-  btn.setAttribute('aria-pressed', _homeVoiceOn?'true':'false');
+  document.querySelectorAll('.voice-mic').forEach(btn=>{
+    btn.classList.toggle('listening', _homeVoiceOn);
+    const stock=btn.id==='stockVoiceBtn';
+    btn.title=_homeVoiceOn?'Dinleniyor… durdur'
+      :(stock?'Sesli komut — örn. AMD kazançlar':'Sesli komut (hisse, kart veya sekme)');
+    btn.setAttribute('aria-pressed', _homeVoiceOn?'true':'false');
+  });
 }
 function stopHomeVoice(){
   _homeVoiceEpoch++; /* gecikmiş onresult bu oturuma ait sayılmasın */
@@ -750,8 +849,7 @@ function stopHomeVoice(){
 }
 function toggleHomeVoice(){
   const SR=getSpeechRecognition();
-  const btn=document.getElementById('homeVoiceBtn');
-  const st=document.getElementById('homeSearchStatus');
+  const st=voiceStatusEl();
   if(!SR){
     if(st) st.textContent='Bu tarayıcı sesli aramayı desteklemiyor.';
     return;
@@ -761,6 +859,7 @@ function toggleHomeVoice(){
   /* Önceki arama / eski ses sonucu yarışmasın */
   REQ_GEN++;
   const epoch=++_homeVoiceEpoch;
+  const onStock=voiceOnStockPage();
   try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
   _homeVoiceRec=new SR();
   _homeVoiceRec.lang='tr-TR';
@@ -770,7 +869,12 @@ function toggleHomeVoice(){
   _homeVoiceRec.onstart=()=>{
     if(epoch!==_homeVoiceEpoch) return;
     setHomeVoiceUi(true);
-    if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… örn. “ABD takvim”, “İngiltere ilk 100”, “AAPL hisseX”, “ASELSAN aracı kurum”'; }
+    if(st){
+      st.style.color='';
+      st.textContent=onStock
+        ?'🎙️ Dinleniyor… örn. “AMD kazançlar”, “AMD özet”, “AMD fiyat grafiği”'
+        :'🎙️ Dinleniyor… örn. “AMD kazançlar”, “ABD takvim”, “AAPL hisseX”';
+    }
   };
   _homeVoiceRec.onend=()=>{
     if(epoch===_homeVoiceEpoch) setHomeVoiceUi(false);
@@ -795,7 +899,9 @@ function toggleHomeVoice(){
     setHomeVoiceUi(false);
     if(epoch!==_homeVoiceEpoch) return;
     if(!handleHomeVoiceCommand(transcripts, st)){
-      if(st) st.textContent='Anlaşılamadı — örn. “ABD ekonomik takvim”, “Almanya teknoloji”, “Türkiye piyasa değeri sırala”.';
+      if(st) st.textContent=onStock
+        ?'Anlaşılamadı — örn. “AMD kazançlar”, “AMD özet”, “AMD analist hedef fiyatları”.'
+        :'Anlaşılamadı — örn. “AMD kazançlar”, “ABD ekonomik takvim”, “Türkiye piyasa değeri sırala”.';
     }
   };
 
@@ -810,15 +916,15 @@ function toggleHomeVoice(){
       }
     }, 140);
   }
-  if(btn) btn.focus({preventScroll:true});
 }
 function initHomeVoice(){
-  const btn=document.getElementById('homeVoiceBtn');
-  if(!btn) return;
-  if(!getSpeechRecognition()){
-    btn.hidden=true;
-    btn.title='Bu tarayıcı sesli aramayı desteklemiyor';
-  }
+  const ok=!!getSpeechRecognition();
+  document.querySelectorAll('.voice-mic').forEach(btn=>{
+    if(!ok){
+      btn.hidden=true;
+      btn.title='Bu tarayıcı sesli aramayı desteklemiyor';
+    }
+  });
 }
 window.toggleHomeVoice=toggleHomeVoice;
 
@@ -847,6 +953,7 @@ async function homeSearch(forcedSym){
     const { cands }=await detectBareMarkets(sym);
     if(myGen!==REQ_GEN) return;
     if(!cands.length){
+      _voicePendingCard=null;
       if(st) st.innerHTML='✕ <b>'+safeHTML(sym)+'</b> hiçbir borsada bulunamadı.';
       return;
     }
@@ -4917,6 +5024,7 @@ function analyze(myGen){
       pn.textContent='';
     }
   }
+  flushVoicePendingCard(FIN && FIN.ticker);
 }
 
 /* ---------- Dışa aktarma: PDF (yazdır) & Excel (CSV) ---------- */
