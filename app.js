@@ -343,7 +343,7 @@ const VOICE_ALIASES={
   koc:'KCHOL', kchol:'KCHOL',
   samsung:'005930'
 };
-let _homeVoiceRec=null, _homeVoiceOn=false;
+let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
 
 function getSpeechRecognition(){
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
@@ -369,7 +369,7 @@ function parseVoiceTicker(raw){
   }
   /* Harf harf söylenmiş: "a m d" → AMD */
   if(parts.length>=2 && parts.length<=6 && parts.every(p=>/^[\p{L}]$/u.test(p))){
-    const spelled=parts.map(p=>p.toLocaleUpperCase('tr-TR')).join('').replace(/[^A-Z0-9]/g,'');
+    const spelled=parts.map(p=>p.toLocaleUpperCase('en-US')).join('').replace(/[^A-Z0-9]/g,'');
     if(spelled.length>=1 && spelled.length<=6) return spelled;
   }
   return '';
@@ -383,7 +383,11 @@ function setHomeVoiceUi(on){
   btn.setAttribute('aria-pressed', _homeVoiceOn?'true':'false');
 }
 function stopHomeVoice(){
-  try{ _homeVoiceRec&&_homeVoiceRec.stop(); }catch(_e){}
+  _homeVoiceEpoch++; /* gecikmiş onresult bu oturuma ait sayılmasın */
+  try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){
+    try{ _homeVoiceRec&&_homeVoiceRec.stop(); }catch(_e2){}
+  }
+  _homeVoiceRec=null;
   setHomeVoiceUi(false);
 }
 function toggleHomeVoice(){
@@ -395,64 +399,75 @@ function toggleHomeVoice(){
     return;
   }
   if(_homeVoiceOn){ stopHomeVoice(); return; }
-  if(!_homeVoiceRec){
-    _homeVoiceRec=new SR();
-    _homeVoiceRec.lang='tr-TR';
-    _homeVoiceRec.interimResults=false;
-    _homeVoiceRec.maxAlternatives=3;
-    _homeVoiceRec.continuous=false;
-    _homeVoiceRec.onstart=()=>{
-      setHomeVoiceUi(true);
-      if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… hisse kodu veya adını söyleyin.'; }
-    };
-    _homeVoiceRec.onend=()=> setHomeVoiceUi(false);
-    _homeVoiceRec.onerror=e=>{
-      setHomeVoiceUi(false);
-      if(!st) return;
-      const err=e&&e.error;
-      if(err==='not-allowed'||err==='service-not-allowed')
-        st.textContent='Mikrofon izni gerekli — tarayıcı ayarlarından izin verin.';
-      else if(err==='no-speech')
-        st.textContent='Ses algılanamadı — tekrar deneyin.';
-      else if(err==='aborted')
-        st.textContent='';
-      else
-        st.textContent='Sesli arama hatası — tekrar deneyin.';
-    };
-    _homeVoiceRec.onresult=ev=>{
-      let best='';
-      try{
-        const res=ev.results&&ev.results[ev.results.length-1];
-        if(res){
-          for(let i=0;i<res.length;i++){
-            const alt=(res[i]&&res[i].transcript)||'';
-            const sym=parseVoiceTicker(alt);
-            if(sym){ best=sym; break; }
-            if(!best && alt) best=parseVoiceTicker(alt) || '';
-          }
-          if(!best && res[0]) best=parseVoiceTicker(res[0].transcript);
+
+  /* Önceki arama / eski ses sonucu yarışmasın */
+  REQ_GEN++;
+  const epoch=++_homeVoiceEpoch;
+  try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
+  _homeVoiceRec=new SR();
+  _homeVoiceRec.lang='tr-TR';
+  _homeVoiceRec.interimResults=false;
+  _homeVoiceRec.maxAlternatives=5;
+  _homeVoiceRec.continuous=false;
+  _homeVoiceRec.onstart=()=>{
+    if(epoch!==_homeVoiceEpoch) return;
+    setHomeVoiceUi(true);
+    if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… hisse kodu veya adını söyleyin.'; }
+  };
+  _homeVoiceRec.onend=()=>{
+    if(epoch===_homeVoiceEpoch) setHomeVoiceUi(false);
+  };
+  _homeVoiceRec.onerror=e=>{
+    if(epoch!==_homeVoiceEpoch) return;
+    setHomeVoiceUi(false);
+    if(!st) return;
+    const err=e&&e.error;
+    if(err==='not-allowed'||err==='service-not-allowed')
+      st.textContent='Mikrofon izni gerekli — tarayıcı ayarlarından izin verin.';
+    else if(err==='no-speech')
+      st.textContent='Ses algılanamadı — tekrar deneyin.';
+    else if(err==='aborted')
+      st.textContent='';
+    else
+      st.textContent='Sesli arama hatası — tekrar deneyin.';
+  };
+  _homeVoiceRec.onresult=ev=>{
+    if(epoch!==_homeVoiceEpoch) return; /* eski dinleme sonucu */
+    let best='';
+    try{
+      const ri=(typeof ev.resultIndex==='number')?ev.resultIndex:0;
+      for(let r=ri;r<ev.results.length;r++){
+        const res=ev.results[r];
+        if(!res||res.isFinal===false) continue;
+        for(let i=0;i<res.length;i++){
+          const sym=parseVoiceTicker((res[i]&&res[i].transcript)||'');
+          if(sym){ best=sym; break; }
         }
-      }catch(_e){}
-      setHomeVoiceUi(false);
-      if(!best){
-        if(st) st.textContent='Anlaşılamadı — örn. “NVDA” veya “Apple” deyin.';
-        return;
+        if(best) break;
       }
-      const inp=document.getElementById('homeTicker');
-      if(inp) inp.value=best;
-      if(st){ st.style.color=''; st.innerHTML='🎙️ Duyulan: <b>'+safeHTML(best)+'</b>'; }
-      homeSearch();
-    };
-  }
+    }catch(_e){}
+    setHomeVoiceUi(false);
+    if(epoch!==_homeVoiceEpoch) return;
+    if(!best){
+      if(st) st.textContent='Anlaşılamadı — örn. “NVDA” veya “Apple” deyin.';
+      return;
+    }
+    const inp=document.getElementById('homeTicker');
+    if(inp) inp.value=best;
+    if(st){ st.style.color=''; st.innerHTML='🎙️ Duyulan: <b>'+safeHTML(best)+'</b>'; }
+    homeSearch(best); /* input’taki eski koda güvenme */
+  };
+
   try{
     _homeVoiceRec.start();
   }catch(_e){
-    /* zaten çalışıyorsa yeniden başlat */
-    try{ _homeVoiceRec.stop(); }catch(_e2){}
-    setTimeout(()=>{ try{ _homeVoiceRec.start(); }catch(_e3){
-      if(st) st.textContent='Mikrofon başlatılamadı.';
-      setHomeVoiceUi(false);
-    }; }, 120);
+    setTimeout(()=>{
+      if(epoch!==_homeVoiceEpoch) return;
+      try{ _homeVoiceRec.start(); }catch(_e3){
+        if(st) st.textContent='Mikrofon başlatılamadı.';
+        setHomeVoiceUi(false);
+      }
+    }, 140);
   }
   if(btn) btn.focus({preventScroll:true});
 }
@@ -466,13 +481,20 @@ function initHomeVoice(){
 }
 window.toggleHomeVoice=toggleHomeVoice;
 
-/* Ana sayfa: kod ara → ülkeyi bul → o borsanın Bugünün Fırsatları’nı göster (önceden gizli) */
-async function homeSearch(){
-  const v=(document.getElementById('homeTicker').value||'').trim();
+/* Ana sayfa: kod ara → ülkeyi bul → o borsanın Bugünün Fırsatları’nı göster (önceden gizli)
+   forcedSym: sesli aramada duyulan kod (input’taki eski değere güvenilmez) */
+async function homeSearch(forcedSym){
+  const v=(forcedSym!=null&&forcedSym!==''
+    ? String(forcedSym)
+    : (document.getElementById('homeTicker').value||'')).trim();
   const st=document.getElementById('homeSearchStatus');
   if(!v){ if(st) st.textContent='Bir hisse kodu yaz.'; return; }
   document.getElementById('periodType').value=document.getElementById('homePeriod').value;
   const sym=v.toUpperCase().trim();
+  const inp=document.getElementById('homeTicker');
+  if(inp) inp.value=sym;
+  /* Her aramada nesil artır — önceki detect/fetch sonucu yeni kodu ezmesin */
+  const myGen=++REQ_GEN;
   if(st){ st.style.color=''; st.innerHTML='⏳ <b>'+safeHTML(sym)+'</b> aranıyor…'; }
 
   let pickCode=null, cc=null;
@@ -481,7 +503,6 @@ async function homeSearch(){
     pickCode=sym;
     cc=discCcFromCode(sym);
   }else{
-    const myGen=++REQ_GEN;
     const { cands }=await detectBareMarkets(sym);
     if(myGen!==REQ_GEN) return;
     if(!cands.length){
@@ -493,6 +514,7 @@ async function homeSearch(){
     cc=discCcFromPick(pick);
   }
 
+  if(myGen!==REQ_GEN) return;
   if(!cc || !TOP100_MARKETS[cc]){
     if(st) st.innerHTML='✕ Bu kod için ülke eşlemesi yapılamadı.';
     return;
