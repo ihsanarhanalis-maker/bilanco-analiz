@@ -331,8 +331,8 @@ function discCcFromPick(pick){
   return discCcFromCode(pick.code);
 }
 
-/* ---------- Ana sayfa sesli hisse arama (Web Speech API, bas-konuş) ---------- */
-const VOICE_FILLER=/^(aç|getir|ara|hisse|bak|göster|lütfen|bir|tane|kodu|hissesini|hissesi|analiz|et|yap|için)$/i;
+/* ---------- Ana sayfa sesli komut (hisse ara + sekme aç; Web Speech API, bas-konuş) ---------- */
+const VOICE_FILLER=/^(aç|ac|getir|ara|hisse|bak|göster|goster|lütfen|lutfen|bir|tane|kodu|hissesini|hissesi|analiz|et|yap|için|icin|sekme|sekmesi|git|gidelim)$/i;
 const VOICE_ALIASES={
   apple:'AAPL', aapl:'AAPL',
   nvidia:'NVDA', nvda:'NVDA',
@@ -352,17 +352,51 @@ const VOICE_ALIASES={
   koc:'KCHOL', kchol:'KCHOL',
   samsung:'005930'
 };
+/* Uzun anahtar önce eşleşsin diye keys uzunluğa göre taranır */
+const VOICE_PAGES=[
+  { page:'home', label:'Ana Sayfa', keys:['ana sayfa','anasayfa','home','giriş','giris','başlangıç','baslangic'] },
+  { page:'stock', label:'Bilanço Analizi', keys:['bilanço analizi','bilanco analizi','bilanço','bilanco','mali tablo'] },
+  { page:'econ', label:'Ekonomik Takvim', keys:['ekonomik takvim','ekonomi takvimi','ekonomi takvim','takvim'] },
+  { page:'top100', label:'İlk 100 Şirket', keys:['ilk 100 şirket','ilk yüz şirket','ilk 100','ilk yüz','top 100','top100'] },
+  { page:'scan', label:'Hisse Tarayıcı', keys:['hisse tarayıcı','hisse tarayici','tarayıcı','tarayici','scanner','scan'] },
+  { page:'sect', label:'Sektör Devleri', keys:['sektör devleri','sektor devleri','sektörler','sektorler','sektör','sektor'] },
+  { page:'takas', label:'Aracı Kurum Dağılımı', keys:['aracı kurum dağılımı','araci kurum dagilimi','aracı kurum','araci kurum','takas'] },
+  { page:'etf', label:'ETF', keys:['etf','e t f'] },
+  { page:'wnews', label:'Dünya Haberleri', keys:['dünya haberleri','dunya haberleri','haberler','world news'] },
+  { page:'st', label:'hisseX', keys:['hissex','hisse x','hisse iks','stocktwits','stock twits'] }
+];
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
 
 function getSpeechRecognition(){
   return window.SpeechRecognition||window.webkitSpeechRecognition||null;
 }
-function parseVoiceTicker(raw){
-  if(!raw) return '';
-  let s=String(raw).toLowerCase()
+function normalizeVoiceText(raw){
+  return String(raw||'').toLowerCase()
     .replace(/[^\p{L}\p{N}.\s-]/gu,' ')
     .replace(/\s+/g,' ')
     .trim();
+}
+function parseVoicePage(raw){
+  let s=normalizeVoiceText(raw);
+  if(!s) return null;
+  s=s.replace(/\b(aç|ac|getir|git|gidelim|göster|goster|sekmesi|sekme|lütfen|lutfen)\b/g,' ')
+    .replace(/\s+/g,' ').trim();
+  if(!s) return null;
+  let best=null, bestLen=0;
+  for(const row of VOICE_PAGES){
+    for(const k of row.keys){
+      if(k.length>bestLen && (s===k || s.includes(k))){
+        best=row; bestLen=k.length;
+      }
+    }
+  }
+  return best; /* { page, label } veya null */
+}
+function parseVoiceTicker(raw){
+  if(!raw) return '';
+  /* Sekme komutuysa hisse sanma */
+  if(parseVoicePage(raw)) return '';
+  let s=normalizeVoiceText(raw);
   if(!s) return '';
   const joined=s.replace(/[\s.-]+/g,'');
   if(VOICE_ALIASES[joined]) return VOICE_ALIASES[joined];
@@ -383,12 +417,48 @@ function parseVoiceTicker(raw){
   }
   return '';
 }
+function voiceTranscriptsFromEvent(ev){
+  const out=[];
+  try{
+    const ri=(typeof ev.resultIndex==='number')?ev.resultIndex:0;
+    for(let r=ri;r<ev.results.length;r++){
+      const res=ev.results[r];
+      if(!res||res.isFinal===false) continue;
+      for(let i=0;i<res.length;i++){
+        const t=(res[i]&&res[i].transcript)||'';
+        if(t && !out.includes(t)) out.push(t);
+      }
+    }
+  }catch(_e){}
+  return out;
+}
+function handleHomeVoiceCommand(transcripts, st){
+  for(const t of transcripts){
+    const pg=parseVoicePage(t);
+    if(pg){
+      switchPage(pg.page);
+      if(st){ st.style.color=''; st.innerHTML='🎙️ Sekme: <b>'+safeHTML(pg.label)+'</b>'; }
+      return true;
+    }
+  }
+  for(const t of transcripts){
+    const sym=parseVoiceTicker(t);
+    if(sym){
+      const inp=document.getElementById('homeTicker');
+      if(inp) inp.value=sym;
+      if(st){ st.style.color=''; st.innerHTML='🎙️ Duyulan: <b>'+safeHTML(sym)+'</b>'; }
+      homeSearch(sym);
+      return true;
+    }
+  }
+  return false;
+}
 function setHomeVoiceUi(on){
   _homeVoiceOn=!!on;
   const btn=document.getElementById('homeVoiceBtn');
   if(!btn) return;
   btn.classList.toggle('listening', _homeVoiceOn);
-  btn.title=_homeVoiceOn?'Dinleniyor… durdur':'Sesli ara';
+  btn.title=_homeVoiceOn?'Dinleniyor… durdur':'Sesli komut (hisse veya sekme)';
   btn.setAttribute('aria-pressed', _homeVoiceOn?'true':'false');
 }
 function stopHomeVoice(){
@@ -421,7 +491,7 @@ function toggleHomeVoice(){
   _homeVoiceRec.onstart=()=>{
     if(epoch!==_homeVoiceEpoch) return;
     setHomeVoiceUi(true);
-    if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… hisse kodu veya adını söyleyin.'; }
+    if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… hisse (AMD) veya sekme (tarayıcı, hisseX, takvim…)'; }
   };
   _homeVoiceRec.onend=()=>{
     if(epoch===_homeVoiceEpoch) setHomeVoiceUi(false);
@@ -438,33 +508,16 @@ function toggleHomeVoice(){
     else if(err==='aborted')
       st.textContent='';
     else
-      st.textContent='Sesli arama hatası — tekrar deneyin.';
+      st.textContent='Sesli komut hatası — tekrar deneyin.';
   };
   _homeVoiceRec.onresult=ev=>{
     if(epoch!==_homeVoiceEpoch) return; /* eski dinleme sonucu */
-    let best='';
-    try{
-      const ri=(typeof ev.resultIndex==='number')?ev.resultIndex:0;
-      for(let r=ri;r<ev.results.length;r++){
-        const res=ev.results[r];
-        if(!res||res.isFinal===false) continue;
-        for(let i=0;i<res.length;i++){
-          const sym=parseVoiceTicker((res[i]&&res[i].transcript)||'');
-          if(sym){ best=sym; break; }
-        }
-        if(best) break;
-      }
-    }catch(_e){}
+    const transcripts=voiceTranscriptsFromEvent(ev);
     setHomeVoiceUi(false);
     if(epoch!==_homeVoiceEpoch) return;
-    if(!best){
-      if(st) st.textContent='Anlaşılamadı — örn. “NVDA” veya “Apple” deyin.';
-      return;
+    if(!handleHomeVoiceCommand(transcripts, st)){
+      if(st) st.textContent='Anlaşılamadı — örn. “NVDA”, “tarayıcı aç”, “hisseX”, “takvim”.';
     }
-    const inp=document.getElementById('homeTicker');
-    if(inp) inp.value=best;
-    if(st){ st.style.color=''; st.innerHTML='🎙️ Duyulan: <b>'+safeHTML(best)+'</b>'; }
-    homeSearch(best); /* input’taki eski koda güvenme */
   };
 
   try{
