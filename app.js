@@ -1759,44 +1759,55 @@ function drawEarnChart(points){
   if(!box) return;
   if(!points||!points.length){ box.innerHTML='<div class="hint">Bu dönem için grafik serisi yok.</div>'; return; }
   const mobile=(typeof window!=='undefined' && window.innerWidth<=560);
-  /* Telefonda daha kare/yüksek viewBox → noktalar ve yazılar dolgun kalır */
-  const W=mobile?420:720, H=mobile?400:340;
-  const padL=mobile?40:52, padR=mobile?16:28, padT=mobile?36:28, padB=mobile?56:48;
-  const fsY=mobile?15:13, fsX=mobile?15:14, fsV=mobile?14:12;
-  const rEst=mobile?13:11, rAct=mobile?11:9.5, swEst=mobile?3.2:2.8;
+  /* Telefonda kutu genişliğine göre viewBox → letterbox yok, eksen taşmaz */
+  const boxW=Math.max(280, Math.round(box.clientWidth|| (window.innerWidth-28)));
+  const W=mobile?boxW:720;
+  const H=mobile?Math.round(W*0.62):340;
+  const padL=mobile?34:52, padR=mobile?10:28, padT=mobile?26:28, padB=mobile?40:48;
+  const fsY=mobile?11:13, fsX=mobile?11:14, fsV=mobile?11:12;
+  const rEst=mobile?9:11, rAct=mobile?7.5:9.5, swEst=mobile?2.4:2.8;
   const vals=points.flatMap(p=>[p.actual,p.estimate].filter(v=>v!=null&&isFinite(v)));
   if(!vals.length){ box.innerHTML='<div class="hint">Grafik verisi yok.</div>'; return; }
   let yMin=Math.min(0, ...vals), yMax=Math.max(...vals);
   if(yMax===yMin) yMax=yMin+1;
-  const pad=(yMax-yMin)*0.16; yMin-=pad; yMax+=pad;
+  const yPad=(yMax-yMin)*(mobile?0.18:0.14); yMin-=yPad; yMax+=yPad;
   const n=points.length;
   const X=i=> padL+((n===1?0.5:i/(n-1))*(W-padL-padR));
   const Y=v=> padT+(yMax-v)/((yMax-yMin)||1)*(H-padT-padB);
   let grid='', ylbl='';
   for(let g=0;g<=4;g++){
     const v=yMin+(yMax-yMin)*g/4, yy=Y(v).toFixed(1);
-    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="${mobile?1.4:1.2}"/>`;
-    ylbl+=`<text x="${padL-8}" y="${(+yy+5).toFixed(1)}" font-size="${fsY}" font-weight="700" fill="var(--muted)" text-anchor="end">${v.toFixed(2)}</text>`;
+    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1.2"/>`;
+    ylbl+=`<text x="${padL-6}" y="${(+yy+4).toFixed(1)}" font-size="${fsY}" font-weight="600" fill="var(--muted)" text-anchor="end">${v.toFixed(2)}</text>`;
   }
   let dots='', xl='', valsLbl='';
   points.forEach((p,i)=>{
     const x=X(i);
-    xl+=`<text x="${x.toFixed(1)}" y="${H-14}" font-size="${fsX}" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${safeHTML(p.label)}</text>`;
+    const lab=mobile?String(p.label||'').replace(/\s+'/,"'"):p.label;
+    xl+=`<text x="${x.toFixed(1)}" y="${H-12}" font-size="${fsX}" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${safeHTML(lab)}</text>`;
     if(p.estimate!=null&&isFinite(p.estimate)){
       const ey=Y(p.estimate);
       dots+=`<circle cx="${x.toFixed(1)}" cy="${ey.toFixed(1)}" r="${rEst}" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="${swEst}"><title>Tahmin: ${p.estimate}</title></circle>`;
     }
     if(p.actual!=null&&isFinite(p.actual)){
       const ay=Y(p.actual);
-      dots+=`<circle cx="${x.toFixed(1)}" cy="${ay.toFixed(1)}" r="${rAct}" fill="#26a69a" stroke="#1e8e82" stroke-width="1.6"><title>Güncel: ${p.actual}</title></circle>`;
-      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ay-18).toFixed(1)}" font-size="${fsV}" font-weight="800" fill="#26a69a" text-anchor="middle">${Number(p.actual).toFixed(2)}</text>`;
+      dots+=`<circle cx="${x.toFixed(1)}" cy="${ay.toFixed(1)}" r="${rAct}" fill="#26a69a" stroke="#1e8e82" stroke-width="1.5"><title>Güncel: ${p.actual}</title></circle>`;
+      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ay-12).toFixed(1)}" font-size="${fsV}" font-weight="700" fill="#26a69a" text-anchor="middle">${Number(p.actual).toFixed(2)}</text>`;
     }else if(p.estimate!=null&&isFinite(p.estimate)){
       const ey=Y(p.estimate);
-      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ey-18).toFixed(1)}" font-size="${fsV}" font-weight="800" fill="var(--muted)" text-anchor="middle">${Number(p.estimate).toFixed(2)}</text>`;
+      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ey-12).toFixed(1)}" font-size="${fsV}" font-weight="700" fill="var(--muted)" text-anchor="middle">${Number(p.estimate).toFixed(2)}</text>`;
     }
   });
-  const cssH=mobile?360:340;
-  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" height="${cssH}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:${cssH}px">${grid}${ylbl}${dots}${valsLbl}${xl}</svg>`;
+  box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;aspect-ratio:${W} / ${H}">${grid}${ylbl}${dots}${valsLbl}${xl}</svg>`;
+}
+let _earnResizeT=null;
+if(typeof window!=='undefined' && !window._earnResizeBound){
+  window._earnResizeBound=true;
+  window.addEventListener('resize',()=>{
+    if(!EARN_CACHE) return;
+    clearTimeout(_earnResizeT);
+    _earnResizeT=setTimeout(()=>renderEarnPanel(EARN_CACHE),140);
+  });
 }
 function renderEarnPanel(data){
   const card=document.getElementById('earnCard'), meta=document.getElementById('earnMeta');
