@@ -1759,43 +1759,49 @@ function drawEarnChart(points){
   if(!box) return;
   if(!points||!points.length){ box.innerHTML='<div class="hint">Bu dönem için grafik serisi yok.</div>'; return; }
   const mobile=(typeof window!=='undefined' && window.innerWidth<=560);
-  /* Telefonda kutu genişliğine göre viewBox → letterbox yok, eksen taşmaz */
-  const boxW=Math.max(280, Math.round(box.clientWidth|| (window.innerWidth-28)));
+  /* Telefonda yüksek/dolgun grafik; sağ-sol pad Q4'26 gibi etiketlerin kesilmesini önler */
+  const boxW=Math.max(300, Math.round(box.clientWidth|| (window.innerWidth-28)));
   const W=mobile?boxW:720;
-  const H=mobile?Math.round(W*0.62):340;
-  const padL=mobile?34:52, padR=mobile?10:28, padT=mobile?26:28, padB=mobile?40:48;
-  const fsY=mobile?11:13, fsX=mobile?11:14, fsV=mobile?11:12;
-  const rEst=mobile?9:11, rAct=mobile?7.5:9.5, swEst=mobile?2.4:2.8;
+  const H=mobile?Math.round(Math.max(300, W*0.88)):340;
+  const padL=mobile?42:52, padR=mobile?30:28, padT=mobile?34:28, padB=mobile?48:48;
+  const fsY=mobile?13:13, fsX=mobile?13:14, fsV=mobile?13:12;
+  const rEst=mobile?12:11, rAct=mobile?10:9.5, swEst=mobile?3:2.8;
   const vals=points.flatMap(p=>[p.actual,p.estimate].filter(v=>v!=null&&isFinite(v)));
   if(!vals.length){ box.innerHTML='<div class="hint">Grafik verisi yok.</div>'; return; }
   let yMin=Math.min(0, ...vals), yMax=Math.max(...vals);
   if(yMax===yMin) yMax=yMin+1;
-  const yPad=(yMax-yMin)*(mobile?0.18:0.14); yMin-=yPad; yMax+=yPad;
+  const yPad=(yMax-yMin)*(mobile?0.2:0.14); yMin-=yPad; yMax+=yPad;
   const n=points.length;
   const X=i=> padL+((n===1?0.5:i/(n-1))*(W-padL-padR));
   const Y=v=> padT+(yMax-v)/((yMax-yMin)||1)*(H-padT-padB);
   let grid='', ylbl='';
   for(let g=0;g<=4;g++){
     const v=yMin+(yMax-yMin)*g/4, yy=Y(v).toFixed(1);
-    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1.2"/>`;
-    ylbl+=`<text x="${padL-6}" y="${(+yy+4).toFixed(1)}" font-size="${fsY}" font-weight="600" fill="var(--muted)" text-anchor="end">${v.toFixed(2)}</text>`;
+    grid+=`<line x1="${padL}" x2="${W-padR}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="${mobile?1.5:1.2}"/>`;
+    ylbl+=`<text x="${padL-8}" y="${(+yy+4).toFixed(1)}" font-size="${fsY}" font-weight="700" fill="var(--muted)" text-anchor="end">${v.toFixed(2)}</text>`;
   }
   let dots='', xl='', valsLbl='';
   points.forEach((p,i)=>{
     const x=X(i);
     const lab=mobile?String(p.label||'').replace(/\s+'/,"'"):p.label;
-    xl+=`<text x="${x.toFixed(1)}" y="${H-12}" font-size="${fsX}" font-weight="700" fill="var(--ink-2)" text-anchor="middle">${safeHTML(lab)}</text>`;
+    /* İlk/son etiket kenarda kesilmesin: anchor kaydır */
+    let anchor='middle', tx=x;
+    if(mobile && n>1){
+      if(i===0){ anchor='start'; tx=Math.max(2, x-2); }
+      else if(i===n-1){ anchor='end'; tx=Math.min(W-2, x+2); }
+    }
+    xl+=`<text x="${tx.toFixed(1)}" y="${H-14}" font-size="${fsX}" font-weight="800" fill="var(--ink-2)" text-anchor="${anchor}">${safeHTML(lab)}</text>`;
     if(p.estimate!=null&&isFinite(p.estimate)){
       const ey=Y(p.estimate);
       dots+=`<circle cx="${x.toFixed(1)}" cy="${ey.toFixed(1)}" r="${rEst}" fill="var(--surface)" stroke="var(--ink-2)" stroke-width="${swEst}"><title>Tahmin: ${p.estimate}</title></circle>`;
     }
     if(p.actual!=null&&isFinite(p.actual)){
       const ay=Y(p.actual);
-      dots+=`<circle cx="${x.toFixed(1)}" cy="${ay.toFixed(1)}" r="${rAct}" fill="#26a69a" stroke="#1e8e82" stroke-width="1.5"><title>Güncel: ${p.actual}</title></circle>`;
-      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ay-12).toFixed(1)}" font-size="${fsV}" font-weight="700" fill="#26a69a" text-anchor="middle">${Number(p.actual).toFixed(2)}</text>`;
+      dots+=`<circle cx="${x.toFixed(1)}" cy="${ay.toFixed(1)}" r="${rAct}" fill="#26a69a" stroke="#1e8e82" stroke-width="1.6"><title>Güncel: ${p.actual}</title></circle>`;
+      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ay-16).toFixed(1)}" font-size="${fsV}" font-weight="800" fill="#26a69a" text-anchor="middle">${Number(p.actual).toFixed(2)}</text>`;
     }else if(p.estimate!=null&&isFinite(p.estimate)){
       const ey=Y(p.estimate);
-      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ey-12).toFixed(1)}" font-size="${fsV}" font-weight="700" fill="var(--muted)" text-anchor="middle">${Number(p.estimate).toFixed(2)}</text>`;
+      valsLbl+=`<text x="${x.toFixed(1)}" y="${(ey-16).toFixed(1)}" font-size="${fsV}" font-weight="800" fill="var(--muted)" text-anchor="middle">${Number(p.estimate).toFixed(2)}</text>`;
     }
   });
   box.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:auto;aspect-ratio:${W} / ${H}">${grid}${ylbl}${dots}${valsLbl}${xl}</svg>`;
