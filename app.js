@@ -322,6 +322,150 @@ function discCcFromPick(pick){
   return discCcFromCode(pick.code);
 }
 
+/* ---------- Ana sayfa sesli hisse arama (Web Speech API, bas-konuş) ---------- */
+const VOICE_FILLER=/^(aç|getir|ara|hisse|bak|göster|lütfen|bir|tane|kodu|hissesini|hissesi|analiz|et|yap|için)$/i;
+const VOICE_ALIASES={
+  apple:'AAPL', aapl:'AAPL',
+  nvidia:'NVDA', nvda:'NVDA',
+  amd:'AMD',
+  microsoft:'MSFT', msft:'MSFT',
+  tesla:'TSLA', tsla:'TSLA',
+  google:'GOOGL', googl:'GOOGL', alphabet:'GOOGL',
+  amazon:'AMZN', amzn:'AMZN',
+  meta:'META', facebook:'META',
+  intel:'INTC', intc:'INTC',
+  thy:'THYAO', thyao:'THYAO', turkishairlines:'THYAO',
+  garanti:'GARAN', garan:'GARAN',
+  aselsan:'ASELS', asels:'ASELS',
+  bip:'BIMAS', bimas:'BIMAS',
+  eregli:'EREGL', eregl:'EREGL',
+  ford:'FROTO', froto:'FROTO',
+  koc:'KCHOL', kchol:'KCHOL',
+  samsung:'005930'
+};
+let _homeVoiceRec=null, _homeVoiceOn=false;
+
+function getSpeechRecognition(){
+  return window.SpeechRecognition||window.webkitSpeechRecognition||null;
+}
+function parseVoiceTicker(raw){
+  if(!raw) return '';
+  let s=String(raw).toLowerCase()
+    .replace(/[^\p{L}\p{N}.\s-]/gu,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  if(!s) return '';
+  const joined=s.replace(/[\s.-]+/g,'');
+  if(VOICE_ALIASES[joined]) return VOICE_ALIASES[joined];
+  if(VOICE_ALIASES[s]) return VOICE_ALIASES[s];
+  const parts=s.split(' ').filter(w=>w && !VOICE_FILLER.test(w));
+  for(const w of parts){
+    const key=w.replace(/[.-]/g,'');
+    if(VOICE_ALIASES[key]||VOICE_ALIASES[w]) return VOICE_ALIASES[key]||VOICE_ALIASES[w];
+  }
+  for(const w of parts){
+    const tok=w.toUpperCase().replace(/[^A-Z0-9.]/g,'');
+    if(tok && /^[A-Z0-9]{1,6}(\.[A-Z]{1,3})?$/.test(tok)) return tok;
+  }
+  /* Harf harf söylenmiş: "a m d" → AMD */
+  if(parts.length>=2 && parts.length<=6 && parts.every(p=>/^[\p{L}]$/u.test(p))){
+    const spelled=parts.map(p=>p.toLocaleUpperCase('tr-TR')).join('').replace(/[^A-Z0-9]/g,'');
+    if(spelled.length>=1 && spelled.length<=6) return spelled;
+  }
+  return '';
+}
+function setHomeVoiceUi(on){
+  _homeVoiceOn=!!on;
+  const btn=document.getElementById('homeVoiceBtn');
+  if(!btn) return;
+  btn.classList.toggle('listening', _homeVoiceOn);
+  btn.title=_homeVoiceOn?'Dinleniyor… durdur':'Sesli ara';
+  btn.setAttribute('aria-pressed', _homeVoiceOn?'true':'false');
+}
+function stopHomeVoice(){
+  try{ _homeVoiceRec&&_homeVoiceRec.stop(); }catch(_e){}
+  setHomeVoiceUi(false);
+}
+function toggleHomeVoice(){
+  const SR=getSpeechRecognition();
+  const btn=document.getElementById('homeVoiceBtn');
+  const st=document.getElementById('homeSearchStatus');
+  if(!SR){
+    if(st) st.textContent='Bu tarayıcı sesli aramayı desteklemiyor.';
+    return;
+  }
+  if(_homeVoiceOn){ stopHomeVoice(); return; }
+  if(!_homeVoiceRec){
+    _homeVoiceRec=new SR();
+    _homeVoiceRec.lang='tr-TR';
+    _homeVoiceRec.interimResults=false;
+    _homeVoiceRec.maxAlternatives=3;
+    _homeVoiceRec.continuous=false;
+    _homeVoiceRec.onstart=()=>{
+      setHomeVoiceUi(true);
+      if(st){ st.style.color=''; st.textContent='🎙️ Dinleniyor… hisse kodu veya adını söyleyin.'; }
+    };
+    _homeVoiceRec.onend=()=> setHomeVoiceUi(false);
+    _homeVoiceRec.onerror=e=>{
+      setHomeVoiceUi(false);
+      if(!st) return;
+      const err=e&&e.error;
+      if(err==='not-allowed'||err==='service-not-allowed')
+        st.textContent='Mikrofon izni gerekli — tarayıcı ayarlarından izin verin.';
+      else if(err==='no-speech')
+        st.textContent='Ses algılanamadı — tekrar deneyin.';
+      else if(err==='aborted')
+        st.textContent='';
+      else
+        st.textContent='Sesli arama hatası — tekrar deneyin.';
+    };
+    _homeVoiceRec.onresult=ev=>{
+      let best='';
+      try{
+        const res=ev.results&&ev.results[ev.results.length-1];
+        if(res){
+          for(let i=0;i<res.length;i++){
+            const alt=(res[i]&&res[i].transcript)||'';
+            const sym=parseVoiceTicker(alt);
+            if(sym){ best=sym; break; }
+            if(!best && alt) best=parseVoiceTicker(alt) || '';
+          }
+          if(!best && res[0]) best=parseVoiceTicker(res[0].transcript);
+        }
+      }catch(_e){}
+      setHomeVoiceUi(false);
+      if(!best){
+        if(st) st.textContent='Anlaşılamadı — örn. “NVDA” veya “Apple” deyin.';
+        return;
+      }
+      const inp=document.getElementById('homeTicker');
+      if(inp) inp.value=best;
+      if(st){ st.style.color=''; st.innerHTML='🎙️ Duyulan: <b>'+safeHTML(best)+'</b>'; }
+      homeSearch();
+    };
+  }
+  try{
+    _homeVoiceRec.start();
+  }catch(_e){
+    /* zaten çalışıyorsa yeniden başlat */
+    try{ _homeVoiceRec.stop(); }catch(_e2){}
+    setTimeout(()=>{ try{ _homeVoiceRec.start(); }catch(_e3){
+      if(st) st.textContent='Mikrofon başlatılamadı.';
+      setHomeVoiceUi(false);
+    }; }, 120);
+  }
+  if(btn) btn.focus({preventScroll:true});
+}
+function initHomeVoice(){
+  const btn=document.getElementById('homeVoiceBtn');
+  if(!btn) return;
+  if(!getSpeechRecognition()){
+    btn.hidden=true;
+    btn.title='Bu tarayıcı sesli aramayı desteklemiyor';
+  }
+}
+window.toggleHomeVoice=toggleHomeVoice;
+
 /* Ana sayfa: kod ara → ülkeyi bul → o borsanın Bugünün Fırsatları’nı göster (önceden gizli) */
 async function homeSearch(){
   const v=(document.getElementById('homeTicker').value||'').trim();
@@ -6344,5 +6488,6 @@ window.addEventListener('DOMContentLoaded',()=>{
   body.addEventListener('change', colorInputRows);
   registerPwa();
   initMarketTape();
+  initHomeVoice();
   // Bugünün Fırsatları + Hisse Takvimi: arama yapılana kadar gizli
 });
