@@ -700,8 +700,8 @@
     <div class="toolbar" style="align-items:center">
       <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
       <select id="cmpPeriod" class="cell" style="width:auto">
+        <option value="quarter" selected>Çeyreklik</option>
         <option value="annual">Yıllık</option>
-        <option value="quarter">Çeyreklik</option>
       </select>
       <button class="primary" onclick="compareTickers()">Karşılaştır →</button>
       <span id="cmpStatus" class="hint"></span>
@@ -1117,7 +1117,7 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="app.js?v=145"></script>
+<script src="app.js?v=147"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

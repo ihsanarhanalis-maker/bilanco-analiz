@@ -20,7 +20,8 @@ function switchPage(p){
     if(DISC_REVEALED) loadDiscovery();
     if(EQCAL_REVEALED) loadEqCalendar();
   }
-  window.scrollTo({top:0,behavior:'smooth'});
+  /* Sesli kart kaydırması varsa tepeye scroll kartı bozar */
+  if(!_voicePendingCard) window.scrollTo({top:0,behavior:'smooth'});
 }
 
 /* ---------- Hisse logoları ----------
@@ -215,12 +216,12 @@ function paintLivePrice(sym, live, ch){
 async function tickLivePrice(){
   const st=LIVE_PRICE_STATE;
   if(!st || LIVE_PRICE_BUSY || LIVE_PRICE_ES) return;
-  if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym){ stopLivePrice(); return; }
+  if(st.myGen!==REQ_GEN || !FIN || String(FIN.ticker).toUpperCase()!==String(st.sym).toUpperCase()){ stopLivePrice(); return; }
   if(document.hidden) return;
   LIVE_PRICE_BUSY=true;
   try{
     const q=await fetchTvLiveQuote(st.sym, st.market, st.euInfo);
-    if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym) return;
+    if(st.myGen!==REQ_GEN || !FIN || String(FIN.ticker).toUpperCase()!==String(st.sym).toUpperCase()) return;
     if(q&&q.price!=null){
       if(q.logoid) FIN.logoid=q.logoid;
       if(q.tv && !st.tv){ st.tv=q.tv; startLivePriceStream(st); return; }
@@ -241,7 +242,7 @@ function startLivePriceStream(st){
   let gotTick=false;
   es.onmessage=function(ev){
     if(!LIVE_PRICE_STATE || LIVE_PRICE_STATE!==st) return;
-    if(st.myGen!==REQ_GEN || !FIN || FIN.ticker!==st.sym){ stopLivePrice(); return; }
+    if(st.myGen!==REQ_GEN || !FIN || String(FIN.ticker).toUpperCase()!==String(st.sym).toUpperCase()){ stopLivePrice(); return; }
     if(document.hidden) return;
     try{
       const j=JSON.parse(ev.data);
@@ -421,7 +422,10 @@ function scrollVoiceStockCard(card){
 function flushVoicePendingCard(sym){
   const p=_voicePendingCard;
   if(!p) return;
-  if(p.sym && sym && String(sym).toUpperCase()!==String(p.sym).toUpperCase()) return;
+  if(p.sym && sym && String(sym).toUpperCase()!==String(p.sym).toUpperCase()){
+    _voicePendingCard=null; /* eski bekleyen kart yanlış hisseye kaymasın */
+    return;
+  }
   _voicePendingCard=null;
   setTimeout(()=>{
     scrollVoiceStockCard(p);
@@ -526,6 +530,7 @@ const VOICE_SCAN_QF_LABEL={
 const VOICE_LISTEN_MS=20000; /* konuşulmazsa en fazla 20 sn dinle */
 let _homeVoiceRec=null, _homeVoiceOn=false, _homeVoiceEpoch=0;
 let _homeVoiceTimer=null, _homeVoiceDeadline=0, _homeVoiceGotResult=false;
+let _homeVoiceRestartT=null;
 let _voiceCcMap=null, _voiceSectMap=null;
 
 function getSpeechRecognition(){
@@ -639,7 +644,7 @@ function parseVoiceCompare(s){
     .replace(/\s+/g,' ').trim();
   const syms=extractVoiceTickersAll(rest).slice(0,4);
   if(syms.length<2) return null;
-  return { type:'compare', syms, mode: mode||'annual' };
+  return { type:'compare', syms, mode: mode||'quarter' };
 }
 function runVoiceCompare(intent){
   switchPage('stock');
@@ -746,6 +751,11 @@ function parseVoiceIntent(raw){
     else if(sym && /\b(hissex|hisse\s*x|stock\s*twits|stocktwits)\b/.test(s)){ page='st'; pageLabel='hisseX'; }
     else if(sym) return { type:'search', sym, label:sym, mode:period };
     else return null;
+  }
+
+  /* "AMD bilanço" / "NVDA bilanço analizi" → sekme değil, hisse ara */
+  if(page==='stock' && sym){
+    return { type:'search', sym, label:sym, mode:period };
   }
 
   let sort=null, cap=null, ma=[], qf=[];
@@ -925,8 +935,12 @@ function setHomeVoiceUi(on){
 function clearHomeVoiceTimer(){
   if(_homeVoiceTimer){ clearTimeout(_homeVoiceTimer); _homeVoiceTimer=null; }
 }
+function clearHomeVoiceRestart(){
+  if(_homeVoiceRestartT){ clearTimeout(_homeVoiceRestartT); _homeVoiceRestartT=null; }
+}
 function stopHomeVoice(){
   clearHomeVoiceTimer();
+  clearHomeVoiceRestart();
   _homeVoiceGotResult=true; /* yeniden başlatmayı engelle */
   _homeVoiceEpoch++; /* gecikmiş onresult bu oturuma ait sayılmasın */
   try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){
@@ -944,16 +958,17 @@ function toggleHomeVoice(){
   }
   if(_homeVoiceOn){ stopHomeVoice(); return; }
 
-  /* Önceki arama / eski ses sonucu yarışmasın */
-  REQ_GEN++;
+  /* REQ_GEN artırma — yalnız yeni hisse aramasında (mic kart kaydırınca canlı fiyatı kesmesin) */
   const epoch=++_homeVoiceEpoch;
   const onStock=voiceOnStockPage();
   _homeVoiceGotResult=false;
   _homeVoiceDeadline=Date.now()+VOICE_LISTEN_MS;
   clearHomeVoiceTimer();
+  clearHomeVoiceRestart();
   _homeVoiceTimer=setTimeout(()=>{
     if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
     _homeVoiceGotResult=true;
+    clearHomeVoiceRestart();
     try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
     _homeVoiceRec=null;
     setHomeVoiceUi(false);
@@ -966,6 +981,14 @@ function toggleHomeVoice(){
 
   try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
   _homeVoiceRec=null;
+
+  function scheduleArmRec(ms){
+    clearHomeVoiceRestart();
+    _homeVoiceRestartT=setTimeout(()=>{
+      _homeVoiceRestartT=null;
+      armRec();
+    }, ms);
+  }
 
   function armRec(){
     if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
@@ -981,25 +1004,26 @@ function toggleHomeVoice(){
     rec.maxAlternatives=5;
     rec.continuous=false;
     rec.onstart=()=>{
-      if(epoch!==_homeVoiceEpoch) return;
+      if(epoch!==_homeVoiceEpoch || _homeVoiceRec!==rec) return;
       setHomeVoiceUi(true);
       if(st){ st.style.color=''; st.textContent=listenHint; }
     };
     /* Tarayıcı ~5–8 sn no-speech ile kapanır — 20 sn dolana kadar yeniden aç */
     rec.onend=()=>{
-      if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
-      if(Date.now()<_homeVoiceDeadline) setTimeout(armRec, 100);
+      if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult || _homeVoiceRec!==rec) return;
+      if(Date.now()<_homeVoiceDeadline) scheduleArmRec(100);
       else{
         setHomeVoiceUi(false);
         if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
       }
     };
     rec.onerror=e=>{
-      if(epoch!==_homeVoiceEpoch) return;
+      if(epoch!==_homeVoiceEpoch || _homeVoiceRec!==rec) return;
       const err=e&&e.error;
       /* no-speech / aborted → onend yeniden başlatır (süre bitene kadar) */
       if(err==='no-speech'||err==='aborted') return;
       clearHomeVoiceTimer();
+      clearHomeVoiceRestart();
       _homeVoiceGotResult=true;
       setHomeVoiceUi(false);
       if(!st) return;
@@ -1009,9 +1033,10 @@ function toggleHomeVoice(){
         st.textContent='Sesli komut hatası — tekrar deneyin.';
     };
     rec.onresult=ev=>{
-      if(epoch!==_homeVoiceEpoch) return;
+      if(epoch!==_homeVoiceEpoch || _homeVoiceRec!==rec) return;
       _homeVoiceGotResult=true;
       clearHomeVoiceTimer();
+      clearHomeVoiceRestart();
       const transcripts=voiceTranscriptsFromEvent(ev);
       setHomeVoiceUi(false);
       try{ rec.stop(); }catch(_e){}
@@ -1024,17 +1049,13 @@ function toggleHomeVoice(){
     };
     try{ rec.start(); }
     catch(_e){
-      setTimeout(()=>{
-        if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
-        try{ rec.start(); }catch(_e3){
-          if(Date.now()<_homeVoiceDeadline) setTimeout(armRec, 200);
-          else{
-            clearHomeVoiceTimer();
-            if(st) st.textContent='Mikrofon başlatılamadı.';
-            setHomeVoiceUi(false);
-          }
-        }
-      }, 140);
+      if(Date.now()<_homeVoiceDeadline) scheduleArmRec(200);
+      else{
+        clearHomeVoiceTimer();
+        clearHomeVoiceRestart();
+        if(st) st.textContent='Mikrofon başlatılamadı.';
+        setHomeVoiceUi(false);
+      }
     }
   }
   armRec();
@@ -1067,10 +1088,15 @@ async function homeSearch(forcedSym){
   if(st){ st.style.color=''; st.innerHTML='⏳ <b>'+safeHTML(sym)+'</b> aranıyor…'; }
 
   let pickCode=null, cc=null;
+  const cikMap=window.CIK_MAP||{};
 
   if(/\.[A-Z]{1,3}$/.test(sym)){
     pickCode=sym;
     cc=discCcFromCode(sym);
+  }else if(cikMap[sym]){
+    /* ABD listesinde bilinen kod → TradingView borsa taramasını atla (AMD, AAPL…) */
+    pickCode=sym+'.US';
+    cc='US';
   }else{
     const { cands }=await detectBareMarkets(sym);
     if(myGen!==REQ_GEN) return;
@@ -1086,6 +1112,7 @@ async function homeSearch(forcedSym){
 
   if(myGen!==REQ_GEN) return;
   if(!cc || !TOP100_MARKETS[cc]){
+    _voicePendingCard=null;
     if(st) st.innerHTML='✕ Bu kod için ülke eşlemesi yapılamadı.';
     return;
   }
@@ -1094,12 +1121,11 @@ async function homeSearch(forcedSym){
   if(st) st.innerHTML='✓ <b>'+safeHTML(pickCode)+'</b> → <b>'+safeHTML(cName)+'</b> · ana sayfada Fırsatlar + Takvim hazır';
 
   document.getElementById('ticker').value=pickCode;
-  // Fırsatlar + Takvim o ülke için hazırlanır (logo → ana sayfa); analiz sekmesine gidilir
+  /* Önce bilançoyu çekmeye başla — keşif/takvim UI işi ağı bloklamasın */
+  fetchTicker(pickCode);
   revealDiscoveryForCountry(cc, pickCode);
   revealEqCalendarForCountry(cc);
   switchPage('stock');
-  /* pickCode’u açık ver — input’ta kalan eski AAPL ile fetch yarışmasın */
-  fetchTicker(pickCode);
 }
 
 /* ---------- Kalem kategorileri ---------- */
@@ -1330,18 +1356,22 @@ async function fetchConcept(cik, tags, formPrefix){
 async function fetchSeries(cik, mode, formPrefix, opts){
   opts=opts||{};
   const tax=opts.taxonomy;
+  const CHUNK=8; /* SEC concept isteklerini paralel grupla */
   const grab = async (defs, fp)=>{
     const keys=Object.keys(defs), raw={};
-    for(let i=0;i<keys.length;i+=5){
-      const chunk=keys.slice(i,i+5);
+    for(let i=0;i<keys.length;i+=CHUNK){
+      const chunk=keys.slice(i,i+CHUNK);
       const r=await Promise.all(chunk.map(k=>fetchConceptRaw(cik,defs[k],fp||formPrefix,tax)));
       chunk.forEach((k,j)=>raw[k]=r[j]);
     }
     return {keys,raw};
   };
-  const b=await grab(opts.balanceDefs||CONCEPTS_BALANCE);
-  const ic=await grab(opts.incomeDefs||CONCEPTS_INCOME);
-  const cf=await grab(opts.cashDefs||CONCEPTS_CASH, opts.cashForm||'10-K');   // nakit akışı her zaman yıllık (bkz. CONCEPTS_CASH notu)
+  /* Bilanço ∥ gelir ∥ nakit — birbirinden bağımsız, sırayla beklemeyi kaldır */
+  const [b,ic,cf]=await Promise.all([
+    grab(opts.balanceDefs||CONCEPTS_BALANCE),
+    grab(opts.incomeDefs||CONCEPTS_INCOME),
+    grab(opts.cashDefs||CONCEPTS_CASH, opts.cashForm||'10-K'),
+  ]);
   const D={}; b.keys.forEach(k=>D[k]=pickInstant(b.raw[k]));
   const I={}; ic.keys.forEach(k=>I[k]=pickDuration(ic.raw[k],mode));
   const CF={}; cf.keys.forEach(k=>CF[k]=pickDuration(cf.raw[k],'annual'));
@@ -1425,6 +1455,7 @@ async function fetchMetrics(sym, mode){
 }
 
 /* ---------- Şirket karşılaştırma ---------- */
+let CMP_GEN=0;
 async function compareTickers(){
   const st=document.getElementById('cmpStatus');
   if(location.protocol==='file:'){ st.textContent='⚠ Bu dosyayı "Bilanco-Baslat.bat" ile açın.'; st.style.color='var(--bad)'; return; }
@@ -1432,9 +1463,14 @@ async function compareTickers(){
   const syms=[...new Set(raw.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean))].slice(0,4);
   const mode=document.getElementById('cmpPeriod').value;
   if(syms.length<2){ st.textContent='En az 2 hisse kodu girin (virgülle ayırın).'; st.style.color='var(--bad)'; return; }
+  const myCmp=++CMP_GEN;
   st.textContent='⏳ '+syms.join(', ')+' çekiliyor…'; st.style.color='var(--muted)';
   const data=[];
-  for(const s of syms){ data.push(await fetchMetrics(s,mode)); }   // sıralı: SEC saniye limiti
+  for(const s of syms){
+    if(myCmp!==CMP_GEN) return;
+    data.push(await fetchMetrics(s,mode));
+  }
+  if(myCmp!==CMP_GEN) return;
   const okData=data.filter(d=>d.ok), bad=data.filter(d=>!d.ok);
   if(!okData.length){ st.textContent='✕ Hiçbiri için veri alınamadı.'; st.style.color='var(--bad)'; document.getElementById('cmpResult').innerHTML=''; return; }
   st.textContent='✓ '+okData.map(d=>d.sym).join(', ')+(bad.length?'  ·  alınamadı: '+bad.map(d=>d.sym+' ('+d.err+')').join(', '):'');
@@ -1541,7 +1577,11 @@ async function fetchBistSeries(sym, mode){
   if(!hasData(first)) return null;
   const byCode={};
   bistMerge(byCode, first);
-  for(let i=1;i<calls.length;i++) bistMerge(byCode, await bistCall(sym, group, calls[i]));
+  /* Şema belli olduktan sonra kalan dönem paketlerini paralel çek */
+  if(calls.length>1){
+    const rest=await Promise.all(calls.slice(1).map(c=>bistCall(sym, group, c)));
+    rest.forEach(pack=>bistMerge(byCode, pack));
+  }
   // Kod → Türkçe açıklama haritası (banka/sigorta satır etiketleri ve açıklamaya-göre-arama için)
   const descOf={};
   first.items.forEach(it=>{ descOf[it.itemCode]=(it.itemDescTr||'').trim(); });
@@ -1639,11 +1679,10 @@ async function fetchTickerBIST(sym, mode, myGen){
     if(myGen!==REQ_GEN) return;
     const dates=Object.keys(D.assets).sort().reverse();
     const D0=dates[0], D1=dates[1]||null;
-    CUR='TL'; CURSYM='₺';
     const shares=(D.common&&D.common[D0])||null;   // Ödenmiş sermaye (nominal 1 TL) ≈ pay adedi
+    CUR='TL'; CURSYM='₺';
     FIN={ ticker:sym, mode, cur:'TRY', market:'BIST', bankGroup:group, D0, D1, balance:D, income:I,
           filedD0:null, filedD1:null, sharesBist:shares };
-    if(myGen!==REQ_GEN) return;
     const rows = group==='UFRS' ? buildRowsBank(D,D0,D1) : buildRowsFromSEC(D,D0,D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
@@ -1666,7 +1705,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     updateWatchStar();
     startBistClock();               // İstanbul saati + seans içi/dışı
   }catch(e){
-    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+    if(myGen===REQ_GEN) setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
 }
 
@@ -2005,13 +2044,17 @@ async function resolveYahooForEu(euInfo){
 }
 async function fetchTickerEU(euInfo, mode, myGen){
   const tvTicker=euInfo.tv+':'+euTvBase(euInfo);
-  let ysym=await resolveYahooForEu(euInfo);
+  /* Yahoo çözümü ∥ TradingView tarama — bağımsız, sırayla beklemeyi kaldır */
+  const ysymP=resolveYahooForEu(euInfo);
+  const scanP=fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
+    {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})})
+    .then(async r=> r.ok ? r.json() : null)
+    .catch(()=>null);
+  let ysym=await ysymP;
   if(myGen!==REQ_GEN) return;
   const sym=euInfo.base;
   try{
-    const r=await fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
-      {method:'POST',body:JSON.stringify({symbols:{tickers:[tvTicker]},columns:EU_COLS})});
-    const j=r.ok?await r.json():null;
+    const j=await scanP;
     if(myGen!==REQ_GEN) return;
     const row=j&&j.data&&j.data.find(x=>x.d&&x.d[4]!=null);   // close (index 4) doluysa hisse gerçek
     if(!row){ setStatus('✕ "'+sym+'.'+euInfo.suffix+'" '+euInfo.country+' borsasında bulunamadı.','bad'); return; }
@@ -2060,7 +2103,6 @@ async function fetchTickerEU(euInfo, mode, myGen){
     FIN={ ticker:sym, mode, cur:CUR, market:'EU', euInfo, D0, D1, balance:D, income:I,
           filedD0, filedD1, companyName:R.desc||sym, sector:R.sector, industry:R.industry,
           sharesEU:R.shares, ifrsSource:!!ifrs };
-    if(myGen!==REQ_GEN) return;
     const rows=buildRowsFromSEC(D, D0, D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(rr=>b.insertAdjacentHTML('beforeend', rowHTML(rr[0],rr[1],rr[2],rr[3])));
@@ -2088,7 +2130,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
     // KAP/İçeriden işlem: Avrupa'da anahtarsız kaynak yok (KAP=TR, Form 4=ABD) — kart gizlenir
     ['kapCard','insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }catch(e){
-    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+    if(myGen===REQ_GEN) setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
 }
 
@@ -2100,13 +2142,18 @@ async function fetchTickerEU(euInfo, mode, myGen){
    Tek borsada bulunduysa otomatik oraya yönlenir; birden fazlaysa tıklanabilir
    seçenekler gösterilir (ya da kullanıcı eki elle yazar: .US / .IS / .T / .HK / .TW / .TO / .AX / .SI …). */
 const EURONEXT_COUNTRY_SUFFIX={ 'France':'PA', 'Netherlands':'AS', 'Belgium':'BR', 'Portugal':'LS' };
+const DETECT_CACHE={}; /* sym → { at, data } — tekrar aramalarda TV taramasını atla */
+const DETECT_TTL=10*60*1000;
 async function detectBareMarkets(sym){
+  const key=String(sym||'').toUpperCase();
+  const hit=DETECT_CACHE[key];
+  if(hit && (Date.now()-hit.at)<DETECT_TTL) return hit.data;
   const map=window.CIK_MAP||{};
   const cands=[];
   let scanOk=false;
-  if(map[sym]) cands.push({ market:'US', code:sym+'.US', label:'🇺🇸 ABD', desc:'' });
+  if(map[key]) cands.push({ market:'US', code:key+'.US', label:'🇺🇸 ABD', desc:'' });
   try{
-    const tvSym=sym.replace(/-/g,'_');
+    const tvSym=key.replace(/-/g,'_');
     const prefixes=[...new Set(Object.values(EU_EXCHANGES).map(e=>e.tv))];
     const tickers=['BIST:'+tvSym, ...prefixes.map(p=>p+':'+tvSym)];
     const r=await fetch('https://scanner.tradingview.com/global/scan',
@@ -2116,7 +2163,7 @@ async function detectBareMarkets(sym){
       scanOk=true;
       const rows=(j.data||[]).filter(x=>x.d && x.d[2]!=null);   // close dolu = gerçek kotasyon
       const bistRow=rows.find(x=>x.s.indexOf('BIST:')===0);
-      if(bistRow) cands.push({ market:'BIST', code:sym+'.IS', label:'🇹🇷 Borsa İstanbul', desc:bistRow.d[4]||'' });
+      if(bistRow) cands.push({ market:'BIST', code:key+'.IS', label:'🇹🇷 Borsa İstanbul', desc:bistRow.d[4]||'' });
       let euRows=rows.filter(x=>x.s.indexOf('BIST:')!==0);
       const prim=euRows.filter(x=>x.d[1]===true);
       // Birincil kotasyon varsa çapraz kotasyonları ele; hiç birincil yoksa ve başka aday da
@@ -2127,12 +2174,14 @@ async function detectBareMarkets(sym){
         let sfx=null;
         if(pfx==='EURONEXT') sfx=EURONEXT_COUNTRY_SUFFIX[x.d[3]]||null;
         else{ const ent=Object.entries(EU_EXCHANGES).find(([s,e])=>e.tv===pfx); sfx=ent?ent[0]:null; }
-        if(sfx && !cands.some(c=>c.code===sym+'.'+sfx))
-          cands.push({ market:'EU', code:sym+'.'+sfx, label:EU_EXCHANGES[sfx].flag+' '+EU_EXCHANGES[sfx].country, desc:x.d[4]||'' });
+        if(sfx && !cands.some(c=>c.code===key+'.'+sfx))
+          cands.push({ market:'EU', code:key+'.'+sfx, label:EU_EXCHANGES[sfx].flag+' '+EU_EXCHANGES[sfx].country, desc:x.d[4]||'' });
       });
     }
   }catch(e){}
-  return { cands, scanOk };
+  const data={ cands, scanOk };
+  DETECT_CACHE[key]={ at:Date.now(), data };
+  return data;
 }
 /* Birden fazla borsada bulunan kod için seçenek düğmeleri (tıkla → o borsada ara) */
 function renderMarketChoices(sym,cands){
@@ -2243,6 +2292,7 @@ async function fetchTickerUS(sym, mode, myGen){
     const dates=Object.keys(D.assets).sort().reverse();
     const D0=dates[0], D1=dates[1]||null;
     if(!D1){ setStatus('⚠ '+sym+' için yalnızca tek dönem bulundu; değişim analizi sınırlı olacak.','muted'); }
+    if(myGen!==REQ_GEN) return;
 
     CUR='USD'; CURSYM='$';
     // Çok yıllı analiz/grafik/karşılaştırma için sakla
@@ -2252,7 +2302,6 @@ async function fetchTickerUS(sym, mode, myGen){
             // Bu durumda "ilk açıklanma" araması cari dönemin dosyalama tarihini bulur (filedD1===filedD0) —
             // bu yanlış/yanıltıcı olur (aynı fiyat iki kez gösterilir). Böyle durumlarda bilinmiyor sayılır.
             filedD1:(filed&&D1&&filed[D1]&&filed[D1]!==filed[D0])?filed[D1]:null };
-    if(myGen!==REQ_GEN) return;
 
     const rows=buildRowsFromSEC(D,D0,D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
@@ -2276,7 +2325,7 @@ async function fetchTickerUS(sym, mode, myGen){
     updateWatchStar();
     const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
-    setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+    if(myGen===REQ_GEN) setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
   }
 }
 
