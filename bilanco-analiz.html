@@ -169,6 +169,12 @@
   .hero-search > button{padding:14px 26px;border-radius:13px;font-size:15px}
   .hero .hero-hint{color:var(--muted);font-size:12px;margin-top:16px}
   .hero .hero-hint b{color:var(--ink-2)}
+  .lang-btn{flex:0 0 auto;margin-left:10px;min-width:36px;height:28px;padding:0 10px;border-radius:999px;
+    border:1px solid var(--line-2);background:rgba(255,255,255,.04);color:var(--ink-2);
+    font-size:11px;font-weight:800;letter-spacing:.06em;cursor:pointer;line-height:1;
+    display:inline-flex;align-items:center;justify-content:center;box-shadow:none}
+  .lang-btn:hover{color:var(--accent-2);border-color:rgba(79,156,249,.45);background:rgba(79,156,249,.12)}
+  .hd-inner h1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 
   /* --- Ekonomik takvim sayfası: solda ülke kutuları, sağda açık paneller --- */
   .econ-layout{display:flex;gap:18px;align-items:flex-start}
@@ -552,11 +558,13 @@
 <body>
 <header>
   <div class="hd-inner">
-    <div class="logo" role="button" tabindex="0" title="Ana Sayfa" onclick="switchPage('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('home')}">
+    <div class="logo" role="button" tabindex="0" data-i18n-title="home_title" title="Ana Sayfa" onclick="switchPage('home')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchPage('home')}">
       <img src="/icons/icon-192.png" width="44" height="44" alt="Bilanço Analiz">
     </div>
     <div>
-      <h1>Bilanço Analiz <button type="button" id="pwaInstall" class="no-print" onclick="installPwa()">📲 Yükle</button></h1>
+      <h1><span data-i18n="brand">Bilanço Analiz</span> <button type="button" id="pwaInstall" class="no-print" onclick="installPwa()" data-i18n="install">📲 Yükle</button>
+        <button type="button" id="langBtn" class="lang-btn no-print" title="Switch to English" aria-label="Switch to English">EN</button>
+      </h1>
     </div>
     <div id="hdrStockMeta" class="hidden" style="margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div id="livePrice" class="live-price hidden"></div>
@@ -564,23 +572,23 @@
       <div id="nyClock" class="hidden" style="font-size:14px;color:var(--ink-2);font-variant-numeric:tabular-nums;font-weight:600"></div>
     </div>
   </div>
-  <div class="market-tape no-print" id="marketTape" aria-label="Canlı piyasa şeridi">
-    <div class="market-tape-track" id="marketTapeTrack"><span class="tape-item"><span class="t-name">Piyasa verisi yükleniyor…</span></span></div>
+  <div class="market-tape no-print" id="marketTape" data-i18n-aria="tape_aria" aria-label="Canlı piyasa şeridi">
+    <div class="market-tape-track" id="marketTapeTrack"><span class="tape-item"><span class="t-name" data-i18n="tape_loading">Piyasa verisi yükleniyor…</span></span></div>
   </div>
 </header>
 
 <!-- SEKME ÇUBUĞU -->
 <nav class="tabs-nav no-print">
   <div class="tabs-in">
-    <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')">📊 Bilanço Analizi</button>
-    <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')">📅 Ekonomik Takvim</button>
-    <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')">🏆 İlk 100 Şirket</button>
-    <button class="tab-btn" id="tabbtn-scan" onclick="switchPage('scan')">🔎 Hisse Tarayıcı</button>
-    <button class="tab-btn" id="tabbtn-sect" onclick="switchPage('sect')">🏭 Sektör Devleri</button>
-    <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')">🏦 Aracı Kurum Dağılımı</button>
-    <button class="tab-btn" id="tabbtn-etf" onclick="switchPage('etf')">📦 ETF</button>
-    <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')">🌎 Dünya Haberleri</button>
-    <button class="tab-btn" id="tabbtn-st" onclick="switchPage('st')">💬 hisseX</button>
+    <button class="tab-btn" id="tabbtn-stock" onclick="switchPage('stock')" data-i18n="tab_stock">📊 Bilanço Analizi</button>
+    <button class="tab-btn" id="tabbtn-econ" onclick="switchPage('econ')" data-i18n="tab_econ">📅 Ekonomik Takvim</button>
+    <button class="tab-btn" id="tabbtn-top100" onclick="switchPage('top100')" data-i18n="tab_top100">🏆 İlk 100 Şirket</button>
+    <button class="tab-btn" id="tabbtn-scan" onclick="switchPage('scan')" data-i18n="tab_scan">🔎 Hisse Tarayıcı</button>
+    <button class="tab-btn" id="tabbtn-sect" onclick="switchPage('sect')" data-i18n="tab_sect">🏭 Sektör Devleri</button>
+    <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')" data-i18n="tab_takas">🏦 Aracı Kurum Dağılımı</button>
+    <button class="tab-btn" id="tabbtn-etf" onclick="switchPage('etf')" data-i18n="tab_etf">📦 ETF</button>
+    <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')" data-i18n="tab_wnews">🌎 Dünya Haberleri</button>
+    <button class="tab-btn" id="tabbtn-st" onclick="switchPage('st')" data-i18n="tab_st">💬 hisseX</button>
   </div>
 </nav>
 
@@ -593,12 +601,12 @@
     <div class="hero-logo">
       <img src="/icons/icon-512.png" width="88" height="88" alt="Bilanço Analiz">
     </div>
-    <h2>Hisse ara, bilançoyu anında analiz et</h2>
-    <div class="hero-sub">25 ülke, 32.000 şirketin bilanço ve finansal verisini tek yerden gör.<br>Türkiye, ABD, Kanada, İngiltere, Güney Kore, Japonya, Çin, Hong Kong, Tayvan, Singapur, Avustralya, Almanya, Fransa, İtalya, İspanya, Hollanda, Belçika, Portekiz, İsviçre, İsveç, Danimarka, Norveç, Finlandiya, Avusturya, Polonya — şirketin kodunu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
+    <h2 data-i18n="hero_h2">Hisse ara, bilançoyu anında analiz et</h2>
+    <div class="hero-sub" data-i18n-html="hero_sub">25 ülke, 32.000 şirketin bilanço ve finansal verisini tek yerden gör.<br>Türkiye, ABD, Kanada, İngiltere, Güney Kore, Japonya, Çin, Hong Kong, Tayvan, Singapur, Avustralya, Almanya, Fransa, İtalya, İspanya, Hollanda, Belçika, Portekiz, İsviçre, İsveç, Danimarka, Norveç, Finlandiya, Avusturya, Polonya — şirketin kodunu yaz, borsa otomatik bulunur.<br>Bilanço, oranlar, değerleme, haberler ve analist hedefleri tek ekranda.</div>
     <div class="hero-search">
       <div class="voice-field">
-        <input id="homeTicker" placeholder="örn. NVDA, THYAO, SIE, RR, AIR…" onkeydown="if(event.key==='Enter')homeSearch()" autocomplete="off">
-        <button type="button" id="homeVoiceBtn" class="voice-mic" title="Sesli komut (hisse veya sekme)" aria-label="Sesli komut" onclick="toggleHomeVoice()">
+        <input id="homeTicker" data-i18n-placeholder="ph_home_ticker" placeholder="örn. NVDA, THYAO, SIE, RR, AIR…" onkeydown="if(event.key==='Enter')homeSearch()" autocomplete="off">
+        <button type="button" id="homeVoiceBtn" class="voice-mic" data-i18n-title="voice_title_home" data-i18n-aria="voice_aria" title="Sesli komut (hisse veya sekme)" aria-label="Sesli komut" onclick="toggleHomeVoice()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/>
             <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
@@ -607,45 +615,45 @@
         </button>
       </div>
       <select id="homePeriod">
-        <option value="quarter" selected>Çeyreklik</option>
-        <option value="annual">Yıllık</option>
+        <option value="quarter" selected data-i18n="period_quarter">Çeyreklik</option>
+        <option value="annual" data-i18n="period_annual">Yıllık</option>
       </select>
-      <button class="primary" onclick="homeSearch()">Ara →</button>
+      <button class="primary" onclick="homeSearch()" data-i18n="btn_search">Ara →</button>
     </div>
-    <div class="hero-hint">Örnek: <b>NVDA</b> · <b>THYAO</b> · <b>NESN</b> · <b>005930</b> — kodu yazıp Ara’ya bas; o ülkenin <b>Bugünün Fırsatları</b> listesi açılır.</div>
+    <div class="hero-hint" data-i18n-html="hero_hint">Örnek: <b>NVDA</b> · <b>THYAO</b> · <b>NESN</b> · <b>005930</b> — kodu yazıp Ara’ya bas; o ülkenin <b>Bugünün Fırsatları</b> listesi açılır.</div>
     <div id="homeSearchStatus" class="hint" style="margin-top:10px"></div>
   </div>
 
   <!-- İZLEME LİSTESİ -->
   <div class="card no-print hidden" id="watchCard">
-    <h2>İzleme Listem</h2>
-    <div class="sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
+    <h2 data-i18n="watch_h2">İzleme Listem</h2>
+    <div class="sub" data-i18n-html="watch_sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
     <div id="watchBody"><div class="hint">—</div></div>
   </div>
 
   <!-- Discovery: arama yapılana kadar gizli; aranan hissenin ülkesine göre dolar -->
   <div class="card no-print hidden" id="discCard">
-    <h2 id="discTitle">Bugünün Fırsatları</h2>
-    <div class="sub" id="discSub">Aradığın hissenin borsasına göre günün yükselen / düşen / en aktif listesi. Satıra tıkla → bilanço analizi.</div>
+    <h2 id="discTitle" data-i18n="disc_title">Bugünün Fırsatları</h2>
+    <div class="sub" id="discSub" data-i18n="disc_sub">Aradığın hissenin borsasına göre günün yükselen / düşen / en aktif listesi. Satıra tıkla → bilanço analizi.</div>
     <div id="discOpenBar" class="toolbar" style="margin-bottom:12px;gap:8px;flex-wrap:wrap;display:none"></div>
     <div class="toolbar" style="margin-bottom:12px;gap:8px;flex-wrap:wrap">
-      <button type="button" class="scan-chip active" data-disc="gainers" onclick="selectDiscTab(this)">Yükselenler</button>
-      <button type="button" class="scan-chip" data-disc="losers" onclick="selectDiscTab(this)">Düşenler</button>
-      <button type="button" class="scan-chip" data-disc="actives" onclick="selectDiscTab(this)">En Aktif</button>
+      <button type="button" class="scan-chip active" data-disc="gainers" onclick="selectDiscTab(this)" data-i18n="disc_gainers">Yükselenler</button>
+      <button type="button" class="scan-chip" data-disc="losers" onclick="selectDiscTab(this)" data-i18n="disc_losers">Düşenler</button>
+      <button type="button" class="scan-chip" data-disc="actives" onclick="selectDiscTab(this)" data-i18n="disc_actives">En Aktif</button>
     </div>
     <div id="discBody"><div class="hint">—</div></div>
   </div>
 
   <!-- Hisse Takvimi: arama yapılana kadar gizli (Bugünün Fırsatları ile aynı kural) -->
   <div class="card no-print hidden" id="eqCalCard">
-    <h2 id="eqCalTitle">Hisse Takvimi</h2>
-    <div class="sub" id="eqCalSub">Aradığın hissenin borsasına göre ajanda. Satıra tıkla → analiz.</div>
+    <h2 id="eqCalTitle" data-i18n="eqcal_title">Hisse Takvimi</h2>
+    <div class="sub" id="eqCalSub" data-i18n="eqcal_sub">Aradığın hissenin borsasına göre ajanda. Satıra tıkla → analiz.</div>
     <div class="toolbar" style="margin-bottom:12px;gap:8px;flex-wrap:wrap;align-items:center">
-      <button type="button" class="scan-chip active" data-eqcal="earnings" onclick="selectEqCalTab(this)">Bilanço</button>
-      <button type="button" class="scan-chip" data-eqcal="dividends" onclick="selectEqCalTab(this)">Temettü</button>
-      <button type="button" class="scan-chip" data-eqcal="ipo" onclick="selectEqCalTab(this)">IPO</button>
-      <button type="button" class="scan-chip" data-eqcal="splits" onclick="selectEqCalTab(this)">Bölünme</button>
-      <label id="eqCalDayWrap" style="flex-direction:row;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:var(--muted)">Gün
+      <button type="button" class="scan-chip active" data-eqcal="earnings" onclick="selectEqCalTab(this)" data-i18n="eqcal_earnings">Bilanço</button>
+      <button type="button" class="scan-chip" data-eqcal="dividends" onclick="selectEqCalTab(this)" data-i18n="eqcal_div">Temettü</button>
+      <button type="button" class="scan-chip" data-eqcal="ipo" onclick="selectEqCalTab(this)" data-i18n="eqcal_ipo">IPO</button>
+      <button type="button" class="scan-chip" data-eqcal="splits" onclick="selectEqCalTab(this)" data-i18n="eqcal_splits">Bölünme</button>
+      <label id="eqCalDayWrap" style="flex-direction:row;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:var(--muted)"><span data-i18n="eqcal_day">Gün</span>
         <input type="date" id="eqCalDay" onchange="loadEqCalendar()" style="background:var(--surface);border:1px solid var(--line-2);color:var(--ink);border-radius:8px;padding:6px 8px">
       </label>
     </div>
@@ -659,12 +667,12 @@
 
   <!-- ŞİRKET ARAMA -->
   <div class="card no-print" id="stockSearchCard">
-    <h2>Hisse Ara</h2>
-    <div class="sub">Hisse kodunu yaz, <b>Ara</b>'ya bas — borsa otomatik bulunur (25 ülke). Örnek: <b>NVDA</b>, <b>THYAO</b>, <b>2330</b> (TSMC), <b>SHOP</b>, <b>BHP</b>, <b>D05</b> (DBS). Ekler: <b>.US .IS .T .HK .TW .TO .AX .SI</b> ve diğerleri. Mikrofon: <b>AMD kazançlar</b>, <b>AMD özet</b>, <b>AMD fiyat grafiği</b>…</div>
+    <h2 data-i18n="stock_search_h2">Hisse Ara</h2>
+    <div class="sub" data-i18n-html="stock_search_sub">Hisse kodunu yaz, <b>Ara</b>'ya bas — borsa otomatik bulunur (25 ülke). Örnek: <b>NVDA</b>, <b>THYAO</b>, <b>2330</b> (TSMC), <b>SHOP</b>, <b>BHP</b>, <b>D05</b> (DBS). Ekler: <b>.US .IS .T .HK .TW .TO .AX .SI</b> ve diğerleri. Mikrofon: <b>AMD kazançlar</b>, <b>AMD özet</b>, <b>AMD fiyat grafiği</b>…</div>
     <div class="toolbar" style="align-items:center">
       <div class="voice-field">
-        <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()" autocomplete="off">
-        <button type="button" id="stockVoiceBtn" class="voice-mic" title="Sesli komut — örn. AMD kazançlar" aria-label="Sesli komut" onclick="toggleHomeVoice()">
+        <input id="ticker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" data-i18n-placeholder="ph_ticker" placeholder="örn. NVDA" onkeydown="if(event.key==='Enter')fetchTicker()" autocomplete="off">
+        <button type="button" id="stockVoiceBtn" class="voice-mic" data-i18n-title="voice_title_stock" data-i18n-aria="voice_aria" title="Sesli komut — örn. AMD kazançlar" aria-label="Sesli komut" onclick="toggleHomeVoice()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/>
             <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
@@ -673,13 +681,13 @@
         </button>
       </div>
       <select id="periodType" class="cell" style="width:auto">
-        <option value="quarter" selected>Çeyreklik</option>
-        <option value="annual">Yıllık</option>
+        <option value="quarter" selected data-i18n="period_quarter">Çeyreklik</option>
+        <option value="annual" data-i18n="period_annual">Yıllık</option>
       </select>
-      <button class="primary" onclick="fetchTicker()">Ara →</button>
-      <button id="watchStar" class="hidden" onclick="toggleWatch()" title="İzleme listesine ekle/çıkar">☆ Listeme Ekle</button>
+      <button class="primary" onclick="fetchTicker()" data-i18n="btn_search">Ara →</button>
+      <button id="watchStar" class="hidden" onclick="toggleWatch()" title="İzleme listesine ekle/çıkar" data-i18n="watch_add">☆ Listeme Ekle</button>
       <span id="forumWrap" class="forum-wrap hidden">
-        <button id="forumBtn" type="button" onclick="toggleForumMenu(event)" title="Investing.com hisse forumu">Forum ▾</button>
+        <button id="forumBtn" type="button" onclick="toggleForumMenu(event)" title="Investing.com hisse forumu" data-i18n="forum">Forum ▾</button>
         <div id="forumMenu" class="forum-menu hidden" role="menu" onclick="event.stopPropagation()">
           <button type="button" role="menuitem" onclick="openInvestingForumLocale('tr')">Türkçe</button>
           <button type="button" role="menuitem" onclick="openInvestingForumLocale('us')">English (USA)</button>
@@ -688,22 +696,22 @@
       <span id="fetchStatus" class="hint"></span>
     </div>
     <div id="marketOrigin" class="hidden" style="margin-top:12px;display:none;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-radius:11px;background:var(--surface-2);border:1px solid var(--line)">
-      <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">Piyasa</span>
+      <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em" data-i18n="market_lbl">Piyasa</span>
       <span id="marketOriginText" style="font-size:14px;font-weight:700;color:var(--ink)"></span>
     </div>
   </div>
 
   <!-- ŞİRKET KARŞILAŞTIRMA -->
   <div class="card no-print" id="cmpCard">
-    <h2>Şirket Karşılaştırma</h2>
-    <div class="sub">2–4 hisse kodunu virgülle ayırarak yaz (farklı ülkeler karışık olabilir). Örnek: <b>AAPL, D05.SI, BHP.AX</b> veya <b>2330.TW, SHOP.TO</b>. Mikrofon: <b>AMD NVDA çeyreklik karşılaştır</b>, <b>AMD NVDA AMZN yıllık karşılaştır</b>. Not: farklı para birimlerinde mutlak tutarları değil oranları (marj, ROE) karşılaştırın.</div>
+    <h2 data-i18n="cmp_h2">Şirket Karşılaştırma</h2>
+    <div class="sub" data-i18n-html="cmp_sub">2–4 hisse kodunu virgülle ayırarak yaz (farklı ülkeler karışık olabilir). Örnek: <b>AAPL, D05.SI, BHP.AX</b> veya <b>2330.TW, SHOP.TO</b>. Mikrofon: <b>AMD NVDA çeyreklik karşılaştır</b>, <b>AMD NVDA AMZN yıllık karşılaştır</b>. Not: farklı para birimlerinde mutlak tutarları değil oranları (marj, ROE) karşılaştırın.</div>
     <div class="toolbar" style="align-items:center">
-      <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
+      <input id="cmpTickers" class="cell" style="width:300px;text-align:left;text-transform:uppercase;font-weight:600;font-size:14px" data-i18n-placeholder="ph_cmp" placeholder="örn. AAPL, MSFT, NVDA" onkeydown="if(event.key==='Enter')compareTickers()">
       <select id="cmpPeriod" class="cell" style="width:auto">
-        <option value="quarter" selected>Çeyreklik</option>
-        <option value="annual">Yıllık</option>
+        <option value="quarter" selected data-i18n="period_quarter">Çeyreklik</option>
+        <option value="annual" data-i18n="period_annual">Yıllık</option>
       </select>
-      <button class="primary" onclick="compareTickers()">Karşılaştır →</button>
+      <button class="primary" onclick="compareTickers()" data-i18n="btn_compare">Karşılaştır →</button>
       <span id="cmpStatus" class="hint"></span>
     </div>
     <div id="cmpResult" style="overflow-x:auto"></div>
@@ -711,22 +719,22 @@
 
   <!-- VERİ GİRİŞİ -->
   <div class="card" id="inputDataCard">
-    <h2>Bilanço Verisi</h2>
-    <div class="sub">Otomatik gelen veriyi buradan düzenleyebilir veya elle girebilirsiniz. Tutarlar şirketin <span id="curNote">para biriminde</span>dir.</div>
+    <h2 data-i18n="input_h2">Bilanço Verisi</h2>
+    <div class="sub" data-i18n-html="input_sub">Otomatik gelen veriyi buradan düzenleyebilir veya elle girebilirsiniz. Tutarlar şirketin <span id="curNote">para biriminde</span>dir.</div>
     <div id="priceNote" class="hidden" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px"></div>
     <div id="earnNote" class="hidden" style="margin-bottom:14px"></div>
     <div class="toolbar">
-      <button class="primary" onclick="analyze()">🔍 Analiz Et</button>
-      <button onclick="loadSample()">📋 Örnek Veri</button>
-      <button onclick="addRow('asset')">+ Varlık</button>
-      <button onclick="addRow('liab')">+ Yükümlülük</button>
-      <button onclick="addRow('equity')">+ Özkaynak</button>
-      <button onclick="clearAll()">🗑 Temizle</button>
+      <button class="primary" onclick="analyze()" data-i18n="btn_analyze">🔍 Analiz Et</button>
+      <button onclick="loadSample()" data-i18n="btn_sample">📋 Örnek Veri</button>
+      <button onclick="addRow('asset')" data-i18n="btn_asset">+ Varlık</button>
+      <button onclick="addRow('liab')" data-i18n="btn_liab">+ Yükümlülük</button>
+      <button onclick="addRow('equity')" data-i18n="btn_equity">+ Özkaynak</button>
+      <button onclick="clearAll()" data-i18n="btn_clear">🗑 Temizle</button>
     </div>
 
     <table id="inputTable">
       <thead>
-        <tr><th style="width:40%">Kalem</th><th>Kategori</th><th id="thCur">Cari Dönem</th><th id="thPrev">Önceki Dönem</th><th class="row-actions"></th></tr>
+        <tr><th style="width:40%" data-i18n="th_item">Kalem</th><th data-i18n="th_cat">Kategori</th><th id="thCur" data-i18n="th_cur">Cari Dönem</th><th id="thPrev" data-i18n="th_prev">Önceki Dönem</th><th class="row-actions"></th></tr>
       </thead>
       <tbody id="inputBody"></tbody>
     </table>
@@ -736,162 +744,162 @@
   <div id="results" class="hidden">
 
     <div class="toolbar no-print" style="justify-content:flex-end;margin-bottom:6px">
-      <button onclick="exportPDF()">📄 PDF / Yazdır</button>
-      <button onclick="exportCSV()">⬇ Excel (CSV)</button>
+      <button onclick="exportPDF()" data-i18n="btn_pdf">📄 PDF / Yazdır</button>
+      <button onclick="exportCSV()" data-i18n="btn_csv">⬇ Excel (CSV)</button>
     </div>
     <div id="reportTitle" style="font-size:15px;font-weight:700;color:var(--ink);margin:2px 0 4px"></div>
     <div id="periodNote" class="hint" style="margin:0 0 14px"></div>
 
     <div class="card" id="summaryCard">
-      <h2>Özet</h2>
+      <h2 data-i18n="card_summary">Özet</h2>
       <div id="balcheck" style="margin-bottom:14px"></div>
       <div class="grid" id="kpis"></div>
     </div>
 
     <div class="card hidden" id="valCard">
-      <h2>Değerleme Oranları (Canlı)</h2>
-      <div class="sub">Anlık piyasa fiyatına göre hesaplanır. F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak (Defter Değeri). Sektöre göre yorumlanmalıdır.</div>
+      <h2 data-i18n="card_val">Değerleme Oranları (Canlı)</h2>
+      <div class="sub" data-i18n="card_val_sub">Anlık piyasa fiyatına göre hesaplanır. F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak (Defter Değeri). Sektöre göre yorumlanmalıdır.</div>
       <div class="grid" id="valBody"></div>
     </div>
 
     <div class="card hidden" id="ydfCard">
-      <h2>Yedekler &amp; YDF</h2>
-      <div class="sub">Toplam yedekler = Özkaynaklar − Ödenmiş sermaye. YDF = Toplam yedekler / Piyasa değeri. Oran ne kadar yüksekse (özellikle ≥ 0,80) o kadar iyi; ödenmiş sermayesi düşük, yedekleri yüksek şirketler tercih edilir. <b>BIST</b> (KAP) ve <b>ABD</b> (SEC) hisselerinde görünür.</div>
+      <h2 data-i18n="card_ydf">Yedekler &amp; YDF</h2>
+      <div class="sub" data-i18n-html="card_ydf_sub">Toplam yedekler = Özkaynaklar − Ödenmiş sermaye. YDF = Toplam yedekler / Piyasa değeri. Oran ne kadar yüksekse (özellikle ≥ 0,80) o kadar iyi; ödenmiş sermayesi düşük, yedekleri yüksek şirketler tercih edilir. <b>BIST</b> (KAP) ve <b>ABD</b> (SEC) hisselerinde görünür.</div>
       <div class="grid" id="ydfBody"></div>
     </div>
 
     <div class="card hidden" id="chartCard">
-      <h2>Fiyat Grafiği</h2>
-      <div class="sub">Kapanış fiyatları (Yahoo Finance). <span id="chartInfo"></span></div>
+      <h2 data-i18n="card_chart">Fiyat Grafiği</h2>
+      <div class="sub"><span data-i18n="card_chart_sub">Kapanış fiyatları (Yahoo Finance). </span><span id="chartInfo"></span></div>
       <div class="toolbar" id="chartBtns">
-        <button data-r="1mo" onclick="setChartRange('1mo')">1 Ay</button>
-        <button data-r="3mo" onclick="setChartRange('3mo')">3 Ay</button>
-        <button data-r="6mo" onclick="setChartRange('6mo')">6 Ay</button>
-        <button data-r="1y" class="primary" onclick="setChartRange('1y')">1 Yıl</button>
-        <button data-r="5y" onclick="setChartRange('5y')">5 Yıl</button>
+        <button data-r="1mo" onclick="setChartRange('1mo')" data-i18n="chart_1mo">1 Ay</button>
+        <button data-r="3mo" onclick="setChartRange('3mo')" data-i18n="chart_3mo">3 Ay</button>
+        <button data-r="6mo" onclick="setChartRange('6mo')" data-i18n="chart_6mo">6 Ay</button>
+        <button data-r="1y" class="primary" onclick="setChartRange('1y')" data-i18n="chart_1y">1 Yıl</button>
+        <button data-r="5y" onclick="setChartRange('5y')" data-i18n="chart_5y">5 Yıl</button>
       </div>
       <div id="chartBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card hidden" id="earnCard">
-      <h2>Kazançlar</h2>
-      <div class="sub">HBK (EPS) gerçekleşen vs analist tahmini. Kaynak: <b>TradingView</b>.</div>
+      <h2 data-i18n="card_earn">Kazançlar</h2>
+      <div class="sub" data-i18n-html="card_earn_sub">HBK (EPS) gerçekleşen vs analist tahmini. Kaynak: <b>TradingView</b>.</div>
       <div class="earn-toolbar">
-        <button type="button" class="scan-chip" id="earnTabFY" onclick="setEarnMode('annual')">Yıllık</button>
-        <button type="button" class="scan-chip active" id="earnTabQ" onclick="setEarnMode('quarter')">Üç aylık</button>
-        <span class="earn-legend" style="margin-left:auto"><span class="earn-dot act"></span> Güncel <span class="earn-dot est" style="margin-left:12px"></span> Tahmin</span>
+        <button type="button" class="scan-chip" id="earnTabFY" onclick="setEarnMode('annual')" data-i18n="earn_annual">Yıllık</button>
+        <button type="button" class="scan-chip active" id="earnTabQ" onclick="setEarnMode('quarter')" data-i18n="earn_quarter">Üç aylık</button>
+        <span class="earn-legend" style="margin-left:auto"><span class="earn-dot act"></span> <span data-i18n="earn_actual">Güncel</span> <span class="earn-dot est" style="margin-left:12px"></span> <span data-i18n="earn_est">Tahmin</span></span>
       </div>
       <div id="earnChart"><div class="hint">—</div></div>
       <div id="earnMeta"></div>
     </div>
 
     <div class="card hidden" id="ownerCard">
-      <h2>Ortaklık Yapısı</h2>
-      <div class="sub" id="ownerSub">Şirketin payları kimde — halka açıklık oranı ve büyük ortaklar, pasta dilimiyle. ABD’de kurumsal (13F) sahipler listelenir. <b>BIST / ABD:</b> fiili dolaşımdaki senet = ödenmiş sermaye ÷ halka açıklık oranı.</div>
+      <h2 data-i18n="card_owner">Ortaklık Yapısı</h2>
+      <div class="sub" id="ownerSub" data-i18n-html="card_owner_sub">Şirketin payları kimde — halka açıklık oranı ve büyük ortaklar, pasta dilimiyle. ABD’de kurumsal (13F) sahipler listelenir. <b>BIST / ABD:</b> fiili dolaşımdaki senet = ödenmiş sermaye ÷ halka açıklık oranı.</div>
       <div id="ownerBody"><div class="hint">—</div></div>
       <div id="ownerFloatBody" class="hidden" style="margin-top:14px"></div>
       <div id="ownerInstBody" class="hidden" style="margin-top:14px"></div>
     </div>
 
     <div class="card hidden" id="techCard">
-      <h2>Teknik Görünüm & Risk</h2>
-      <div class="sub">Momentum, trend ve risk: RSI, Fisher Dönüşümü, SMA50/200, 52 hafta, beta, volatilite. Kaynak: TradingView + Yahoo (Fisher)<span id="techShortSrc"></span>.</div>
+      <h2 data-i18n="card_tech">Teknik Görünüm & Risk</h2>
+      <div class="sub"><span data-i18n="card_tech_sub">Momentum, trend ve risk: RSI, Fisher Dönüşümü, SMA50/200, 52 hafta, beta, volatilite. Kaynak: TradingView + Yahoo (Fisher)</span><span id="techShortSrc"></span>.</div>
       <div id="techBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card" id="incomeCard">
-      <h2>Gelir Tablosu & Kârlılık</h2>
-      <div class="sub">SEC'ten çekilen gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
+      <h2 data-i18n="card_income">Gelir Tablosu & Kârlılık</h2>
+      <div class="sub" data-i18n="card_income_sub">SEC'ten çekilen gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
       <div class="grid" id="profKpis" style="margin-bottom:16px"></div>
       <table>
-        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim</th></tr></thead>
+        <thead><tr><th data-i18n="th_item">Kalem</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th data-i18n="th_change">Değişim</th></tr></thead>
         <tbody id="incomeBody"></tbody>
       </table>
       <div style="height:14px"></div>
       <table>
-        <thead><tr><th>Kârlılık Oranı</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
+        <thead><tr><th data-i18n="th_profit_ratio">Kârlılık Oranı</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th data-i18n="th_change">Değişim</th><th data-i18n="th_status">Durum</th></tr></thead>
         <tbody id="profBody"></tbody>
       </table>
     </div>
 
     <div class="card hidden" id="cashCard">
-      <h2>Nakit Akışı & Serbest Nakit Akış (FCF)</h2>
-      <div class="sub">Kâr kâğıt üzerinde kalabilir — nakit yalan söylemez. FCF = Faaliyet Nakiti − Yatırım Harcamaları (capex): şirketin temettü/geri alım/borç ödemeye ayırabileceği gerçek nakit. <span id="cashNote" class="hint"></span></div>
+      <h2 data-i18n="card_cash">Nakit Akışı & Serbest Nakit Akış (FCF)</h2>
+      <div class="sub"><span data-i18n="card_cash_sub">Kâr kâğıt üzerinde kalabilir — nakit yalan söylemez. FCF = Faaliyet Nakiti − Yatırım Harcamaları (capex): şirketin temettü/geri alım/borç ödemeye ayırabileceği gerçek nakit. </span><span id="cashNote" class="hint"></span></div>
       <div class="grid" id="cashKpis"></div>
     </div>
 
     <div class="card" id="trendCard">
-      <h2>Çok Yıllı Trend</h2>
-      <div class="sub">Son dönemlerin gelişimi. Çubuğa gelince değeri görürsünüz.</div>
+      <h2 data-i18n="card_trend">Çok Yıllı Trend</h2>
+      <div class="sub" data-i18n="card_trend_sub">Son dönemlerin gelişimi. Çubuğa gelince değeri görürsünüz.</div>
       <div class="grid" id="trendCharts" style="grid-template-columns:repeat(auto-fit,minmax(330px,1fr))"></div>
     </div>
 
     <div class="card" id="newsCard">
-      <h2>Güncel Haberler</h2>
-      <div class="sub">Üst düzey kaynaklardan (Bloomberg, CNBC, Reuters, WSJ, MarketWatch, Forbes, Yahoo Finance…) bu şirketle ilgili en az 12 güncel haber — başlık ve özet Türkçe. Başlığa tıklayınca <b>Türkçe özet uygulama içinde</b> açılır; "Orijinal habere git" ile kaynağın İngilizce sayfasına gidersin. (MSN, Barron's, Seeking Alpha gibi sorunlu kaynaklar hiç gösterilmez.)</div>
+      <h2 data-i18n="card_news">Güncel Haberler</h2>
+      <div class="sub" data-i18n="card_news_sub">Üst düzey kaynaklardan (Bloomberg, CNBC, Reuters, WSJ, MarketWatch, Forbes, Yahoo Finance…) bu şirketle ilgili en az 12 güncel haber — başlık ve özet. Başlığa tıklayınca özet uygulama içinde açılır; "Orijinal habere git" ile kaynağa gidersin.</div>
       <div id="newsList"><div class="hint">—</div></div>
     </div>
 
     <div class="card hidden" id="kapCard">
-      <h2>KAP Bildirimleri</h2>
-      <div class="sub">Şirketin Kamuyu Aydınlatma Platformu'na yaptığı son bildirimler — yeni iş ilişkileri, pay alım satımı, sermaye/temettü kararları, derecelendirme vb. Kısa özet burada; başlığa tıklayıp <b>"KAP'ta tam bildirimi oku"</b> ile resmi bildirime gidebilirsin. (Yalnızca BIST hisselerinde görünür.)</div>
+      <h2 data-i18n="card_kap">KAP Bildirimleri</h2>
+      <div class="sub" data-i18n-html="card_kap_sub">Şirketin Kamuyu Aydınlatma Platformu'na yaptığı son bildirimler. Kısa özet burada; başlığa tıklayıp resmi bildirime gidebilirsin. (Yalnızca BIST.)</div>
       <div id="kapBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card hidden" id="targetCard">
-      <h2>Analist Hedef Fiyatları</h2>
-      <div class="sub">Hisseyi izleyen banka ve aracı kurumların konsensüs hedef fiyatı, genel tavsiye ve dağılım. ABD hisselerinde kaynak Finviz (kurum bazlı not geçmişiyle); BIST hisselerinde kaynak TradingView/Refinitiv (Türk ve uluslararası aracı kurum tahminlerinin konsensüsü: ortalama/en yüksek/en düşük hedef + Al-Tut-Sat dağılımı).</div>
+      <h2 data-i18n="card_target">Analist Hedef Fiyatları</h2>
+      <div class="sub" data-i18n="card_target_sub">Hisseyi izleyen banka ve aracı kurumların konsensüs hedef fiyatı, genel tavsiye ve dağılım.</div>
       <div id="targetBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card hidden" id="sectorCard">
-      <h2>Sektör Karşılaştırması</h2>
-      <div class="sub" id="sectorSub">Aynı sektördeki en büyük şirketlerle yan yana — F/K, PD/DD, ROE, net marj ve sektör medyanı. (Kaynak: TradingView)</div>
+      <h2 data-i18n="card_sector">Sektör Karşılaştırması</h2>
+      <div class="sub" id="sectorSub" data-i18n="card_sector_sub">Aynı sektördeki en büyük şirketlerle yan yana — F/K, PD/DD, ROE, net marj ve sektör medyanı. (Kaynak: TradingView)</div>
       <div id="sectorBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card hidden" id="insiderCard">
-      <h2>İçeriden Alım-Satım (Form 4)</h2>
-      <div class="sub">Şirket yöneticileri ve büyük ortakların kendi hisselerindeki işlemleri — SEC'e zorunlu Form 4 bildirimlerinden. Yöneticilerin <span class="up">alımı</span> genelde güven işareti sayılır. (Yalnızca ABD hisselerinde; BIST'te benzer bildirimler KAP Bildirimleri kartında gelir.)</div>
+      <h2 data-i18n="card_insider">İçeriden Alım-Satım (Form 4)</h2>
+      <div class="sub" data-i18n-html="card_insider_sub">Şirket yöneticileri ve büyük ortakların kendi hisselerindeki işlemleri — SEC Form 4. Yalnızca ABD hisselerinde.</div>
       <div id="insiderBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card" id="ratiosCard">
-      <h2>Finansal Oranlar</h2>
-      <div class="sub">Renkler genel kabul görmüş eşik değerlerine göredir; sektöre göre yorumlanmalıdır.</div>
+      <h2 data-i18n="card_ratios">Finansal Oranlar</h2>
+      <div class="sub" data-i18n="card_ratios_sub">Renkler genel kabul görmüş eşik değerlerine göredir; sektöre göre yorumlanmalıdır.</div>
       <table>
-        <thead><tr><th>Oran</th><th>Cari</th><th>Önceki</th><th>Değişim</th><th>Durum</th></tr></thead>
+        <thead><tr><th data-i18n="th_ratio">Oran</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th data-i18n="th_change">Değişim</th><th data-i18n="th_status">Durum</th></tr></thead>
         <tbody id="ratioBody"></tbody>
       </table>
     </div>
 
     <div class="card hidden" id="healthCard">
-      <h2>Sağlık Karnesi — DuPont · Piotroski</h2>
-      <div class="sub"><b>DuPont</b> ROE'yi 3 bileşene ayırır (kârlılık × verimlilik × kaldıraç) — cari değer önceki döneme göre olumluysa <span class="up">yeşil</span>, olumsuzsa <span class="down">kırmızı</span>; <b>Piotroski F-Score</b> 9 kriterle finansal kaliteyi puanlar (7+ güçlü).</div>
+      <h2 data-i18n="card_health">Sağlık Karnesi — DuPont · Piotroski</h2>
+      <div class="sub" data-i18n-html="card_health_sub"><b>DuPont</b> ROE'yi 3 bileşene ayırır; <b>Piotroski F-Score</b> 9 kriterle finansal kaliteyi puanlar (7+ güçlü).</div>
       <div id="healthBody"><div class="hint">—</div></div>
     </div>
 
     <div class="card" id="varianceCard">
-      <h2>Önemli Değişimler</h2>
-      <div class="sub">Dönemler arası tutarca en büyük 8 değişim. Sıralama mutlak değişime göre.</div>
+      <h2 data-i18n="card_var">Önemli Değişimler</h2>
+      <div class="sub" data-i18n="card_var_sub">Dönemler arası tutarca en büyük 8 değişim. Sıralama mutlak değişime göre.</div>
       <table>
-        <thead><tr><th>Kalem</th><th>Cari</th><th>Önceki</th><th>Değişim ($)</th><th>Değişim (%)</th><th>Yön</th></tr></thead>
+        <thead><tr><th data-i18n="th_item">Kalem</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th data-i18n="th_chg_abs">Değişim ($)</th><th data-i18n="th_chg_pct">Değişim (%)</th><th data-i18n="th_dir">Yön</th></tr></thead>
         <tbody id="varBody"></tbody>
       </table>
     </div>
 
     <div class="card" id="verticalCard">
-      <h2>Dikey Analiz</h2>
-      <div class="sub">Her kalemin toplam varlıklara oranı — bilançonun bileşimi ve dönemsel kayması.</div>
+      <h2 data-i18n="card_vert">Dikey Analiz</h2>
+      <div class="sub" data-i18n="card_vert_sub">Her kalemin toplam varlıklara oranı — bilançonun bileşimi ve dönemsel kayması.</div>
       <table>
-        <thead><tr><th>Kalem</th><th>Cari %</th><th>Önceki %</th><th>Pay Değişimi</th><th></th></tr></thead>
+        <thead><tr><th data-i18n="th_item">Kalem</th><th data-i18n="th_cur_pct">Cari %</th><th data-i18n="th_prev_pct">Önceki %</th><th data-i18n="th_share_chg">Pay Değişimi</th><th></th></tr></thead>
         <tbody id="vertBody"></tbody>
       </table>
     </div>
 
     <div class="card" id="flagsCard">
-      <h2>Otomatik Yorum & Risk İşaretleri</h2>
-      <div class="sub">Kurallara dayalı otomatik değerlendirme. Yatırım kararı için profesyonel görüş alınmalıdır.</div>
+      <h2 data-i18n="card_flags">Otomatik Yorum & Risk İşaretleri</h2>
+      <div class="sub" data-i18n="card_flags_sub">Kurallara dayalı otomatik değerlendirme. Yatırım kararı için profesyonel görüş alınmalıdır.</div>
       <div id="flags"></div>
     </div>
 
@@ -903,14 +911,14 @@
 <div id="page-top100" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>Piyasa Değerine Göre İlk 100 Şirket — 25 Ülke</h2>
-    <div class="sub">Soldan ülke kutusuna tıkla — o ülkenin borsasındaki en değerli 100 şirket canlı piyasa değerine göre sıralı açılır, <b>tekrar tıklayınca kapanır</b>. Tek seferde bir ülke listesi açık kalır; başka ülkeye tıklayınca öncekinin yerini alır. <b>Satıra tıklayınca o şirketin bilanço analizi açılır.</b> Kaynak: TradingView (canlı).</div>
+    <h2 data-i18n="top100_h2">Piyasa Değerine Göre İlk 100 Şirket — 25 Ülke</h2>
+    <div class="sub" data-i18n-html="top100_sub">Soldan ülke kutusuna tıkla — o ülkenin borsasındaki en değerli 100 şirket canlı piyasa değerine göre sıralı açılır. <b>Satıra tıklayınca bilanço analizi açılır.</b> Kaynak: TradingView.</div>
   </div>
 
   <div class="econ-layout">
     <div class="econ-side no-print" id="topCountries"></div>
     <div class="econ-main" id="topPanels">
-      <div class="hint" id="topEmptyHint" style="padding:26px 10px;text-align:center">İlk 100 listesini görmek istediğin ülkeyi soldan seç.</div>
+      <div class="hint" id="topEmptyHint" style="padding:26px 10px;text-align:center" data-i18n="top100_hint">İlk 100 listesini görmek istediğin ülkeyi soldan seç.</div>
     </div>
   </div>
 
@@ -920,10 +928,8 @@
 <div id="page-scan" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>Hisse Tarayıcı — 25 Ülke Borsası</h2>
-    <div class="sub">TradingView Hisse Tarayıcısı + quant skor: soldan ülke seç → tüm birincil hisseler yüklenir.
-      Piyasa değeri, trend, RSI, momentum, value/quality filtreleri ve <b>Quant Skor</b> ile daralt.
-      <b>Satıra tıklayınca bilanço analizi açılır.</b></div>
+    <h2 data-i18n="scan_h2">Hisse Tarayıcı — 25 Ülke Borsası</h2>
+    <div class="sub" data-i18n-html="scan_sub">TradingView Hisse Tarayıcısı + quant skor: soldan ülke seç → filtrele. <b>Satıra tıklayınca bilanço analizi açılır.</b></div>
   </div>
 
   <div class="econ-layout">
@@ -931,36 +937,36 @@
     <div class="econ-main">
       <div class="card">
         <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h2 id="scanTitle" style="display:flex;align-items:center;gap:9px;margin:0">Sonuçlar</h2>
+          <h2 id="scanTitle" style="display:flex;align-items:center;gap:9px;margin:0" data-i18n="scan_results">Sonuçlar</h2>
           <div class="scan-inputs" style="margin:0">
-            <label style="flex-direction:row;align-items:center;gap:8px">Ara
-              <input id="scanSearch" type="search" placeholder="kod veya şirket…" style="width:180px" oninput="renderScanPage()">
+            <label style="flex-direction:row;align-items:center;gap:8px"><span data-i18n="scan_search_lbl">Ara</span>
+              <input id="scanSearch" type="search" data-i18n-placeholder="ph_scan" placeholder="kod veya şirket…" style="width:180px" oninput="renderScanPage()">
             </label>
-            <label style="flex-direction:row;align-items:center;gap:8px">Sırala
+            <label style="flex-direction:row;align-items:center;gap:8px"><span data-i18n="scan_sort_lbl">Sırala</span>
               <select id="scanSort" onchange="onScanSortChange()" style="background:var(--surface);border:1px solid var(--line-2);color:var(--ink);border-radius:9px;padding:8px 10px;font-size:13px;font-weight:700">
-                <option value="mcap-desc">Piyasa değeri ↓</option>
-                <option value="mcap-asc">Piyasa değeri ↑</option>
-                <option value="chg-desc">Günlük değişim ↓</option>
-                <option value="name-asc">Kod A→Z</option>
-                <option value="pe-asc">F/K ↑</option>
-                <option value="roe-desc">ROE ↓</option>
-                <option value="div-desc">Temettü ↓</option>
-                <option value="rsi-desc">RSI ↓</option>
-                <option value="rsi-asc">RSI ↑</option>
-                <option value="quant-desc">Quant skor ↓</option>
-                <option value="perf3m-desc">3A getiri ↓</option>
-                <option value="vol-asc">Volatilite ↑</option>
-                <option value="beta-asc">Beta ↑</option>
-                <option value="ydf-desc" id="scanSortYdf" style="display:none">YDF ↓</option>
-                <option value="earn-asc">Yaklaşan kazanç tarihi</option>
+                <option value="mcap-desc" data-i18n="sort_mcap_desc">Piyasa değeri ↓</option>
+                <option value="mcap-asc" data-i18n="sort_mcap_asc">Piyasa değeri ↑</option>
+                <option value="chg-desc" data-i18n="sort_chg">Günlük değişim ↓</option>
+                <option value="name-asc" data-i18n="sort_name">Kod A→Z</option>
+                <option value="pe-asc" data-i18n="sort_pe">F/K ↑</option>
+                <option value="roe-desc" data-i18n="sort_roe">ROE ↓</option>
+                <option value="div-desc" data-i18n="sort_div">Temettü ↓</option>
+                <option value="rsi-desc" data-i18n="sort_rsi_desc">RSI ↓</option>
+                <option value="rsi-asc" data-i18n="sort_rsi_asc">RSI ↑</option>
+                <option value="quant-desc" data-i18n="sort_quant">Quant skor ↓</option>
+                <option value="perf3m-desc" data-i18n="sort_perf">3A getiri ↓</option>
+                <option value="vol-asc" data-i18n="sort_vol">Volatilite ↑</option>
+                <option value="beta-asc" data-i18n="sort_beta">Beta ↑</option>
+                <option value="ydf-desc" id="scanSortYdf" style="display:none" data-i18n="sort_ydf">YDF ↓</option>
+                <option value="earn-asc" data-i18n="sort_earn">Yaklaşan kazanç tarihi</option>
               </select>
             </label>
           </div>
         </div>
         <div class="scan-filters" style="margin:0 0 12px">
           <div class="scan-row">
-            <span class="scan-lbl">Piyasa Değeri</span>
-            <button type="button" class="scan-chip active" data-cap="all" onclick="toggleScanCap(this)">Tümü</button>
+            <span class="scan-lbl" data-i18n="scan_mcap">Piyasa Değeri</span>
+            <button type="button" class="scan-chip active" data-cap="all" onclick="toggleScanCap(this)" data-i18n="scan_all">Tümü</button>
             <button type="button" class="scan-chip" data-cap="mega" onclick="toggleScanCap(this)">Mega</button>
             <button type="button" class="scan-chip" data-cap="large" onclick="toggleScanCap(this)">Large</button>
             <button type="button" class="scan-chip" data-cap="mid" onclick="toggleScanCap(this)">Mid</button>
@@ -968,12 +974,12 @@
             <button type="button" class="scan-chip" data-cap="micro" onclick="toggleScanCap(this)">Micro</button>
           </div>
           <div class="scan-row">
-            <span class="scan-lbl">Trend</span>
+            <span class="scan-lbl" data-i18n="scan_trend">Trend</span>
             <button type="button" class="scan-chip" data-ma="sma50" onclick="toggleScanMa(this)">Fiyat &gt; SMA50</button>
             <button type="button" class="scan-chip" data-ma="sma200" onclick="toggleScanMa(this)">Fiyat &gt; SMA200</button>
           </div>
           <div class="scan-row">
-            <span class="scan-lbl">Quant</span>
+            <span class="scan-lbl" data-i18n="scan_quant">Quant</span>
             <button type="button" class="scan-chip" data-qf="rsi_os" onclick="toggleScanQ(this)">RSI ≤ 30</button>
             <button type="button" class="scan-chip" data-qf="rsi_ob" onclick="toggleScanQ(this)">RSI ≥ 70</button>
             <button type="button" class="scan-chip" data-qf="mom" onclick="toggleScanQ(this)">Momentum+</button>
@@ -983,20 +989,20 @@
             <button type="button" class="scan-chip" data-qf="quality" onclick="toggleScanQ(this)">Quality</button>
             <button type="button" class="scan-chip" data-qf="relvol" onclick="toggleScanQ(this)">Hacim ↑</button>
             <span id="scanYdfFilter" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
-              <label style="flex-direction:row;align-items:center;gap:8px">YDF min
+              <label style="flex-direction:row;align-items:center;gap:8px"><span data-i18n="scan_ydf_min">YDF min</span>
                 <input id="scanYdfMin" type="number" step="0.05" placeholder="0.80" style="width:88px" title="Toplam yedekler / piyasa değeri — BIST ve ABD">
               </label>
-              <span class="hint" id="scanYdfHint" style="margin:0">BIST / ABD · ≥0,80 tercih</span>
+              <span class="hint" id="scanYdfHint" style="margin:0" data-i18n="scan_ydf_hint">BIST / ABD · ≥0,80 tercih</span>
             </span>
-            <button type="button" class="primary" onclick="applyScanFilters()">Filtrele</button>
+            <button type="button" class="primary" onclick="applyScanFilters()" data-i18n="btn_filter">Filtrele</button>
           </div>
         </div>
-        <div class="sub" id="scanSub">Soldan bir ülke seç — o borsadaki tüm hisseler yüklenir.</div>
-        <div id="scanBody"><div class="hint" id="scanEmptyHint">Tarayıcıyı kullanmak için ülke seçin.</div></div>
+        <div class="sub" id="scanSub" data-i18n="scan_sub2">Soldan bir ülke seç — o borsadaki tüm hisseler yüklenir.</div>
+        <div id="scanBody"><div class="hint" id="scanEmptyHint" data-i18n="scan_empty">Tarayıcıyı kullanmak için ülke seçin.</div></div>
         <div id="scanPager" class="scan-row" style="margin-top:12px;justify-content:space-between;display:none">
-          <button type="button" class="scan-chip" id="scanPrev" onclick="scanChangePage(-1)">← Önceki</button>
+          <button type="button" class="scan-chip" id="scanPrev" onclick="scanChangePage(-1)" data-i18n="scan_prev">← Önceki</button>
           <span id="scanPageInfo" style="font-size:12.5px;font-weight:700;color:var(--ink-2)"></span>
-          <button type="button" class="scan-chip" id="scanNext" onclick="scanChangePage(1)">Sonraki →</button>
+          <button type="button" class="scan-chip" id="scanNext" onclick="scanChangePage(1)" data-i18n="scan_next">Sonraki →</button>
         </div>
       </div>
     </div>
@@ -1008,15 +1014,15 @@
 <div id="page-sect" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>Sektör Devleri</h2>
-    <div class="sub">Üstten <b>ülke</b> seç (🌍 = bütün dünya), soldan <b>sektör</b> seç — o ülkenin/dünyanın o sektördeki en değerli şirketleri piyasa değerine göre sıralı açılır. Sektöre tekrar tıklayınca kapanır. <b>Satıra tıklayınca o şirketin bilanço analizi açılır.</b> Kaynak: TradingView (canlı; dünya sıralamasında piyasa değerleri USD'ye çevrilir).</div>
+    <h2 data-i18n="sect_h2">Sektör Devleri</h2>
+    <div class="sub" data-i18n-html="sect_sub">Üstten <b>ülke</b> seç (🌍 = bütün dünya), soldan <b>sektör</b> seç. <b>Satıra tıklayınca bilanço analizi açılır.</b></div>
     <div class="sect-countries" id="sectCountries"></div>
   </div>
 
   <div class="econ-layout">
     <div class="econ-side no-print" id="sectSectors"></div>
     <div class="econ-main" id="sectPanel">
-      <div class="hint" id="sectEmptyHint" style="padding:26px 10px;text-align:center">Soldan bir sektör seç.</div>
+      <div class="hint" id="sectEmptyHint" style="padding:26px 10px;text-align:center" data-i18n="sect_empty">Soldan bir sektör seç.</div>
     </div>
   </div>
 
@@ -1026,20 +1032,20 @@
 <div id="page-etf" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>ETF / Fon İçerik</h2>
-    <div class="sub">ABD: Yahoo ETF holdings. Türkiye: yalnızca sektör ve varlık listesi olan hisse fonları (İş Portföy vb.).</div>
+    <h2 data-i18n="etf_h2">ETF / Fon İçerik</h2>
+    <div class="sub" data-i18n="etf_sub">ABD: Yahoo ETF holdings. Türkiye: yalnızca sektör ve varlık listesi olan hisse fonları (İş Portföy vb.).</div>
     <div class="toolbar" style="margin-bottom:10px;gap:8px;flex-wrap:wrap">
-      <button type="button" class="scan-chip active" id="etfMktUS" onclick="setEtfMarket('US')">ABD</button>
-      <button type="button" class="scan-chip" id="etfMktTR" onclick="setEtfMarket('TR')">Türkiye</button>
+      <button type="button" class="scan-chip active" id="etfMktUS" onclick="setEtfMarket('US')" data-i18n="etf_us">ABD</button>
+      <button type="button" class="scan-chip" id="etfMktTR" onclick="setEtfMarket('TR')" data-i18n="etf_tr">Türkiye</button>
     </div>
     <div class="toolbar" id="etfTefasFilters" style="margin-bottom:10px;gap:8px;flex-wrap:wrap;display:none"></div>
     <div class="toolbar" id="etfChips" style="margin-bottom:12px;gap:8px;flex-wrap:wrap"></div>
     <div class="toolbar" style="align-items:center;margin-bottom:12px">
-      <input id="etfTicker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" placeholder="örn. SPY" onkeydown="if(event.key==='Enter')loadEtf(document.getElementById('etfTicker').value)">
-      <button class="primary" type="button" onclick="loadEtf(document.getElementById('etfTicker').value)">Ara →</button>
+      <input id="etfTicker" class="cell" style="width:200px;text-align:left;text-transform:uppercase;font-weight:700;font-size:15px" data-i18n-placeholder="ph_etf" placeholder="örn. SPY" onkeydown="if(event.key==='Enter')loadEtf(document.getElementById('etfTicker').value)">
+      <button class="primary" type="button" onclick="loadEtf(document.getElementById('etfTicker').value)" data-i18n="btn_search">Ara →</button>
     </div>
     <div id="etfMeta" class="sub" style="margin-bottom:10px"></div>
-    <div id="etfBody"><div class="hint">Soldan bir ETF/fon seç veya kod yaz.</div></div>
+    <div id="etfBody"><div class="hint" data-i18n="etf_empty">Soldan bir ETF/fon seç veya kod yaz.</div></div>
   </div>
 
 </div>
@@ -1048,16 +1054,16 @@
 <div id="page-takas" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>Aracı Kurum Dağılımı — BIST</h2>
-    <div class="sub">Yalnızca Borsa İstanbul. Gün sonu / gün içi <b>aracı kurum dağılımı (AKD)</b> tabloları uygulamada açılır (dış siteye yönlendirme yok). Yatırım tavsiyesi değildir.</div>
+    <h2 data-i18n="takas_h2">Aracı Kurum Dağılımı — BIST</h2>
+    <div class="sub" data-i18n-html="takas_sub">Yalnızca Borsa İstanbul. Gün sonu / gün içi <b>aracı kurum dağılımı (AKD)</b> tabloları uygulamada açılır (dış siteye yönlendirme yok). Yatırım tavsiyesi değildir.</div>
     <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="takasTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. THYAO" onkeydown="if(event.key==='Enter')loadTakasAkd()">
-      <button type="button" class="primary" onclick="loadTakasAkd()">Ara</button>
+      <input id="takasTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" data-i18n-placeholder="ph_takas" placeholder="örn. THYAO" onkeydown="if(event.key==='Enter')loadTakasAkd()">
+      <button type="button" class="primary" onclick="loadTakasAkd()" data-i18n="btn_search_short">Ara</button>
       <span class="hint" id="takasStatus"></span>
     </div>
   </div>
 
-  <div id="takasBody"><div class="hint">BIST hisse kodu yaz (THYAO, ASELS, GARAN…) — güncel aracı kurum dağılımı tabloları gelir.</div></div>
+  <div id="takasBody"><div class="hint" data-i18n="takas_empty">BIST hisse kodu yaz (THYAO, ASELS, GARAN…) — güncel aracı kurum dağılımı tabloları gelir.</div></div>
 
 </div>
 
@@ -1065,8 +1071,8 @@
 <div id="page-wnews" class="page">
 
   <div class="card no-print">
-    <h2>Dünya Haberleri</h2>
-    <div class="sub">Dünyanın en kaliteli kaynaklarından (Bloomberg, Reuters, Financial Times, WSJ, The Economist, BBC, AP…) en güncel haberler — başlık ve özet <b>Türkçe</b>. Konu seç, başlığa tıklayınca Türkçe özet uygulama içinde açılır; "Orijinal habere git" ile kaynağa gidersin.</div>
+    <h2 data-i18n="wnews_h2">Dünya Haberleri</h2>
+    <div class="sub" data-i18n-html="wnews_sub">Dünyanın en kaliteli kaynaklarından (Bloomberg, Reuters, Financial Times, WSJ, The Economist, BBC, AP…) en güncel haberler — başlık ve özet <b>Türkçe</b>. Konu seç, başlığa tıklayınca Türkçe özet uygulama içinde açılır; "Orijinal habere git" ile kaynağa gidersin.</div>
     <div class="toolbar" id="wnewsTopics" style="margin-bottom:14px"></div>
     <div id="wnewsList"><div class="hint">—</div></div>
   </div>
@@ -1077,22 +1083,22 @@
 <div id="page-st" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>hisseX</h2>
-    <div class="sub">Hisse kodunu yaz — <a href="https://stocktwits.com/" target="_blank" rel="noopener">StockTwits</a> üzerindeki en güncel ve popüler yorumlar. Şimdilik <b>ABD hisseleri</b> (AAPL, NVDA, TSLA…). BIST kodları (THYAO vb.) StockTwits’te yok.</div>
+    <h2 data-i18n="st_h2">hisseX</h2>
+    <div class="sub" data-i18n-html="st_sub">Hisse kodunu yaz — <a href="https://stocktwits.com/" target="_blank" rel="noopener">StockTwits</a> üzerindeki en güncel ve popüler yorumlar. Şimdilik <b>ABD hisseleri</b> (AAPL, NVDA, TSLA…). BIST kodları (THYAO vb.) StockTwits’te yok.</div>
     <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="stTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" placeholder="örn. AAPL, NVDA, TSLA" onkeydown="if(event.key==='Enter')loadStockTwits()">
-      <button type="button" class="primary" onclick="loadStockTwits()">Ara</button>
+      <input id="stTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" data-i18n-placeholder="ph_st" placeholder="örn. AAPL, NVDA, TSLA" onkeydown="if(event.key==='Enter')loadStockTwits()">
+      <button type="button" class="primary" onclick="loadStockTwits()" data-i18n="btn_search_short">Ara</button>
       <span class="hint" id="stStatus"></span>
     </div>
   </div>
 
   <div class="card no-print">
     <div class="st-toolbar">
-      <button type="button" class="scan-chip active" id="stTabRecent" onclick="renderStockTwits('recent')">Güncel</button>
-      <button type="button" class="scan-chip" id="stTabPopular" onclick="renderStockTwits('popular')">Popüler</button>
-      <a id="stOpenLink" class="hint" href="https://stocktwits.com/" target="_blank" rel="noopener" style="margin-left:auto">StockTwits’te aç →</a>
+      <button type="button" class="scan-chip active" id="stTabRecent" onclick="renderStockTwits('recent')" data-i18n="st_recent">Güncel</button>
+      <button type="button" class="scan-chip" id="stTabPopular" onclick="renderStockTwits('popular')" data-i18n="st_popular">Popüler</button>
+      <a id="stOpenLink" class="hint" href="https://stocktwits.com/" target="_blank" rel="noopener" style="margin-left:auto" data-i18n="st_open">StockTwits’te aç →</a>
     </div>
-    <div id="stBody"><div class="hint">Hisse kodu yazıp Ara’ya bas — güncel ve popüler yorumlar burada listelenir.</div></div>
+    <div id="stBody"><div class="hint" data-i18n="st_empty">Hisse kodu yazıp Ara’ya bas — güncel ve popüler yorumlar burada listelenir.</div></div>
   </div>
 
 </div>
@@ -1101,14 +1107,14 @@
 <div id="page-econ" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
-    <h2>Ekonomik Takvim — 25 Ülke</h2>
-    <div class="sub">Soldan ülke kutusuna tıkla — o ülkenin ekonomik takvimi sağda açılır, <b>tekrar tıklayınca kapanır</b>. Aynı anda istediğin kadar ülke açık kalabilir; her panelin dönem (Dün/Bugün/Bu Hafta…) ve önem (★/★★/★★★) filtresi bağımsızdır. Saatler TSİ. Kaynak: Investing.com (yedek: TradingView).</div>
+    <h2 data-i18n="econ_h2">Ekonomik Takvim — 25 Ülke</h2>
+    <div class="sub" data-i18n-html="econ_sub">Soldan ülke kutusuna tıkla — o ülkenin ekonomik takvimi sağda açılır, <b>tekrar tıklayınca kapanır</b>. Aynı anda istediğin kadar ülke açık kalabilir; her panelin dönem (Dün/Bugün/Bu Hafta…) ve önem (★/★★/★★★) filtresi bağımsızdır. Saatler TSİ. Kaynak: Investing.com (yedek: TradingView).</div>
   </div>
 
   <div class="econ-layout">
     <div class="econ-side no-print" id="econCountries"></div>
     <div class="econ-main" id="econPanels">
-      <div class="hint" id="econEmptyHint" style="padding:26px 10px;text-align:center">Takvimini görmek istediğin ülkeyi soldan seç.</div>
+      <div class="hint" id="econEmptyHint" style="padding:26px 10px;text-align:center" data-i18n="econ_empty">Takvimini görmek istediğin ülkeyi soldan seç.</div>
     </div>
   </div>
 
@@ -1117,16 +1123,17 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="app.js?v=148"></script>
+<script src="i18n.js?v=149"></script>
+<script src="app.js?v=149"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">
-    <h3 id="pwaSheetTitle">iPhone’a yükle</h3>
-    <p id="pwaSheetDesc">Apple, Android gibi tek tuşla indirmeye izin vermez. Safari’den ana ekrana eklenir — App Store gerekmez.</p>
+    <h3 id="pwaSheetTitle" data-i18n="pwa_title">iPhone’a yükle</h3>
+    <p id="pwaSheetDesc" data-i18n="pwa_desc">Apple, Android gibi tek tuşla indirmeye izin vermez. Safari’den ana ekrana eklenir — App Store gerekmez.</p>
     <ol class="pwa-steps" id="pwaSheetSteps"></ol>
     <div class="pwa-sheet-actions">
-      <button type="button" onclick="closePwaSheet()">Kapat</button>
-      <button type="button" class="ok" onclick="closePwaSheet()">Anladım</button>
+      <button type="button" onclick="closePwaSheet()" data-i18n="pwa_close">Kapat</button>
+      <button type="button" class="ok" onclick="closePwaSheet()" data-i18n="pwa_ok">Anladım</button>
     </div>
   </div>
 </div>

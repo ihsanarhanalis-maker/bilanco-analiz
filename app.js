@@ -199,7 +199,7 @@ function paintLivePrice(sym, live, ch){
     lp.innerHTML=logoHtml(FIN&&FIN.logoid, sym, 26, logoOptsFromFin())+
       `<span class="lp-sym">${sym}</span><span class="lp-val">${fmtUSD(live)}</span>`+
       (ch!=null?`<span class="lp-chg ${cls}">${ar} ${pct(ch)}</span>`:'')+
-      `<span class="lp-live on">● canlı</span>`;
+      `<span class="lp-live on">${t('live_dot')}</span>`;
   }
   lp.classList.remove('hidden');
   if(LIVE_PRICE_STATE) LIVE_PRICE_STATE.lastPrice=live;
@@ -208,7 +208,7 @@ function paintLivePrice(sym, live, ch){
     if(badge){
       const mcap=live*LIVE_PRICE_STATE.shares;
       badge.className='hd-badge mcap';
-      badge.innerHTML=`<span class="mc-lbl">Piyasa Değeri</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
+      badge.innerHTML=`<span class="mc-lbl">${t('mcap_lbl')}</span><span class="mc-eq">=</span><span class="mc-val">${fmtMcap(mcap)}</span>`;
       badge.classList.remove('hidden');
     }
   }
@@ -708,7 +708,7 @@ function runVoiceCompare(intent){
   if(per) per.value=intent.mode==='quarter'?'quarter':'annual';
   scrollVoiceStockCard({ id:'cmpCard', label:'Şirket Karşılaştırma' });
   compareTickers();
-  const modeLbl=intent.mode==='quarter'?'Çeyreklik':'Yıllık';
+  const modeLbl=intent.mode==='quarter'?t('period_quarter'):t('period_annual');
   return 'Karşılaştır: <b>'+safeHTML(intent.syms.join(', '))+'</b> · '+modeLbl;
 }
 /* Varsayılan çeyreklik; "AMD yıllık" → yıllık */
@@ -731,7 +731,7 @@ function applyVoicePeriod(mode){
   return m;
 }
 function voicePeriodLabel(mode){
-  return mode==='annual'?'Yıllık':'Çeyreklik';
+  return mode==='annual'?t('period_annual'):t('period_quarter');
 }
 function parseVoiceIntent(raw){
   let s=normalizeVoiceText(raw);
@@ -1053,7 +1053,7 @@ function toggleHomeVoice(){
   const SR=getSpeechRecognition();
   const st=voiceStatusEl();
   if(!SR){
-    if(st) st.textContent='Bu tarayıcı sesli aramayı desteklemiyor.';
+    if(st) st.textContent=t('voice_unsupported');
     return;
   }
   if(_homeVoiceOn){ stopHomeVoice(); return; }
@@ -1072,12 +1072,10 @@ function toggleHomeVoice(){
     try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
     _homeVoiceRec=null;
     setHomeVoiceUi(false);
-    if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
+    if(st) st.textContent=t('voice_no_speech');
   }, VOICE_LISTEN_MS);
 
-  const listenHint=onStock
-    ?'🎙️ Dinleniyor (20 sn)… örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”'
-    :'🎙️ Dinleniyor (20 sn)… örn. “AMD NVDA yıllık karşılaştır”, “AMD kazançlar”';
+  const listenHint=onStock?t('voice_listening_hint_stock'):t('voice_listening_hint_home');
 
   try{ _homeVoiceRec&&_homeVoiceRec.abort(); }catch(_e){}
   _homeVoiceRec=null;
@@ -1094,12 +1092,12 @@ function toggleHomeVoice(){
     if(epoch!==_homeVoiceEpoch || _homeVoiceGotResult) return;
     if(Date.now()>=_homeVoiceDeadline){
       setHomeVoiceUi(false);
-      if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
+      if(st) st.textContent=t('voice_no_speech');
       return;
     }
     const rec=new SR();
     _homeVoiceRec=rec;
-    rec.lang='tr-TR'; /* TR komutlar; EN şirket adları alias + alternatif puanıyla */
+    rec.lang=(typeof voiceSpeechLang==='function'?voiceSpeechLang():'tr-TR');
     rec.interimResults=false;
     rec.maxAlternatives=10;
     rec.continuous=false;
@@ -1114,7 +1112,7 @@ function toggleHomeVoice(){
       if(Date.now()<_homeVoiceDeadline) scheduleArmRec(100);
       else{
         setHomeVoiceUi(false);
-        if(st) st.textContent='Ses algılanamadı — tekrar deneyin.';
+        if(st) st.textContent=t('voice_no_speech');
       }
     };
     rec.onerror=e=>{
@@ -1128,9 +1126,9 @@ function toggleHomeVoice(){
       setHomeVoiceUi(false);
       if(!st) return;
       if(err==='not-allowed'||err==='service-not-allowed')
-        st.textContent='Mikrofon izni gerekli — tarayıcı ayarlarından izin verin.';
+        st.textContent=t('voice_mic_denied');
       else
-        st.textContent='Sesli komut hatası — tekrar deneyin.';
+        st.textContent=t('voice_err');
     };
     rec.onresult=ev=>{
       if(epoch!==_homeVoiceEpoch || _homeVoiceRec!==rec) return;
@@ -1142,9 +1140,7 @@ function toggleHomeVoice(){
       try{ rec.stop(); }catch(_e){}
       if(epoch!==_homeVoiceEpoch) return;
       if(!handleHomeVoiceCommand(transcripts, st)){
-        if(st) st.textContent=onStock
-          ?'Anlaşılamadı — örn. “AMD NVDA çeyreklik karşılaştır”, “AMD kazançlar”.'
-          :'Anlaşılamadı — örn. “AMD NVDA AMZN yıllık karşılaştır”, “AMD kazançlar”.';
+        if(st) st.textContent=onStock?t('voice_not_understood_stock'):t('voice_not_understood_home');
       }
     };
     try{ rec.start(); }
@@ -1153,7 +1149,7 @@ function toggleHomeVoice(){
       else{
         clearHomeVoiceTimer();
         clearHomeVoiceRestart();
-        if(st) st.textContent='Mikrofon başlatılamadı.';
+        if(st) st.textContent=t('voice_start_fail');
         setHomeVoiceUi(false);
       }
     }
@@ -1165,7 +1161,7 @@ function initHomeVoice(){
   document.querySelectorAll('.voice-mic').forEach(btn=>{
     if(!ok){
       btn.hidden=true;
-      btn.title='Bu tarayıcı sesli aramayı desteklemiyor';
+      btn.title=t('voice_unsupported');
     }
   });
 }
@@ -1178,14 +1174,14 @@ async function homeSearch(forcedSym){
     ? String(forcedSym)
     : (document.getElementById('homeTicker').value||'')).trim();
   const st=document.getElementById('homeSearchStatus');
-  if(!v){ if(st) st.textContent='Bir hisse kodu yaz.'; return; }
+  if(!v){ if(st) st.textContent=t('status_enter_code'); return; }
   document.getElementById('periodType').value=document.getElementById('homePeriod').value;
   const sym=v.toUpperCase().trim();
   const inp=document.getElementById('homeTicker');
   if(inp) inp.value=sym;
   /* Her aramada nesil artır — önceki detect/fetch sonucu yeni kodu ezmesin */
   const myGen=++REQ_GEN;
-  if(st){ st.style.color=''; st.innerHTML='⏳ <b>'+safeHTML(sym)+'</b> aranıyor…'; }
+  if(st){ st.style.color=''; st.innerHTML='⏳ <b>'+safeHTML(sym)+'</b> '+t('status_searching_sym'); }
 
   let pickCode=null, cc=null;
   const cikMap=window.CIK_MAP||{};
@@ -1229,13 +1225,16 @@ async function homeSearch(forcedSym){
 }
 
 /* ---------- Kalem kategorileri ---------- */
-const CATS = {
-  asset_current:  "Dönen Varlık",
-  asset_noncur:   "Duran Varlık",
-  liab_current:   "Kısa Vade Yük.",
-  liab_noncur:    "Uzun Vade Yük.",
-  equity:         "Özkaynak"
-};
+function getCats(){
+  return {
+    asset_current:  t('cat_asset_current'),
+    asset_noncur:   t('cat_asset_noncur'),
+    liab_current:   t('cat_liab_current'),
+    liab_noncur:    t('cat_liab_noncur'),
+    equity:         t('cat_equity')
+  };
+}
+const CATS = new Proxy({}, { get(_t, k){ return getCats()[k]; } });
 const CAT_GROUP = { // hangi büyük gruba ait
   asset_current:'asset', asset_noncur:'asset',
   liab_current:'liab', liab_noncur:'liab', equity:'equity'
@@ -1807,7 +1806,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     document.getElementById('curNote').textContent='TL cinsinden';
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
     setMarketOrigin({ country:'Türkiye', exchange:'Borsa İstanbul', ccy:'TRY', code:sym+'.IS' });
-    setStatus(`✓ ${sym} — Türkiye (BIST)${group==='UFRS'?' · banka/sigorta':''} — ${mode==='annual'?'yıllık':'çeyreklik'} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
+    setStatus(`✓ ${sym} — Türkiye (BIST)${group==='UFRS'?' · banka/sigorta':''} — ${mode==='annual'?t('data_annual'):t('quarterly')} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
     analyze(myGen);
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
@@ -2228,7 +2227,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
       ccy: CUR || euInfo.ccy,
       code: sym+'.'+euInfo.suffix
     });
-    setStatus(`✓ ${sym}.${euInfo.suffix} — ${euInfo.country} — ${D1?(mode==='quarter'?'çeyreklik':'yıllık'):'en güncel dönem'} — ${CUR} — ${srcNote}`,'good');
+    setStatus(`✓ ${sym}.${euInfo.suffix} — ${euInfo.country} — ${D1?(mode==='quarter'?t('quarterly'):t('data_annual')):(getLang()==='en'?'latest period':'en güncel dönem')} — ${CUR} — ${srcNote}`,'good');
     analyze(myGen);
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym, shares:R.shares });
@@ -2319,7 +2318,7 @@ async function fetchTicker(forcedSym){
   let sym=(forcedSym!=null&&forcedSym!==''
     ? String(forcedSym)
     : (document.getElementById('ticker').value||'')).trim().toUpperCase();
-  if(!sym){ setStatus('Lütfen bir hisse kodu yazın.','bad'); return; }
+  if(!sym){ setStatus(t('status_enter_ticker'),'bad'); return; }
   const tickInp=document.getElementById('ticker');
   if(tickInp) tickInp.value=sym;
   stopLivePrice();
@@ -2423,7 +2422,7 @@ async function fetchTickerUS(sym, mode, myGen){
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
     document.getElementById('curNote').textContent='USD cinsinden';
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
-    const periodLbl = isIfrs20F ? 'yıllık (20-F)' : (mode==='annual'?'yıllık':'çeyreklik');
+    const periodLbl = isIfrs20F ? (getLang()==='en'?'annual (20-F)':'yıllık (20-F)') : (mode==='annual'?t('data_annual'):t('quarterly'));
     setMarketOrigin({ country:'Amerika Birleşik Devletleri', exchange:'ABD (SEC EDGAR)', ccy:'USD', code:sym+'.US' });
     setStatus(`✓ ${sym} — ABD — ${periodLbl} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
     analyze(myGen);
@@ -2969,7 +2968,7 @@ function updateWatchStar(){
   if(!b) return;
   if(!FIN || !FIN.ticker){ b.classList.add('hidden'); if(fw) fw.classList.add('hidden'); closeForumMenu(); return; }
   const inList=getWatch().some(x=>x.sym===FIN.ticker && x.market===FIN.market);
-  b.textContent= inList?'★ Listemden Çıkar':'☆ Listeme Ekle';
+  b.textContent= inList?t('watch_remove'):t('watch_add');
   b.classList.remove('hidden');
   if(fw) fw.classList.remove('hidden');
 }
@@ -5144,7 +5143,7 @@ function buildRowsFromSEC(D,D0,D1){
 
 /* ---------- Tablo satır ekleme ---------- */
 function rowHTML(name='', cat='asset_current', cur='', prev=''){
-  const opts = Object.keys(CATS).map(k=>`<option value="${k}" ${k===cat?'selected':''}>${CATS[k]}</option>`).join('');
+  const opts = Object.keys(getCats()).map(k=>`<option value="${k}" ${k===cat?'selected':''}>${getCats()[k]}</option>`).join('');
   const cell = v => (v===''||v===null||v===undefined) ? '' : fmtAbbr(Number(v));
   return `<tr>
     <td><input class="name" value="${name.replace(/"/g,'&quot;')}" placeholder="Kalem adı"></td>
@@ -5921,7 +5920,7 @@ function updateWatchStar(){
   btn.classList.remove('hidden');
   if(forum) forum.classList.remove('hidden');
   const on=isWatched(watchSymFor(), FIN.market);
-  btn.innerHTML = on ? '★ Listemde' : '☆ Listeme Ekle';
+  btn.innerHTML = on ? t('watch_in_list') : t('watch_add');
   btn.classList.toggle('primary', on);
 }
 function closeForumMenu(){
@@ -7281,6 +7280,7 @@ window.loadTakasAkdItem=loadTakasAkdItem;
 
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
+  if(typeof initLang==='function') initLang();
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
   // Bilanço Verisi'nde değer/kategori değişince cari hücreleri anında yeniden renklendir
@@ -7290,5 +7290,18 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerPwa();
   initMarketTape();
   initHomeVoice();
+  window.addEventListener('bilanco-lang',()=>{
+    try{ updateWatchStar(); }catch(_e){}
+    try{
+      const body2=document.getElementById('inputBody');
+      if(body2){
+        body2.querySelectorAll('select').forEach(sel=>{
+          const v=sel.value;
+          const cats=getCats();
+          sel.innerHTML=Object.keys(cats).map(k=>`<option value="${k}" ${k===v?'selected':''}>${cats[k]}</option>`).join('');
+        });
+      }
+    }catch(_e){}
+  });
   // Bugünün Fırsatları + Hisse Takvimi: arama yapılana kadar gizli
 });
