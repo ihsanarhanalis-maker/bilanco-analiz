@@ -334,6 +334,7 @@ function discCcFromPick(pick){
 
 /* ---------- Ana sayfa sesli komut (bileşik: ülke+sekme+filtre/hisse; bas-konuş) ---------- */
 const VOICE_FILLER=/^(aç|ac|getir|ara|hisse|bak|göster|goster|lütfen|lutfen|bir|tane|kodu|hissesini|hissesi|analiz|et|yap|için|icin|sekme|sekmesi|git|gidelim|göre|gore|olan|daki|deki)$/i;
+/* TR + EN şirket adları → ticker (uzun anahtar önce eşlensin) */
 const VOICE_ALIASES={
   apple:'AAPL', aapl:'AAPL',
   nvidia:'NVDA', nvda:'NVDA',
@@ -344,7 +345,22 @@ const VOICE_ALIASES={
   amazon:'AMZN', amzn:'AMZN',
   meta:'META', facebook:'META',
   intel:'INTC', intc:'INTC',
-  thy:'THYAO', thyao:'THYAO', turkishairlines:'THYAO',
+  netflix:'NFLX', nflx:'NFLX',
+  disney:'DIS',
+  boeing:'BA',
+  coke:'KO', coca:'KO', cocacola:'KO', 'coca cola':'KO',
+  pepsi:'PEP',
+  visa:'V', mastercard:'MA',
+  paypal:'PYPL',
+  uber:'UBER',
+  airbnb:'ABNB',
+  costco:'COST',
+  walmart:'WMT',
+  /* SpaceX — tarayıcı sıkça Virgin Galactic (SPCE) yazar; istenen SPCX */
+  spacex:'SPCX', 'space x':'SPCX', spcx:'SPCX',
+  'speys eks':'SPCX', 'spey seks':'SPCX', 'space eks':'SPCX', 'speys x':'SPCX',
+  'virgin galactic':'SPCE', 'virgin':'SPCE',
+  thy:'THYAO', thyao:'THYAO', turkishairlines:'THYAO', 'turkish airlines':'THYAO',
   garanti:'GARAN', garan:'GARAN',
   aselsan:'ASELS', asels:'ASELS',
   bip:'BIMAS', bimas:'BIMAS',
@@ -352,6 +368,10 @@ const VOICE_ALIASES={
   ford:'FROTO', froto:'FROTO',
   koc:'KCHOL', kchol:'KCHOL',
   samsung:'005930'
+};
+/* Duyulan ticker, metinde şirket adı varsa düzelt (SPCE←SpaceX vb.) */
+const VOICE_MISHEAR={
+  SPCE:['spacex','space x','spcx','speys','spey seks','space eks','spaceeks']
 };
 const VOICE_PAGES=[
   { page:'home', label:'Ana Sayfa', keys:['ana sayfa','anasayfa','home','giriş','giris','başlangıç','baslangic'] },
@@ -594,34 +614,68 @@ function voiceAllMatches(s, map){
 function extractVoiceTicker(s){
   if(!s) return '';
   const joined=s.replace(/[\s.-]+/g,'');
-  if(VOICE_ALIASES[joined]) return VOICE_ALIASES[joined];
-  if(VOICE_ALIASES[s]) return VOICE_ALIASES[s];
+  if(VOICE_ALIASES[joined]) return correctVoiceMishear(s, VOICE_ALIASES[joined]);
+  if(VOICE_ALIASES[s]) return correctVoiceMishear(s, VOICE_ALIASES[s]);
+  /* Uzun şirket adları (space x, coca cola…) */
+  const aliasKeys=Object.keys(VOICE_ALIASES).sort((a,b)=>b.length-a.length);
+  for(const k of aliasKeys){
+    if(k.includes(' ') && (s===k || voiceWordHas(s,k))) return correctVoiceMishear(s, VOICE_ALIASES[k]);
+  }
   const parts=s.split(' ').filter(w=>w && !VOICE_FILLER.test(w));
   for(const w of parts){
     const key=w.replace(/[.-]/g,'');
-    if(VOICE_ALIASES[key]||VOICE_ALIASES[w]) return VOICE_ALIASES[key]||VOICE_ALIASES[w];
+    if(VOICE_ALIASES[key]||VOICE_ALIASES[w]) return correctVoiceMishear(s, VOICE_ALIASES[key]||VOICE_ALIASES[w]);
   }
   for(const w of parts){
     const tok=w.toUpperCase().replace(/[^A-Z0-9.]/g,'');
-    if(tok && /^[A-Z0-9]{1,6}(\.[A-Z]{1,3})?$/.test(tok)) return tok;
+    if(tok && /^[A-Z0-9]{1,6}(\.[A-Z]{1,3})?$/.test(tok)) return correctVoiceMishear(s, tok);
   }
   if(parts.length>=2 && parts.length<=6 && parts.every(p=>/^[\p{L}]$/u.test(p))){
     const spelled=parts.map(p=>p.toLocaleUpperCase('en-US')).join('').replace(/[^A-Z0-9]/g,'');
-    if(spelled.length>=1 && spelled.length<=6) return spelled;
+    if(spelled.length>=1 && spelled.length<=6) return correctVoiceMishear(s, spelled);
   }
   return '';
+}
+function correctVoiceMishear(raw, sym){
+  const s=normalizeVoiceText(raw);
+  const u=String(sym||'').toUpperCase();
+  const hints=VOICE_MISHEAR[u];
+  if(hints){
+    for(const h of hints){
+      if(s===h || voiceWordHas(s,h) || s.includes(h)){
+        /* SpaceX / SPCX denmiş → SPCE'yi SPCX yap */
+        if(u==='SPCE') return 'SPCX';
+      }
+    }
+  }
+  /* Alternatifler birleşik metinde spacex geçiyorsa SPCE→SPCX */
+  if(u==='SPCE' && /space\s*x|spacex|spcx|speys/.test(s)) return 'SPCX';
+  return u;
 }
 /* Birden fazla hisse kodu (karşılaştırma) */
 function extractVoiceTickersAll(s){
   if(!s) return [];
   const out=[], seen=new Set();
   const add=t=>{
-    const u=String(t||'').toUpperCase();
+    const u=correctVoiceMishear(s, String(t||'').toUpperCase());
     if(!u||seen.has(u)) return;
     seen.add(u); out.push(u);
   };
   const parts=String(s).split(/[\s,;]+/).filter(w=>w && !VOICE_FILLER.test(w));
-  for(const w of parts){
+  /* Önce çok kelimeli alias (space x…) */
+  const aliasKeys=Object.keys(VOICE_ALIASES).sort((a,b)=>b.length-a.length);
+  let left=' '+normalizeVoiceText(s)+' ';
+  for(const k of aliasKeys){
+    if(!k.includes(' ')) continue;
+    const esc=k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const re=new RegExp('(^|\\s)'+esc+'(\\s|$)');
+    if(re.test(left)){
+      add(VOICE_ALIASES[k]);
+      left=left.replace(re,' ');
+    }
+  }
+  for(const w of left.split(/[\s,;]+/).filter(Boolean)){
+    if(VOICE_FILLER.test(w)) continue;
     const key=w.replace(/[.-]/g,'');
     if(VOICE_ALIASES[key]||VOICE_ALIASES[w]){ add(VOICE_ALIASES[key]||VOICE_ALIASES[w]); continue; }
     const tok=w.toUpperCase().replace(/[^A-Z0-9.]/g,'');
@@ -905,16 +959,62 @@ function voiceTranscriptsFromEvent(ev){
   }catch(_e){}
   return out;
 }
-function handleHomeVoiceCommand(transcripts, st){
-  for(const t of transcripts){
-    const intent=parseVoiceIntent(t);
-    if(intent){
-      const msg=runVoiceIntent(intent);
-      if(st){ st.style.color=''; st.innerHTML='🎙️ '+msg; }
-      return true;
+/* Tüm alternatifleri puanla — TR/EN şirket adı, CIK, yanlış duyum düzeltmesi */
+function scoreVoiceCandidate(transcript, altIndex){
+  const raw=String(transcript||'');
+  const s=normalizeVoiceText(raw);
+  let score=0;
+  const aliasKeys=Object.keys(VOICE_ALIASES).sort((a,b)=>b.length-a.length);
+  for(const k of aliasKeys){
+    if(s===k || voiceWordHas(s,k) || (k.length>=4 && s.includes(k))){
+      score+=120+k.length*2;
+      break;
     }
   }
-  return false;
+  /* SpaceX / SPCX ipucu — SPCE alternatifinden daha yüksek tut */
+  if(/spacex|space\s*x|spcx|speys/.test(s)) score+=80;
+  const intent=parseVoiceIntent(raw);
+  if(!intent) return { transcript:raw, intent:null, score:-1000+altIndex };
+  score+=50;
+  if(intent.type==='compare') score+=40;
+  if(intent.type==='card') score+=35;
+  if(intent.type==='page') score+=25;
+  if(intent.type==='search'||intent.type==='card'){
+    const sym=intent.sym;
+    if(sym){
+      if((window.CIK_MAP||{})[sym]) score+=45;
+      if(Object.values(VOICE_ALIASES).includes(sym)) score+=35;
+      if(sym==='SPCX' && /spacex|space|spcx|speys/.test(s)) score+=60;
+      if(sym==='SPCE' && !/virgin/.test(s)) score-=25; /* SpaceX sanılıp SPCE yazılmış olabilir */
+    }
+  }
+  score+=Math.min(s.length, 18);
+  score-=altIndex*2; /* aynı puanda ilk alternatif */
+  return { transcript:raw, intent, score };
+}
+function handleHomeVoiceCommand(transcripts, st){
+  /* Tüm alternatifleri birleştir — "SPCE" + "space x" birlikte gelsin diye */
+  const bag=transcripts.slice();
+  const joined=normalizeVoiceText(transcripts.join(' '));
+  if(joined && !bag.some(t=>normalizeVoiceText(t)===joined)) bag.push(transcripts.join(' '));
+
+  const ranked=bag.map((t,i)=>scoreVoiceCandidate(t,i))
+    .filter(r=>r.intent)
+    .sort((a,b)=>b.score-a.score);
+  if(!ranked.length) return false;
+  const best=ranked[0];
+  /* Ortak çanta: spacex geçiyorsa search/card SPCE → SPCX */
+  if(best.intent && best.intent.sym==='SPCE' && /spacex|space\s*x|spcx|speys/.test(joined)){
+    best.intent=Object.assign({}, best.intent, { sym:'SPCX', label: best.intent.label==='SPCE'?'SPCX':best.intent.label });
+  }
+  if(best.intent && Array.isArray(best.intent.syms)){
+    best.intent=Object.assign({}, best.intent, {
+      syms:best.intent.syms.map(sy=> (sy==='SPCE' && /spacex|space\s*x|spcx|speys/.test(joined)) ? 'SPCX' : sy)
+    });
+  }
+  const msg=runVoiceIntent(best.intent);
+  if(st){ st.style.color=''; st.innerHTML='🎙️ '+msg; }
+  return true;
 }
 function voiceStatusEl(){
   if(voiceOnStockPage()){
@@ -999,9 +1099,9 @@ function toggleHomeVoice(){
     }
     const rec=new SR();
     _homeVoiceRec=rec;
-    rec.lang='tr-TR';
+    rec.lang='tr-TR'; /* TR komutlar; EN şirket adları alias + alternatif puanıyla */
     rec.interimResults=false;
-    rec.maxAlternatives=5;
+    rec.maxAlternatives=10;
     rec.continuous=false;
     rec.onstart=()=>{
       if(epoch!==_homeVoiceEpoch || _homeVoiceRec!==rec) return;
@@ -1290,14 +1390,32 @@ const CONCEPTS_CASH = {
 /* Bir us-gaap (veya taxonomy verilirse ifrs-full — Almanya/İsviçre'de SEC'e 20-F ile kayıtlı
    birkaç çok-uluslu şirket için, bkz. DE_CH_SEC_XREF) kavramının ham kayıtlarını çeker.
    Sonuç: doğru formdaki ham kayıt dizisi [{start?,end,val,filed,form}, …]. */
+let _secSlots=0;
+const SEC_MAX=8; /* paralel concept tavanı — 429 riskini sınırla */
+function secSleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+async function withSecSlot(fn){
+  while(_secSlots>=SEC_MAX) await secSleep(35);
+  _secSlots++;
+  try{ return await fn(); }
+  finally{ _secSlots--; }
+}
 async function fetchConceptRaw(cik, tags, formPrefix, taxonomy){
   for(const tag of tags){
-    let j;
-    try{
-      const r=await fetch(`/sec/api/xbrl/companyconcept/CIK${cik}/${taxonomy||'us-gaap'}/${tag}.json`);
-      if(!r.ok) continue;
-      j=await r.json();
-    }catch(e){ continue; }
+    let j=null;
+    for(let attempt=0; attempt<3; attempt++){
+      try{
+        const r=await withSecSlot(()=>
+          fetch(`/sec/api/xbrl/companyconcept/CIK${cik}/${taxonomy||'us-gaap'}/${tag}.json`));
+        if(r.status===429){ await secSleep(280*(attempt+1)); continue; }
+        if(!r.ok) break;
+        j=await r.json();
+        break;
+      }catch(e){
+        if(attempt<2){ await secSleep(120*(attempt+1)); continue; }
+        break;
+      }
+    }
+    if(!j) continue;
     // ABD (us-gaap) yolunda davranış AYNEN korunur (yalnız USD). ifrs-full yolunda şirket birden
     // fazla para biriminde raporlamış olabilir (ör. UBS eski yıllarda CHF, günümüzde yalnız USD
     // tag'liyor) — İLK bulunan birimi değil, formPrefix'e uyan kayıtları olan VE en güncel tarihe
@@ -1356,7 +1474,7 @@ async function fetchConcept(cik, tags, formPrefix){
 async function fetchSeries(cik, mode, formPrefix, opts){
   opts=opts||{};
   const tax=opts.taxonomy;
-  const CHUNK=8; /* SEC concept isteklerini paralel grupla */
+  const CHUNK=5; /* SEC concept isteklerini paralel grupla (slot tavanıyla) */
   const grab = async (defs, fp)=>{
     const keys=Object.keys(defs), raw={};
     for(let i=0;i<keys.length;i+=CHUNK){
@@ -2015,30 +2133,26 @@ function euTvBase(euInfo){
 }
 async function resolveYahooForEu(euInfo){
   let ysym=euInfo.base+'.'+euInfo.suffix;
+  const applySuffix=resolved=>{
+    if(!resolved) return;
+    ysym=resolved;
+    const newSfx=resolved.slice(resolved.lastIndexOf('.')+1);
+    euInfo.suffix=newSfx;
+    const ex=EU_EXCHANGES[newSfx];
+    if(ex){
+      euInfo.tv=ex.tv; euInfo.scan=ex.scan; euInfo.country=ex.country;
+      euInfo.ccy=ex.ccy; euInfo.sym=ex.sym; euInfo.flag=ex.flag;
+      if(ex.iso) euInfo.iso=ex.iso;
+    }
+  };
   if(euInfo.suffix==='KS'||euInfo.suffix==='KQ'){
-    const resolved=await resolveKrYahooSymbol(euInfo.base);
-    if(resolved){
-      ysym=resolved;
-      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
-    }
+    applySuffix(await resolveKrYahooSymbol(euInfo.base));
   }else if(euInfo.suffix==='HK'||euInfo.suffix==='SS'||euInfo.suffix==='SZ'){
-    const resolved=await resolveCnYahooSymbol(euInfo.base, euInfo.suffix);
-    if(resolved){
-      ysym=resolved;
-      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
-    }
+    applySuffix(await resolveCnYahooSymbol(euInfo.base, euInfo.suffix));
   }else if(euInfo.suffix==='TW'||euInfo.suffix==='TWO'){
-    const resolved=await resolveTwYahooSymbol(euInfo.base);
-    if(resolved){
-      ysym=resolved;
-      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
-    }
+    applySuffix(await resolveTwYahooSymbol(euInfo.base));
   }else if(euInfo.suffix==='TO'||euInfo.suffix==='V'){
-    const resolved=await resolveCaYahooSymbol(euInfo.base);
-    if(resolved){
-      ysym=resolved;
-      euInfo.suffix=resolved.slice(resolved.lastIndexOf('.')+1);
-    }
+    applySuffix(await resolveCaYahooSymbol(euInfo.base));
   }
   return ysym;
 }
@@ -2180,7 +2294,8 @@ async function detectBareMarkets(sym){
     }
   }catch(e){}
   const data={ cands, scanOk };
-  DETECT_CACHE[key]={ at:Date.now(), data };
+  /* Başarısız / boş taramayı cache'leme — geçici TV hatası 10 dk kilitlenmesin */
+  if(scanOk) DETECT_CACHE[key]={ at:Date.now(), data };
   return data;
 }
 /* Birden fazla borsada bulunan kod için seçenek düğmeleri (tıkla → o borsada ara) */
