@@ -1239,6 +1239,17 @@ const CAT_GROUP = { // hangi büyük gruba ait
   asset_current:'asset', asset_noncur:'asset',
   liab_current:'liab', liab_noncur:'liab', equity:'equity'
 };
+function statusPill(status){
+  if(status==='good') return t('st_good');
+  if(status==='warn') return t('st_warn');
+  return t('st_bad');
+}
+function tf(key, vars){
+  let s=t(key);
+  if(vars) Object.keys(vars).forEach(k=>{ s=s.split('{'+k+'}').join(String(vars[k])); });
+  return s;
+}
+let LAST_MCAP=null, LAST_CMP_LIST=null;
 
 /* Örnek bilanço (Türk tipi) */
 const SAMPLE = [
@@ -1595,24 +1606,25 @@ async function compareTickers(){
   renderComparison(okData);
 }
 function renderComparison(list){
+  LAST_CMP_LIST=list;
   const pp=v=>v==null?'—':(v*100).toFixed(1)+'%';
   const xx=v=>v==null?'—':v.toFixed(2)+'x';
   const ab=v=>v==null?'—':fmtAbbr(v);
   // [etiket, anahtar, biçim, yön(+1 yüksek iyi / −1 düşük iyi)]
   const rows=[
-    ['Gelir (Hasılat)','revenue',ab,1],
-    ['Net Kâr','netIncome',ab,1],
-    ['Brüt Marj','grossMargin',pp,1],
-    ['Faaliyet Marjı','opMargin',pp,1],
-    ['Net Kâr Marjı','netMargin',pp,1],
-    ['Özkaynak Kârlılığı (ROE)','roe',pp,1],
-    ['Aktif Kârlılığı (ROA)','roa',pp,1],
-    ['Cari Oran','current',xx,1],
-    ['Asit-Test','quick',xx,1],
-    ['Borç / Özkaynak','debtEq',xx,-1],
-    ['Özkaynak Oranı','equityRatio',pp,1],
+    [t('inc_rev'),'revenue',ab,1],
+    [t('inc_ni'),'netIncome',ab,1],
+    [t('inc_gm'),'grossMargin',pp,1],
+    [t('inc_om'),'opMargin',pp,1],
+    [t('inc_nm'),'netMargin',pp,1],
+    [t('inc_roe'),'roe',pp,1],
+    [t('inc_roa'),'roa',pp,1],
+    [t('ratio_current'),'current',xx,1],
+    [t('cmp_quick'),'quick',xx,1],
+    [t('ratio_de'),'debtEq',xx,-1],
+    [t('ratio_eq'),'equityRatio',pp,1],
   ];
-  const head='<tr><th>Metrik</th>'+list.map(d=>`<th>${d.sym}<br><span class="thd">${d.asOf?fmtDate(d.asOf):''}</span></th>`).join('')+'</tr>';
+  const head='<tr><th>'+t('cmp_th')+'</th>'+list.map(d=>`<th>${d.sym}<br><span class="thd">${d.asOf?fmtDate(d.asOf):''}</span></th>`).join('')+'</tr>';
   const body=rows.map(([lbl,key,fmt,dir])=>{
     const present=list.map(d=>d[key]).filter(v=>v!=null);
     const best  = present.length>1 ? (dir>0?Math.max(...present):Math.min(...present)) : null;
@@ -1628,7 +1640,7 @@ function renderComparison(list){
   }).join('');
   document.getElementById('cmpResult').innerHTML =
     `<table style="margin-top:14px;min-width:480px"><thead>${head}</thead><tbody>${body}</tbody></table>
-     <div class="hint" style="margin-top:8px">Yeşil = o metrikte en iyi, kırmızı = en kötü değer. Borç/Özkaynak'ta düşük olan iyidir.</div>`;
+     <div class="hint" style="margin-top:8px">${t('cmp_hint')}</div>`;
 }
 
 /* ================== BIST (Borsa İstanbul) veri katmanı ================== */
@@ -1767,19 +1779,19 @@ function buildRowsBank(D,D0,D1){
   const L=D.bankLabels||{};
   const rows=[];
   const push=(lbl,cat,c,p)=>{ if(c!==0||p!==0) rows.push([lbl,cat,c,p]); };
-  push(L.nakit||'Nakit Değerler ve Merkez Bankası','asset_current', v(D.cash,D0), v(D.cash,D1));
-  push(L.bankalar||'Bankalar','asset_current', v(D.bankBankalar,D0), v(D.bankBankalar,D1));
-  push(L.krediler||'Krediler','asset_noncur', v(D.bankKrediler,D0), v(D.bankKrediler,D1));
-  push('Diğer Varlıklar (Menkul Değerler vb.)','asset_noncur',
+  push(L.nakit||t('ln_bank_cash'),'asset_current', v(D.cash,D0), v(D.cash,D1));
+  push(L.bankalar||t('ln_bank_banks'),'asset_current', v(D.bankBankalar,D0), v(D.bankBankalar,D1));
+  push(L.krediler||t('ln_bank_loans'),'asset_noncur', v(D.bankKrediler,D0), v(D.bankKrediler,D1));
+  push(t('ln_bank_other_a'),'asset_noncur',
     v(D.assets,D0)-v(D.cash,D0)-v(D.bankBankalar,D0)-v(D.bankKrediler,D0),
     v(D.assets,D1)-v(D.cash,D1)-v(D.bankBankalar,D1)-v(D.bankKrediler,D1));
-  push(L.mevduat||'Mevduat','liab_current', v(D.bankMevduat,D0), v(D.bankMevduat,D1));
-  push('Diğer Yükümlülükler','liab_noncur',
+  push(L.mevduat||t('ln_bank_dep'),'liab_current', v(D.bankMevduat,D0), v(D.bankMevduat,D1));
+  push(t('ln_bank_other_l'),'liab_noncur',
     v(D.liabEquity,D0)-v(D.equity,D0)-v(D.bankMevduat,D0),
     v(D.liabEquity,D1)-v(D.equity,D1)-v(D.bankMevduat,D1));
-  push('Ödenmiş Sermaye','equity', v(D.common,D0), v(D.common,D1));
-  push('Geçmiş Yıllar Kar/Zararı','equity', v(D.retained,D0), v(D.retained,D1));
-  push('Diğer Özkaynak Kalemleri','equity',
+  push(t('ln_common'),'equity', v(D.common,D0), v(D.common,D1));
+  push(t('ln_bank_ret'),'equity', v(D.retained,D0), v(D.retained,D1));
+  push(t('ln_other_eq'),'equity',
     v(D.equity,D0)-v(D.common,D0)-v(D.retained,D0),
     v(D.equity,D1)-v(D.common,D1)-v(D.retained,D1));
   return rows;
@@ -1803,9 +1815,9 @@ async function fetchTickerBIST(sym, mode, myGen){
     const rows = group==='UFRS' ? buildRowsBank(D,D0,D1) : buildRowsFromSEC(D,D0,D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
-    document.getElementById('curNote').textContent='TL cinsinden';
+    document.getElementById('curNote').textContent=t('cur_tl');
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
-    setMarketOrigin({ country:'Türkiye', exchange:'Borsa İstanbul', ccy:'TRY', code:sym+'.IS' });
+    setMarketOrigin({ country:t('mkt_tr'), exchange:'Borsa İstanbul', ccy:'TRY', code:sym+'.IS' });
     setStatus(`✓ ${sym} — Türkiye (BIST)${group==='UFRS'?' · banka/sigorta':''} — ${mode==='annual'?t('data_annual'):t('quarterly')} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
     analyze(myGen);
     fetchNews(sym, myGen);
@@ -2420,10 +2432,10 @@ async function fetchTickerUS(sym, mode, myGen){
     const rows=buildRowsFromSEC(D,D0,D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
-    document.getElementById('curNote').textContent='USD cinsinden';
+    document.getElementById('curNote').textContent=t('cur_usd');
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
     const periodLbl = isIfrs20F ? (getLang()==='en'?'annual (20-F)':'yıllık (20-F)') : (mode==='annual'?t('data_annual'):t('quarterly'));
-    setMarketOrigin({ country:'Amerika Birleşik Devletleri', exchange:'ABD (SEC EDGAR)', ccy:'USD', code:sym+'.US' });
+    setMarketOrigin({ country:getLang()==='en'?'United States':t('mkt_us'), exchange:getLang()==='en'?'US (SEC EDGAR)':'ABD (SEC EDGAR)', ccy:'USD', code:sym+'.US' });
     setStatus(`✓ ${sym} — ABD — ${periodLbl} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
     analyze(myGen);
     fetchNews(sym, myGen);
@@ -2458,28 +2470,30 @@ const BIG_FIRMS = [
   'keybanc','key banc','baird','cantor','bernstein','guggenheim','wolfe','hsbc','bnp paribas','scotiabank',
   'scotia','susquehanna','nomura','macquarie','loop capital','william blair','canaccord','citizens'
 ];
-const actionTR = { Upgrade:'Yükseltti ▲', Downgrade:'Düşürdü ▼', Reiterated:'Yineledi', Initiated:'Başlattı' };
+function actionLbl(act){
+  return ({ Upgrade:t('act_up'), Downgrade:t('act_down'), Reiterated:t('act_reit'), Initiated:t('act_init') })[act]||act||'—';
+}
 /* Finviz "Recom" skoru 1 (Güçlü Al) — 5 (Güçlü Sat) arası ortalama analist puanı */
 function recomLabel(v){
   if(v==null || isNaN(v)) return null;
-  if(v<=1.5) return ['Güçlü Al','g-buy'];
-  if(v<=2.5) return ['Al','g-buy'];
-  if(v<=3.5) return ['Tut','g-hold'];
-  if(v<=4.5) return ['Sat','g-sell'];
-  return ['Güçlü Sat','g-sell'];
+  if(v<=1.5) return [t('recom_sb'),'g-buy'];
+  if(v<=2.5) return [t('recom_b'),'g-buy'];
+  if(v<=3.5) return [t('recom_h'),'g-hold'];
+  if(v<=4.5) return [t('recom_s'),'g-sell'];
+  return [t('recom_ss'),'g-sell'];
 }
 async function fetchTargets(sym, myGen){
   const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('tgt_loading')+'</div>';
   try{
     const [tR, pR] = await Promise.all([
       fetch('/targets?s='+encodeURIComponent(sym)).then(x=>x.json()).catch(()=>null),
       fetch('/price?s='+encodeURIComponent(sym)+'&range=1d').then(x=>x.json()).catch(()=>null)
     ]);
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
-    if(!tR || !tR.ok){ box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı.</div>'; return; }
+    if(!tR || !tR.ok){ box.innerHTML='<div class="hint">'+t('tgt_none')+'</div>'; return; }
     renderOwnershipUS(tR.own, sym);   // pasta + Yahoo 13F kurumsal liste
     if(tR.shortData){ TECH_SHORT=tR.shortData; renderTechShort(); }   // teknik panele kısa pozisyon satırı
     const meta = pR && pR.chart && pR.chart.result && pR.chart.result[0] && pR.chart.result[0].meta;
@@ -2494,25 +2508,26 @@ async function fetchTargets(sym, myGen){
       const upCls = up==null?'neutral':(up>0?'up':'down');
       const rl = recomLabel(tR.recom);
       html+=`<div class="tgt-grid">
-        <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+        <div class="tgt-box"><div class="lbl">${t('tgt_mean')}</div>
           <div class="big">${fmtUSD(mean)}</div>
-          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
-          ${cur!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div>`:''}</div>
-        <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">${t('tgt_pot')}</span></div>`:''}
+          ${cur!=null?`<div class="sm neutral">${t('tgt_cur')} ${fmtUSD(cur)}</div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">${t('tgt_rec')}</div>
           <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
-          <div class="sm neutral">${tR.recom!=null?'Finviz skoru: '+tR.recom.toFixed(2)+' (1=Güçlü Al, 5=Güçlü Sat)':''}</div></div>
-        <div class="tgt-box"><div class="lbl">Son Not Sayısı</div>
+          <div class="sm neutral">${tR.recom!=null?t('tgt_score')+' '+tR.recom.toFixed(2)+' '+t('tgt_score_h'):''}</div></div>
+        <div class="tgt-box"><div class="lbl">${t('tgt_cnt')}</div>
           <div class="big">${ratings.length||'—'}</div>
-          <div class="sm neutral">yakın zamandaki değişiklik</div></div>
+          <div class="sm neutral">${t('tgt_cnt_sub')}</div></div>
       </div>`;
     }
     // 2) Firma bazlı son notlar — yalnızca büyük ABD bankaları & aracı kurumlar
     const hist=ratings.filter(x=> BIG_FIRMS.some(f=> (x.firm||'').toLowerCase().includes(f)));
     if(hist.length){
+      const loc=getLang()==='en'?'en-US':'tr-TR';
       const rows=hist.slice(0,12).map(x=>{
         const d=new Date((x.date||0)*1000);
-        const ds=isNaN(d)?'':d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
-        const act=actionTR[x.action]||x.action||'—';
+        const ds=isNaN(d)?'':d.toLocaleDateString(loc,{day:'2-digit',month:'short',year:'numeric'});
+        const act=actionLbl(x.action);
         const actCls=x.action==='Upgrade'?'up':x.action==='Downgrade'?'down':'neutral';
         return `<tr><td>${safeHTML(x.firm||'')}</td>
           <td><span class="grade ${gradeClass(x.rating)}">${safeHTML(x.rating||'—')}</span></td>
@@ -2520,13 +2535,13 @@ async function fetchTargets(sym, myGen){
           <td>${safeHTML(x.priceChange||'—')}</td>
           <td>${ds}</td></tr>`;
       }).join('');
-      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Son Analist Notları — Büyük Banka & Aracı Kurumlar</div>
-        <table style="margin-top:8px"><thead><tr><th>Banka / Aracı Kurum</th><th>Not</th><th>İşlem</th><th>Hedef Fiyat</th><th>Tarih</th></tr></thead><tbody>${rows}</tbody></table>`;
+      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">${t('tgt_hist')}</div>
+        <table style="margin-top:8px"><thead><tr><th>${t('tgt_th_firm')}</th><th>${t('tgt_th_rate')}</th><th>${t('tgt_th_act')}</th><th>${t('tgt_th_tp')}</th><th>${t('tgt_th_date')}</th></tr></thead><tbody>${rows}</tbody></table>`;
     }else if(ratings.length){
-      html+=`<div class="hint" style="margin-top:14px">Bu hisse için büyük banka/aracı kurumlardan güncel not bulunamadı.</div>`;
+      html+=`<div class="hint" style="margin-top:14px">${t('tgt_no_big')}</div>`;
     }
-    box.innerHTML = html || '<div class="hint">Bu hisse için analist verisi bulunamadı.</div>';
-  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+    box.innerHTML = html || '<div class="hint">'+t('tgt_none')+'</div>';
+  }catch(e){ box.innerHTML='<div class="hint">'+t('tgt_none')+': '+e.message+'</div>'; }
 }
 
 /* ---------- Borsa şehri canlı saati (TR: İstanbul; ABD: NY; Avrupa: ilgili şehir) ----------
@@ -4544,9 +4559,9 @@ async function fetchPrice(sym, cik, myGen, opts){
     const pCur=closeOn(fd0), pPrev=closeOn(fd1);
     const chip=(lbl,date,price,color)=> price==null?'' :
       `<div style="background:var(--surface-2);border:1px solid var(--line);border-left:3px solid ${color};border-radius:9px;padding:7px 11px;font-size:12px">
-        <span style="color:var(--muted)">${lbl}${date?' · açıklanma '+fmtDate(date):''}:</span>
+        <span style="color:var(--muted)">${lbl}${date?' · '+t('price_filed')+' '+fmtDate(date):''}:</span>
         <b style="color:var(--ink);margin-left:5px;font-variant-numeric:tabular-nums">${fmtUSD(price)}</b></div>`;
-    pn.innerHTML = chip('Cari dönem fiyatı', fd0, pCur, 'var(--accent)') + chip('Önceki dönem fiyatı', fd1, pPrev, 'var(--muted)');
+    pn.innerHTML = chip(t('price_cur'), fd0, pCur, 'var(--accent)') + chip(t('price_prev'), fd1, pPrev, 'var(--muted)');
     pn.classList.toggle('hidden', !pn.innerHTML.trim());
   }catch(e){ stopLivePrice(); lp.classList.add('hidden'); }
 }
@@ -4558,6 +4573,7 @@ function renderValuation(mcap){
   const card=document.getElementById('valCard'), box=document.getElementById('valBody');
   if(!card||!box) return;
   if(!FIN || mcap==null){ card.classList.add('hidden'); return; }
+  LAST_MCAP=mcap;
   const D=FIN.balance, D0=FIN.D0;
   const vv=(m,d)=> (d && m && (d in m)) ? m[d] : 0;
   // Defter Değeri (özkaynak) — uygulamanın her yerinde kullanılan sağlam türetme
@@ -4567,8 +4583,8 @@ function renderValuation(mcap){
   const niDates=Object.keys(niSeries).sort().reverse();
   let netIncome=null, niLabel='';
   if(FIN.mode==='quarter'){
-    if(niDates.length>=4){ netIncome=niDates.slice(0,4).reduce((a,d)=>a+niSeries[d],0); niLabel='son 4 çeyrek (TTM)'; }
-  }else if(niDates.length){ netIncome=niSeries[niDates[0]]; niLabel='son yıl ('+String(niDates[0]).slice(0,4)+')'; }
+    if(niDates.length>=4){ netIncome=niDates.slice(0,4).reduce((a,d)=>a+niSeries[d],0); niLabel=t('val_ttm'); }
+  }else if(niDates.length){ netIncome=niSeries[niDates[0]]; niLabel=t('val_yr')+' ('+String(niDates[0]).slice(0,4)+')'; }
 
   const fk = (netIncome && netIncome>0) ? mcap/netIncome : null;
   const pddd = (bookValue && bookValue>0) ? mcap/bookValue : null;
@@ -4580,10 +4596,10 @@ function renderValuation(mcap){
     <div class="val ${cls||''}" ${cls&&cls!=='neutral'?`style="color:var(--${cls==='up'?'good':'bad'})"`:''}>${val}</div>
     <div class="delta neutral">${sub}</div></div>`;
   box.innerHTML =
-    cell('Piyasa Değeri (PD)', fmtMcap(mcap), 'anlık fiyat × dolaşımdaki pay') +
-    cell('F/K (Fiyat / Kazanç)', x2(fk), netIncome==null?'net kâr verisi yetersiz':(netIncome<0?'şirket zararda — hesaplanamaz':'Net Kâr: '+fmtMcap(netIncome)+' · '+niLabel), fkCls) +
-    cell('PD/DD (Piyasa Değ. / Defter Değ.)', x2(pddd), bookValue>0?'Defter Değeri: '+fmtMcap(bookValue):'özkaynak negatif — hesaplanamaz', pdCls) +
-    cell('Defter Değeri (DD)', fmtMcap(bookValue), 'özkaynak (en güncel bilanço)');
+    cell(t('val_mcap'), fmtMcap(mcap), t('val_mcap_sub')) +
+    cell(t('val_pe'), x2(fk), netIncome==null?t('val_pe_no_ni'):(netIncome<0?t('val_pe_loss'):t('val_pe_ni')+' '+fmtMcap(netIncome)+' · '+niLabel), fkCls) +
+    cell(t('val_pb'), x2(pddd), bookValue>0?t('val_book_sub')+' '+fmtMcap(bookValue):t('val_pb_neg'), pdCls) +
+    cell(t('val_book'), fmtMcap(bookValue), t('val_book_eq'));
   card.classList.remove('hidden');
 }
 
@@ -4613,11 +4629,12 @@ function renderYdf(mcap){
     <div class="delta neutral">${sub}</div></div>`;
   const x2=v=>v==null?'—':v.toFixed(2);
   const paidSrc=FIN.market==='BIST'?'KAP 2OA':'SEC Common Stock';
+  LAST_MCAP=mcap;
   box.innerHTML =
-    cell('Toplam Yedekler', fmtMcap(reserves), 'Özkaynaklar − Ödenmiş sermaye') +
-    cell('YDF Oranı', x2(ydf), 'Toplam yedekler / Piyasa değeri · ≥0,80 tercih', ydfCls) +
-    cell('Ödenmiş Sermaye', fmtMcap(paidIn), paidSrc+' · düşük olması tercih') +
-    cell('Yedekler / Öd. Sermaye', x2(r2p), 'ne kadar yüksekse o kadar iyi', r2pCls);
+    cell(t('ydf_res'), fmtMcap(reserves), t('ydf_res_sub')) +
+    cell(t('ydf_ratio'), x2(ydf), t('ydf_ratio_sub'), ydfCls) +
+    cell(t('ydf_paid'), fmtMcap(paidIn), paidSrc+' '+t('ydf_paid_pref')) +
+    cell(t('ydf_r2p'), x2(r2p), t('ydf_r2p_sub'), r2pCls);
   card.classList.remove('hidden');
 }
 
@@ -4625,10 +4642,10 @@ function renderYdf(mcap){
 const safeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 function relTime(d){
   const diff=(Date.now()-d.getTime())/1000;
-  if(diff<3600) return Math.max(1,Math.round(diff/60))+' dk önce';
-  if(diff<86400) return Math.round(diff/3600)+' saat önce';
-  if(diff<604800) return Math.round(diff/86400)+' gün önce';
-  return d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+  if(diff<3600) return Math.max(1,Math.round(diff/60))+' '+t('rel_min');
+  if(diff<86400) return Math.round(diff/3600)+' '+t('rel_hour');
+  if(diff<604800) return Math.round(diff/86400)+' '+t('rel_day');
+  return d.toLocaleDateString(getLang()==='en'?'en-US':'tr-TR',{day:'2-digit',month:'short',year:'numeric'});
 }
 /* --- Çeviri DOĞRUDAN TARAYICIDAN yapılır (sunucu köprüsü DEĞİL). ---
    Neden: Render'ın veri merkezi IP'si Google Translate & MyMemory tarafından engelleniyor →
@@ -4713,8 +4730,9 @@ function parseNewsXML(xml){
 async function fetchNews(sym, myGen){
   const box=document.getElementById('newsList');
   if(!box) return;
-  box.innerHTML='<div class="hint">Haberler yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('news_loading')+'</div>';
   const isBist = FIN && FIN.market==='BIST';
+  const langEn = getLang()==='en';
   try{
     let items;
     if(isBist){
@@ -4812,25 +4830,24 @@ async function fetchNews(sym, myGen){
       });
     }
     items=items.filter((it,i)=>included[i]);
-    if(!items.length){ box.innerHTML='<div class="hint">Bu hisse için güncel haber bulunamadı.</div>'; return; }
+    if(!items.length){ box.innerHTML='<div class="hint">'+t('news_none')+'</div>'; return; }
 
-    // Başlık + özetler: BIST haberleri zaten Türkçe → çeviri atlanır (hız + doğruluk);
-    // ABD haberleri tek havuzda Türkçe'ye çevrilir (eşzamanlılık sınırlı)
+    // Başlık + özetler: EN modda kaynak dil; TR modda BIST olduğu gibi, ABD→Türkçe çeviri
     const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
-    const tr = isBist ? allTexts : await translateTR(allTexts);
+    const tr = (langEn || isBist) ? allTexts : await translateTR(allTexts);
     if(myGen!=null && myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
     const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
-      const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
-      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${isBist?'Habere git →':'Orijinal habere git (İng.) →'}</a>`;
+      const sum=safeHTML(trDescs[idx]||it.desc||t('news_no_sum'));
+      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${isBist?t('news_go'):t('news_go_orig')}</a>`;
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
         <div class="news-sum">${sum}<br>${links}</div>
       </div>`;
     }).join('');
-  }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('news_none')+': '+e.message+'</div>'; }
 }
 /* Haber başlığına tıklayınca özeti aç/kapat */
 function toggleNews(el){ el.classList.toggle('open'); }
@@ -5107,36 +5124,36 @@ function buildRowsFromSEC(D,D0,D1){
   };
 
   section('asset_current',[
-    ['Nakit ve Nakit Benzerleri',D.cash],
-    ['Kısa Vadeli Yatırımlar',D.stInv],
-    ['Ticari Alacaklar',D.recv],
-    ['Stoklar',D.inv],
-  ],D.assetsCur,'Diğer Dönen Varlıklar');
+    [t('ln_cash'),D.cash],
+    [t('ln_st_inv'),D.stInv],
+    [t('ln_recv'),D.recv],
+    [t('ln_inv'),D.inv],
+  ],D.assetsCur,t('ln_other_ca'));
 
   section('asset_noncur',[
-    ['Maddi Duran Varlıklar',D.ppe],
-    ['Şerefiye (Goodwill)',D.goodwill],
-    ['Maddi Olmayan Duran Varlıklar',D.intang],
-    ['Uzun Vadeli Yatırımlar',D.ltInv],
-  ],null,'Diğer Duran Varlıklar', d=> (v(D.assets,d)-v(D.assetsCur,d)) );
+    [t('ln_ppe'),D.ppe],
+    [t('ln_gw'),D.goodwill],
+    [t('ln_intang'),D.intang],
+    [t('ln_lt_inv'),D.ltInv],
+  ],null,t('ln_other_nca'), d=> (v(D.assets,d)-v(D.assetsCur,d)) );
 
   section('liab_current',[
-    ['Ticari Borçlar',D.ap],
-    ['Kısa Vadeli Finansal Borçlar',D.stDebt],
-    ['Ertelenmiş Gelirler',D.defRev],
-  ],D.liabCur,'Diğer Kısa Vadeli Yük.');
+    [t('ln_ap'),D.ap],
+    [t('ln_st_debt'),D.stDebt],
+    [t('ln_def_rev'),D.defRev],
+  ],D.liabCur,t('ln_other_cl'));
 
   section('liab_noncur',[
-    ['Uzun Vadeli Finansal Borçlar',D.ltDebt],
-  ],null,'Diğer Uzun Vadeli Yük.', d=> (liabTotal(D,d)-v(D.liabCur,d)) );
+    [t('ln_lt_debt'),D.ltDebt],
+  ],null,t('ln_other_ncl'), d=> (liabTotal(D,d)-v(D.liabCur,d)) );
 
   // Özkaynak toplamı = Aktif − (sağlam) Toplam Yükümlülük → bilanço HER ZAMAN dengelenir.
   // Azınlık payları (NCI) ve mezzanine gibi StockholdersEquity'ye dahil OLMAYAN
   // kalemler "Diğer Özkaynak" satırında toplanır.
   section('equity',[
-    ['Ödenmiş Sermaye',D.common],
-    ['Dağıtılmamış Kârlar',D.retained],
-  ],null,'Diğer Özkaynak Kalemleri', d=> (v(D.assets,d)-liabTotal(D,d)) );
+    [t('ln_common'),D.common],
+    [t('ln_retained'),D.retained],
+  ],null,t('ln_other_eq'), d=> (v(D.assets,d)-liabTotal(D,d)) );
 
   return out;
 }
@@ -5146,11 +5163,11 @@ function rowHTML(name='', cat='asset_current', cur='', prev=''){
   const opts = Object.keys(getCats()).map(k=>`<option value="${k}" ${k===cat?'selected':''}>${getCats()[k]}</option>`).join('');
   const cell = v => (v===''||v===null||v===undefined) ? '' : fmtAbbr(Number(v));
   return `<tr>
-    <td><input class="name" value="${name.replace(/"/g,'&quot;')}" placeholder="Kalem adı"></td>
+    <td><input class="name" value="${name.replace(/"/g,'&quot;')}" placeholder="${t('ph_item')}"></td>
     <td><select class="cell catsel">${opts}</select></td>
     <td><input class="cell cur" value="${cell(cur)}" inputmode="text"></td>
     <td><input class="cell prev" value="${cell(prev)}" inputmode="text"></td>
-    <td class="row-actions"><button class="delrow" onclick="this.closest('tr').remove()" title="Sil">✕</button></td>
+    <td class="row-actions"><button class="delrow" onclick="this.closest('tr').remove()" title="${t('btn_del')}">✕</button></td>
   </tr>`;
 }
 function addRow(group){
@@ -5159,8 +5176,8 @@ function addRow(group){
 }
 function setPeriodHeaders(curDate, prevDate){
   const th1=document.getElementById('thCur'), th2=document.getElementById('thPrev');
-  if(th1) th1.innerHTML = 'Cari Dönem' + (curDate?`<br><span class="thd">${curDate}</span>`:'');
-  if(th2) th2.innerHTML = 'Önceki Dönem' + (prevDate?`<br><span class="thd">${prevDate}</span>`:'');
+  if(th1) th1.innerHTML = t('th_cur') + (curDate?`<br><span class="thd">${curDate}</span>`:'');
+  if(th2) th2.innerHTML = t('th_prev') + (prevDate?`<br><span class="thd">${prevDate}</span>`:'');
 }
 function hidePriceUI(){
   stopLivePrice();
@@ -5228,7 +5245,7 @@ function analyze(myGen){
   if(myGen!=null && myGen!==REQ_GEN) return;
   const d=readData();
   colorInputRows();
-  if(d.length===0){ alert('Lütfen en az bir kalem girin veya "Örnek Veri Yükle"ye basın.'); return; }
+  if(d.length===0){ alert(t('alert_need_rows')); return; }
   document.getElementById('results').classList.remove('hidden');
 
   const isA=r=>CAT_GROUP[r.cat]==='asset', isL=r=>CAT_GROUP[r.cat]==='liab', isE=r=>CAT_GROUP[r.cat]==='equity';
@@ -5271,13 +5288,13 @@ function analyze(myGen){
   // Rapor başlığı (dışa aktarmada da kullanılır)
   const rt=document.getElementById('reportTitle');
   if(rt){
-    if(!FIN){ rt.removeAttribute('data-title'); rt.textContent='Elle girilen veri'; }
+    if(!FIN){ rt.removeAttribute('data-title'); rt.textContent=t('report_manual'); }
     else{
       const mkt = FIN.market==='BIST' ? 'BIST'
                 : FIN.market==='EU' && FIN.euInfo ? FIN.euInfo.country
-                : 'ABD';
+                : t('mkt_us');
       const curLbl = FIN.market==='BIST' ? 'TL' : (FIN.cur || (FIN.market==='EU'?'—':'USD'));
-      const titleTxt = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?'Yıllık':'Çeyreklik'} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
+      const titleTxt = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?t('period_annual_cap'):t('period_quarter_cap')} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
       rt.setAttribute('data-title', titleTxt);
       const cached=LOGO_CACHE[logoCacheKey(FIN.ticker, FIN.market)]||FIN.logoid||'';
       rt.innerHTML=logoHtml(cached, FIN.ticker, 28, {...logoOptsFromFin(), logoid:cached})+`<span>${safeHTML(titleTxt)}</span>`;
@@ -5288,22 +5305,16 @@ function analyze(myGen){
   const pn=document.getElementById('periodNote');
   if(pn){
     if(FIN && FIN.market==='BIST'){
-      const bankTxt = FIN.bankGroup==='UFRS' ? ' <b>Banka/sigorta bilançosu:</b> dönen/duran ayrımı olmadığı için likidite oranları (cari oran vb.) bu şirketlerde sınırlı anlam taşır.' : '';
-      pn.innerHTML = (FIN.mode==='annual'
-        ? `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel tamamlanmış mali yıl. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
-        : `📅 KAP verisi (İş Yatırım aracılığıyla) — en güncel açıklanan çeyrek.`) + bankTxt;
+      const bankTxt = FIN.bankGroup==='UFRS' ? t('pn_bank') : '';
+      pn.innerHTML = (FIN.mode==='annual' ? t('pn_bist_a') : t('pn_bist_q')) + bankTxt;
     }else if(FIN && FIN.market==='EU'){
       const via = FIN.ifrsSource
-        ? (FIN.mode==='quarter'
-            ? 'Çeyreklik veri Yahoo Finance üzerinden.'
-            : 'Çok yıllı veri Yahoo Finance / IFRS kaynaklarından.')
-        : 'TradingView tek dönem özeti (çok yıllı veri bu şirket için bulunamadı).';
-      pn.innerHTML = `📅 ${FIN.euInfo?FIN.euInfo.country+' borsası — ':''}${via}${FIN.mode==='annual'?' Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.':''}`;
+        ? (FIN.mode==='quarter' ? t('pn_eu_q') : t('pn_eu_a'))
+        : t('pn_eu_tv');
+      pn.innerHTML = `📅 ${FIN.euInfo?FIN.euInfo.country+' '+t('pn_eu_ex'):''}${via}${FIN.mode==='annual'?t('pn_eu_fresh'):''}`;
     }else if(FIN){
-      const filedTxt = FIN.filedD0 ? `📅 SEC'e bildirilme: ${fmtDate(FIN.filedD0)}.` : '';
-      const lagTxt = FIN.mode==='annual'
-        ? ` Yıllık rapor (10-K) yılda bir, tamamlanmış mali yıl için yayımlanır — bu en güncel tamamlanmış mali yıldır. Daha taze veri için yukarıdan <b>Çeyreklik</b> seçin.`
-        : ` Çeyreklik rapor (10-Q) — en güncel ara dönem.`;
+      const filedTxt = FIN.filedD0 ? tf('pn_sec_filed',{d:fmtDate(FIN.filedD0)}) : '';
+      const lagTxt = FIN.mode==='annual' ? t('pn_sec_a') : t('pn_sec_q');
       pn.innerHTML = (filedTxt + lagTxt).trim();
     }else{
       pn.textContent='';
@@ -5377,25 +5388,25 @@ function renderIncome(T){
     let delta='';
     if(p!=null && p!==0){ const ch=(c-p)/Math.abs(p)*100; const good=inv?ch<0:ch>0;
       const cls=Math.abs(ch)<0.05?'neutral':(good?'up':'down'); const ar=Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
-      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fmtFn(p)})</span></div>`; }
+      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(${t('kpi_prev')} ${fmtFn(p)})</span></div>`; }
     return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${fmtFn(c)}</div>${delta}</div>`;
   };
   const pp=v=>(v==null?'—':(v*100).toFixed(1)+'%');
   document.getElementById('profKpis').innerHTML=[
-    kpi('Gelir (Hasılat)', rev0, rev1, fmtAbbr),
-    kpi('Net Kâr', ni0, ni1, fmtAbbr),
-    kpi('Net Kâr Marjı', nm0, nm1, pp),
-    kpi('Özkaynak Kârlılığı (ROE)', roe0, roe1, pp),
+    kpi(t('inc_rev'), rev0, rev1, fmtAbbr),
+    kpi(t('inc_ni'), ni0, ni1, fmtAbbr),
+    kpi(t('inc_nm'), nm0, nm1, pp),
+    kpi(t('inc_roe'), roe0, roe1, pp),
   ].join('');
 
   // Gelir tablosu satırları
   const lines=[
-    ['Gelir (Hasılat)','revenue',false],
-    ['Satış Maliyeti','costRev',true],
-    ['Brüt Kâr','grossProfit',false],
-    ['Faaliyet Kârı','opIncome',false],
-    ['Ar-Ge Gideri','rnd',true],
-    ['Net Kâr','netIncome',false],
+    [t('inc_rev'),'revenue',false],
+    [t('inc_cogs'),'costRev',true],
+    [t('inc_gp'),'grossProfit',false],
+    [t('inc_op'),'opIncome',false],
+    [t('inc_rnd'),'rnd',true],
+    [t('inc_ni'),'netIncome',false],
   ];
   document.getElementById('incomeBody').innerHTML=lines.map(([lbl,k,inv])=>{
     const c=iv(k,R0), p=iv(k,R1);
@@ -5412,15 +5423,15 @@ function renderIncome(T){
   const roa0=T.cur.toplamV?(ni0!=null?ni0/T.cur.toplamV:null):null;
   const roa1=T.prev.toplamV?(ni1!=null?ni1/T.prev.toplamV:null):null;
   const defs=[
-    ['Brüt Marj','Brüt Kâr / Gelir', rev0?(gp0!=null?gp0/rev0:null):null, rev1?(gp1!=null?gp1/rev1:null):null, v=>v>=0.4?'good':v>=0.2?'warn':'bad'],
-    ['Faaliyet Marjı','Faaliyet Kârı / Gelir', rev0?(op0!=null?op0/rev0:null):null, rev1?(op1!=null?op1/rev1:null):null, v=>v>=0.15?'good':v>=0.05?'warn':'bad'],
-    ['Net Kâr Marjı','Net Kâr / Gelir', nm0, nm1, v=>v>=0.1?'good':v>=0.03?'warn':'bad'],
-    ['Özkaynak Kârlılığı (ROE)','Net Kâr / Özkaynak', roe0, roe1, v=>v>=0.15?'good':v>=0.08?'warn':'bad'],
-    ['Aktif Kârlılığı (ROA)','Net Kâr / Toplam Varlık', roa0, roa1, v=>v>=0.07?'good':v>=0.03?'warn':'bad'],
+    [t('inc_gm'),t('inc_gm_f'), rev0?(gp0!=null?gp0/rev0:null):null, rev1?(gp1!=null?gp1/rev1:null):null, v=>v>=0.4?'good':v>=0.2?'warn':'bad'],
+    [t('inc_om'),t('inc_om_f'), rev0?(op0!=null?op0/rev0:null):null, rev1?(op1!=null?op1/rev1:null):null, v=>v>=0.15?'good':v>=0.05?'warn':'bad'],
+    [t('inc_nm'),t('inc_nm_f'), nm0, nm1, v=>v>=0.1?'good':v>=0.03?'warn':'bad'],
+    [t('inc_roe'),t('inc_roe_f'), roe0, roe1, v=>v>=0.15?'good':v>=0.08?'warn':'bad'],
+    [t('inc_roa'),t('inc_roa_f'), roa0, roa1, v=>v>=0.07?'good':v>=0.03?'warn':'bad'],
   ];
   document.getElementById('profBody').innerHTML=defs.map(([nm,fo,c,p,st])=>{
     const status=c==null?'warn':st(c);
-    const lbl=c==null?'—':(status==='good'?'İyi':status==='warn'?'Orta':'Zayıf');
+    const lbl=c==null?'—':statusPill(status);
     let ch='—';
     if(c!=null&&p!=null){ const d=(c-p)*100; ch=(d>=0?'▲ +':'▼ ')+d.toFixed(1)+'p'; }
     return `<tr>
@@ -5462,7 +5473,7 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
   const card=document.getElementById('techCard'), box=document.getElementById('techBody');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Teknik veriler yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('tech_loading')+'</div>';
   try{
     const scan = euOpt ? euOpt.scan : (market==='BIST'?'turkey':'america');
     const tickers = euOpt ? [euOpt.tv] : (market==='BIST'?['BIST:'+sym]:['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym]);
@@ -5475,7 +5486,7 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
     const j=r.ok?await r.json():null;
     if(myGen!=null && myGen!==REQ_GEN) return;
     const row=(j&&j.data||[]).find(x=>x.d && x.d[0]!=null);
-    if(!row){ box.innerHTML='<div class="hint">Teknik veri bulunamadı.</div>'; return; }
+    if(!row){ box.innerHTML='<div class="hint">'+t('tech_none')+'</div>'; return; }
     const [rsi,sma50,sma200,hi52,lo52,pW,p1M,p3M,pYTD,pY,beta,volM,close]=row.d;
     const closes=((((((priceJ||{}).chart||{}).result||[])[0]||{}).indicators||{}).quote||[])[0];
     const closeArr=((closes&&closes.close)||[]).filter(x=>x!=null&&Number.isFinite(x));
@@ -5484,17 +5495,17 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
     const clsOf=v=> v==null?'neutral':(v>0?'up':v<0?'down':'neutral');
     const sgn=v=> v==null?'—':(v>0?'+':'')+v.toFixed(1)+'%';
     // RSI bölgesi
-    const rsiZone= rsi==null?['—','neutral'] : rsi>=70?['Aşırı Alım','down'] : rsi<=30?['Aşırı Satım','up'] : ['Nötr','neutral'];
+    const rsiZone= rsi==null?['—','neutral'] : rsi>=70?[t('tech_ob'),'down'] : rsi<=30?[t('tech_os'),'up'] : [t('tech_neutral'),'neutral'];
     let fishZone=['—','neutral'], fishSub='';
     if(fish && fish.fisher!=null){
-      const f=fish.fisher, t=fish.trigger;
-      const cross=t==null?'':(f>t?'Fisher > tetik (yükseliş)':f<t?'Fisher < tetik (düşüş)':'nötr');
-      if(f>=2) fishZone=['Aşırı alım bölgesi','down'];
-      else if(f<=-2) fishZone=['Aşırı satım bölgesi','up'];
-      else if(f>t) fishZone=['Momentum ↑','up'];
-      else if(f<t) fishZone=['Momentum ↓','down'];
-      else fishZone=['Nötr','neutral'];
-      fishSub=(cross?(cross+' · '):'')+'tetik '+num(t,2);
+      const f=fish.fisher, trig=fish.trigger;
+      const cross=trig==null?'':(f>trig?t('tech_fish_gt'):f<trig?t('tech_fish_lt'):t('tech_neutral'));
+      if(f>=2) fishZone=[t('tech_fish_ob'),'down'];
+      else if(f<=-2) fishZone=[t('tech_fish_os'),'up'];
+      else if(f>trig) fishZone=[t('tech_mom_up'),'up'];
+      else if(f<trig) fishZone=[t('tech_mom_dn'),'down'];
+      else fishZone=[t('tech_neutral'),'neutral'];
+      fishSub=(cross?(cross+' · '):'')+t('tech_trig')+' '+num(trig,2);
     }
     // Ortalamalara mesafe
     const d50=(close&&sma50)?(close/sma50-1)*100:null;
@@ -5506,42 +5517,43 @@ async function fetchTechPanel(sym, market, myGen, euOpt){
       ${sub?`<div class="delta neutral">${sub}</div>`:''}</div>`;
     let html='<div class="grid" style="margin-bottom:16px">';
     html+=kpi('RSI (14)', num(rsi,1), rsiZone[0], rsiZone[1]);
-    html+=kpi('Fisher Dönüşümü (21)', fish&&fish.fisher!=null?num(fish.fisher,2):'—', fishSub||fishZone[0], fishZone[1]);
-    html+=kpi('50 Günlük Ort. Mesafe', sgn(d50), 'SMA50: '+num(sma50), clsOf(d50));
-    html+=kpi('200 Günlük Ort. Mesafe', sgn(d200), 'SMA200: '+num(sma200), clsOf(d200));
-    html+=kpi('Beta (1 Yıl)', num(beta), beta==null?'':(beta>1.2?'piyasadan oynak':beta<0.8?'piyasadan sakin':'piyasayla uyumlu'));
-    html+=kpi('Aylık Volatilite', num(volM,1)+'%', 'günlük ort. dalgalanma');
+    html+=kpi(t('tech_fish'), fish&&fish.fisher!=null?num(fish.fisher,2):'—', fishSub||fishZone[0], fishZone[1]);
+    html+=kpi(t('tech_d50'), sgn(d50), 'SMA50: '+num(sma50), clsOf(d50));
+    html+=kpi(t('tech_d200'), sgn(d200), 'SMA200: '+num(sma200), clsOf(d200));
+    html+=kpi(t('tech_beta'), num(beta), beta==null?'':(beta>1.2?t('tech_beta_hot'):beta<0.8?t('tech_beta_calm'):t('tech_beta_ok')));
+    html+=kpi(t('tech_vol'), num(volM,1)+'%', t('tech_vol_sub'));
     html+='</div>';
     // 52 hafta konum çubuğu
     if(pos!=null){
       html+=`<div style="margin-bottom:16px">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">52 Hafta Aralığındaki Konum —
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${t('tech_52')} —
           <b style="color:var(--ink)">%${pos.toFixed(0)}</b>
-          <span class="neutral">(düşük ${fmtUSD(lo52)} · yüksek ${fmtUSD(hi52)})</span></div>
+          <span class="neutral">(${t('tech_lo')} ${fmtUSD(lo52)} · ${t('tech_hi')} ${fmtUSD(hi52)})</span></div>
         <div style="position:relative;height:10px;border-radius:6px;background:linear-gradient(90deg,var(--bad),var(--warn),var(--good))">
           <div style="position:absolute;left:${Math.min(99,Math.max(1,pos)).toFixed(1)}%;top:-4px;width:4px;height:18px;background:#fff;border-radius:2px;box-shadow:0 0 0 2px rgba(255,255,255,.25)"></div>
         </div></div>`;
     }
     // Dönemsel getiriler
-    const perf=[['1 Hafta',pW],['1 Ay',p1M],['3 Ay',p3M],['Yıl Başından',pYTD],['1 Yıl',pY]];
+    const perf=[[t('tech_1w'),pW],[t('tech_1m'),p1M],[t('tech_3m'),p3M],[t('tech_ytd'),pYTD],[t('tech_1y'),pY]];
     html+=`<table><thead><tr>${perf.map(p=>`<th>${p[0]}</th>`).join('')}</tr></thead>
       <tbody><tr>${perf.map(p=>`<td class="${clsOf(p[1])}"><b>${sgn(p[1])}</b></td>`).join('')}</tr></tbody></table>`;
     // ABD kısa pozisyonu (Finviz — fetchTargets doldurur; hazırsa bas, değilse sonra güncellenir)
     html+='<div id="techShortRow"></div>';
     box.innerHTML=html;
     renderTechShort();
-  }catch(e){ box.innerHTML='<div class="hint">Teknik veri alınamadı: '+e.message+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('tech_none')+': '+e.message+'</div>'; }
 }
 function renderTechShort(){
   const el=document.getElementById('techShortRow');
   if(!el || !TECH_SHORT || TECH_SHORT.floatPct==null) return;
   const s=TECH_SHORT;
   const cls=s.floatPct>=10?'down':s.floatPct>=5?'warn':'up';
+  const sold=t('tech_short_sold');
   el.innerHTML=`<div style="margin-top:14px;padding:11px 14px;border:1px solid var(--line);border-left:4px solid var(--${cls==='down'?'bad':cls==='warn'?'warn':'good'});border-radius:11px;background:var(--surface-2);font-size:12.5px">
-    <b style="color:var(--ink)">Kısa Pozisyon (ayı bahisleri):</b>
-    dolaşımdaki payların <b class="${cls==='warn'?'neutral':cls}">%${s.floatPct.toFixed(2)}</b>'i açığa satılmış${s.ratio!=null?` · kapatma süresi ≈ <b>${s.ratio.toFixed(1)} gün</b>`:''}.
-    <span class="neutral">%10+ yüksek ayı baskısı / short-squeeze potansiyeli demektir. Kaynak: Finviz.</span></div>`;
-  document.getElementById('techShortSrc').textContent=' + Finviz (kısa pozisyon)';
+    <b style="color:var(--ink)">${t('tech_short')}</b>
+    ${t('tech_short_body')} <b class="${cls==='warn'?'neutral':cls}">%${s.floatPct.toFixed(2)}</b>${sold}${s.ratio!=null?` · ${t('tech_short_days')} <b>${s.ratio.toFixed(1)} ${t('tech_short_days_u')}</b>`:''}.
+    <span class="neutral">${t('tech_short_note')}</span></div>`;
+  const src=document.getElementById('techShortSrc'); if(src) src.textContent=t('tech_short_src');
 }
 
 /* ---- Ortaklık Yapısı (pasta grafik) ----
@@ -5576,7 +5588,7 @@ function renderOwnerPie(slices, note){
     <span style="color:var(--ink);flex:1">${safeHTML(s.label)}</span>
     <b style="color:var(--ink);font-variant-numeric:tabular-nums">%${s.pct.toFixed(2)}</b></div>`).join('');
   box.innerHTML=`<div style="display:flex;gap:26px;align-items:center;flex-wrap:wrap">
-    ${pieSVG(slices, halka?('%'+halka.pct.toFixed(1)):'', halka?'halka açık':'')}
+    ${pieSVG(slices, halka?('%'+halka.pct.toFixed(1)):'', halka?t('owner_float'):'')}
     <div style="flex:1;min-width:230px">${legend}
       ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}</div></div>`;
   card.classList.remove('hidden');
@@ -5985,7 +5997,7 @@ async function renderWatchlist(){
   const list=getWatchlist();
   if(!list.length){ card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('watch_loading')+'</div>';
   const rows=await Promise.all(list.map(async w=>{
     try{
       const r=await fetch(`/price?s=${encodeURIComponent(w.ysym)}&range=1d`).then(x=>x.json());
@@ -5996,15 +6008,15 @@ async function renderWatchlist(){
     }catch(e){ return { ...w, live:null, ch:null }; }
   }));
   const ccy=w=> w.ccySym!=null ? w.ccySym : (w.market==='BIST'?'₺':'$');
-  const marketLbl={BIST:'BIST', US:'ABD', EU:'Avrupa'};
+  const marketLbl={BIST:'BIST', US:t('mkt_us'), EU:t('mkt_eu')};
   const mkt=w=> w.country||marketLbl[w.market]||w.market;
-  box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Pazar</th><th>Fiyat</th><th>Günlük</th><th></th></tr></thead><tbody>
+  box.innerHTML=`<table><thead><tr><th>${t('watch_th_sym')}</th><th>${t('watch_th_mkt')}</th><th>${t('watch_th_px')}</th><th>${t('watch_th_chg')}</th><th></th></tr></thead><tbody>
     ${rows.map(w=>`<tr>
       <td style="cursor:pointer" onclick="watchGo('${w.sym}','${w.market}')"><b>${safeHTML(w.sym)}</b></td>
       <td class="ratio-formula">${safeHTML(mkt(w))}</td>
       <td>${w.live!=null?ccy(w)+w.live.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'}</td>
       <td class="${w.ch==null?'neutral':w.ch>0?'up':'down'}">${w.ch==null?'—':(w.ch>0?'▲ ':'▼ ')+pct(w.ch)}</td>
-      <td class="row-actions"><button class="delrow" onclick="event.stopPropagation();removeWatch('${w.sym}','${w.market}')" title="Kaldır">✕</button></td>
+      <td class="row-actions"><button class="delrow" onclick="event.stopPropagation();removeWatch('${w.sym}','${w.market}')" title="${t('watch_rm')}">✕</button></td>
     </tr>`).join('')}
   </tbody></table>`;
 }
@@ -6039,24 +6051,24 @@ function renderCashFlow(){
       const ch=(c-p)/Math.abs(p)*100;
       const cls=mode==='plain'?'neutral':(Math.abs(ch)<0.05?'neutral':(ch>0?'up':'down'));
       const ar=Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
-      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(önceki ${fmtFn(p)})</span></div>`;
+      delta=`<div class="delta ${cls}">${ar} ${pct(ch)} <span class="neutral">(${t('kpi_prev')} ${fmtFn(p)})</span></div>`;
     }
     return `<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${fmtFn(c)}</div>${delta}</div>`;
   };
   const cells=[
-    kpi('Faaliyet Nakit Akışı', v(CF.opCF,C0), v(CF.opCF,C1), 'good'),
-    kpi('Yatırım Nakit Akışı', v(CF.invCF,C0), v(CF.invCF,C1), 'plain'),
-    kpi('Finansman Nakit Akışı', v(CF.finCF,C0), v(CF.finCF,C1), 'plain'),
-    kpi('Serbest Nakit Akış (FCF)', v(CF.fcf,C0), v(CF.fcf,C1), 'good'),
+    kpi(t('cash_op'), v(CF.opCF,C0), v(CF.opCF,C1), 'good'),
+    kpi(t('cash_inv'), v(CF.invCF,C0), v(CF.invCF,C1), 'plain'),
+    kpi(t('cash_fin'), v(CF.finCF,C0), v(CF.finCF,C1), 'plain'),
+    kpi(t('cash_fcf'), v(CF.fcf,C0), v(CF.fcf,C1), 'good'),
   ];
   // FCF Marjı: aynı tarihte gelir varsa (ABD yıllık↔yıllık; BIST her modda hizalı)
   const rev0=v(FIN.income.revenue,C0), rev1=v(FIN.income.revenue,C1);
   const fm0=(rev0&&v(CF.fcf,C0)!=null)?v(CF.fcf,C0)/rev0:null;
   const fm1=(rev1&&v(CF.fcf,C1)!=null)?v(CF.fcf,C1)/rev1:null;
-  if(fm0!=null) cells.push(kpi('FCF Marjı (FCF/Gelir)', fm0, fm1, 'good', x=>(x*100).toFixed(1)+'%'));
+  if(fm0!=null) cells.push(kpi(t('cash_fcf_m'), fm0, fm1, 'good', x=>(x*100).toFixed(1)+'%'));
   grid.innerHTML=cells.join('');
   const isQ = FIN.market==='BIST' && FIN.mode==='quarter' && /03-31|06-30|09-30/.test(C0);
-  note.textContent='Dönem: '+fmtDate(C0)+(C1?' ↔ '+fmtDate(C1):'')+(FIN.market!=='BIST'?' (ABD nakit akışları her zaman yıllıktır)':(isQ?' (çeyreklik)':''));
+  note.textContent=t('cash_period')+' '+fmtDate(C0)+(C1?' ↔ '+fmtDate(C1):'')+(FIN.market!=='BIST'?t('cash_us_note'):(isQ?t('cash_q_note'):''));
   card.classList.remove('hidden');
 }
 
@@ -6095,37 +6107,37 @@ function renderHealth(T){
     }
     return `<tr><td>${lbl}</td><td class="${cls}"><b>${fmt(c)}</b></td><td>${p!=null?fmt(p):'—'}</td></tr>`;
   };
-  let html=`<div style="font-weight:700;color:var(--ink);margin-bottom:6px">DuPont Analizi — ROE'nin Kaynağı</div>
-  <table><thead><tr><th>Bileşen</th><th>Cari</th><th>Önceki</th></tr></thead><tbody>
-    ${dpRow('Net Kâr Marjı (NI/Gelir)', d0.nm, d1&&d1.nm, pp, 1)}
-    ${dpRow('Varlık Devir Hızı (Gelir/Varlık)', d0.at, d1&&d1.at, xx, 1)}
-    ${dpRow('Kaldıraç Çarpanı (Varlık/Özkaynak)', d0.em, d1&&d1.em, xx, -1)}
-    ${dpRow('= Özkaynak Kârlılığı (ROE)', d0.roe, d1&&d1.roe, pp, 1)}
+  let html=`<div style="font-weight:700;color:var(--ink);margin-bottom:6px">${t('health_dupont')}</div>
+  <table><thead><tr><th>${t('health_comp')}</th><th>${t('th_cur')}</th><th>${t('th_prev')}</th></tr></thead><tbody>
+    ${dpRow(t('health_nm'), d0.nm, d1&&d1.nm, pp, 1)}
+    ${dpRow(t('health_at'), d0.at, d1&&d1.at, xx, 1)}
+    ${dpRow(t('health_em'), d0.em, d1&&d1.em, xx, -1)}
+    ${dpRow(t('health_roe'), d0.roe, d1&&d1.roe, pp, 1)}
   </tbody></table>
-  ${FIN.mode==='quarter'?'<div class="hint" style="margin-top:4px">Çeyreklik akış kalemleri yıllıklandırıldı (×4).</div>':''}`;
+  ${FIN.mode==='quarter'?'<div class="hint" style="margin-top:4px">'+t('health_q_note')+'</div>':''}`;
 
   /* --- Piotroski F-Score (9 kriter; hesaplanamayan kriter kapsam dışı kalır) --- */
   const cfDates=Object.keys(CF.opCF||{}).sort().reverse();
   const CF0=cfDates[0];
   const niAtCF=g(I.netIncome,CF0);   // ABD çeyreklik modda nakit yıllık → NI hizasızsa kriter düşer
   const checks=[
-    ['Aktif kârlılığı pozitif (ROA > 0)', (()=>{ const r=sd(g(I.netIncome,R0),g(D.assets,B0)); return r==null?null:r>0; })()],
-    ['Faaliyet nakit akışı pozitif', CF0?(g(CF.opCF,CF0)>0):null],
-    ['ROA iyileşiyor', (()=>{ if(!B1||!R1) return null; const a=sd(g(I.netIncome,R0),g(D.assets,B0)), b=sd(g(I.netIncome,R1),g(D.assets,B1)); return (a==null||b==null)?null:a>b; })()],
-    ['Nakit akışı kârdan büyük (kalite)', (CF0&&niAtCF!=null)?(g(CF.opCF,CF0)>niAtCF):null],
-    ['Kaldıraç azalıyor (Borç/Varlık)', (()=>{ if(!B1) return null; const l0=sd(liabTotal(D,B0),g(D.assets,B0)), l1=sd(liabTotal(D,B1),g(D.assets,B1)); return (l0==null||l1==null)?null:l0<l1; })()],
-    ['Cari oran iyileşiyor', (()=>{ if(!B1||isBank) return null; const c0=sd(g(D.assetsCur,B0),g(D.liabCur,B0)), c1=sd(g(D.assetsCur,B1),g(D.liabCur,B1)); return (c0==null||c1==null)?null:c0>c1; })()],
-    ['Sermaye sulandırması yok (ödenmiş sermaye ↑ değil)', (()=>{ if(!B1) return null; const s0=g(D.common,B0), s1=g(D.common,B1); return (s0==null||s1==null)?null:s0<=s1; })()],
-    ['Brüt marj iyileşiyor', (()=>{ if(!R1) return null; const m0=sd(g(I.grossProfit,R0),g(I.revenue,R0)), m1=sd(g(I.grossProfit,R1),g(I.revenue,R1)); return (m0==null||m1==null)?null:m0>m1; })()],
-    ['Varlık devir hızı iyileşiyor', (()=>{ if(!B1||!R1) return null; const a=sd(g(I.revenue,R0),g(D.assets,B0)), b=sd(g(I.revenue,R1),g(D.assets,B1)); return (a==null||b==null)?null:a>b; })()],
+    [t('piot_1'), (()=>{ const r=sd(g(I.netIncome,R0),g(D.assets,B0)); return r==null?null:r>0; })()],
+    [t('piot_2'), CF0?(g(CF.opCF,CF0)>0):null],
+    [t('piot_3'), (()=>{ if(!B1||!R1) return null; const a=sd(g(I.netIncome,R0),g(D.assets,B0)), b=sd(g(I.netIncome,R1),g(D.assets,B1)); return (a==null||b==null)?null:a>b; })()],
+    [t('piot_4'), (CF0&&niAtCF!=null)?(g(CF.opCF,CF0)>niAtCF):null],
+    [t('piot_5'), (()=>{ if(!B1) return null; const l0=sd(liabTotal(D,B0),g(D.assets,B0)), l1=sd(liabTotal(D,B1),g(D.assets,B1)); return (l0==null||l1==null)?null:l0<l1; })()],
+    [t('piot_6'), (()=>{ if(!B1||isBank) return null; const c0=sd(g(D.assetsCur,B0),g(D.liabCur,B0)), c1=sd(g(D.assetsCur,B1),g(D.liabCur,B1)); return (c0==null||c1==null)?null:c0>c1; })()],
+    [t('piot_7'), (()=>{ if(!B1) return null; const s0=g(D.common,B0), s1=g(D.common,B1); return (s0==null||s1==null)?null:s0<=s1; })()],
+    [t('piot_8'), (()=>{ if(!R1) return null; const m0=sd(g(I.grossProfit,R0),g(I.revenue,R0)), m1=sd(g(I.grossProfit,R1),g(I.revenue,R1)); return (m0==null||m1==null)?null:m0>m1; })()],
+    [t('piot_9'), (()=>{ if(!B1||!R1) return null; const a=sd(g(I.revenue,R0),g(D.assets,B0)), b=sd(g(I.revenue,R1),g(D.assets,B1)); return (a==null||b==null)?null:a>b; })()],
   ];
   const evaluable=checks.filter(c=>c[1]!==null);
   const score=evaluable.filter(c=>c[1]===true).length;
   const denom=evaluable.length;
   const sCls= score>=7?'good': score>=4?'warn':'bad';
-  html+=`<div style="font-weight:700;color:var(--ink);margin:18px 0 6px">Piotroski F-Score
+  html+=`<div style="font-weight:700;color:var(--ink);margin:18px 0 6px">${t('health_piot')}
     <span class="pill ${sCls}" style="margin-left:8px;font-size:14px">${score} / ${denom}</span>
-    ${denom<9?`<span class="hint" style="font-weight:400"> · ${9-denom} kriter veri yetersizliğinden kapsam dışı</span>`:''}</div>`;
+    ${denom<9?`<span class="hint" style="font-weight:400"> · ${9-denom} ${t('health_skip')}</span>`:''}</div>`;
   html+=checks.map(([lbl,ok])=>`<div style="padding:3px 0;font-size:12.5px;color:var(--ink-2)">
     ${ok===null?'<span class="neutral">—</span>':ok?'<span class="up">✓</span>':'<span class="down">✗</span>'} ${lbl}</div>`).join('');
 
@@ -6172,15 +6184,15 @@ function miniBarChart(title, series){
 }
 function renderTrends(){
   const charts=[
-    ['Gelir (Hasılat)', FIN.income.revenue],
-    ['Net Kâr', FIN.income.netIncome],
-    ['Serbest Nakit Akış (FCF)', FIN.income._cash && FIN.income._cash.fcf],
-    ['Toplam Varlık', FIN.balance.assets],
-    ['Özkaynak', FIN.balance.equity],
-    ['Toplam Yükümlülük', FIN.balance.liab],
+    [t('trend_rev'), FIN.income.revenue],
+    [t('trend_ni'), FIN.income.netIncome],
+    [t('trend_fcf'), FIN.income._cash && FIN.income._cash.fcf],
+    [t('trend_assets'), FIN.balance.assets],
+    [t('trend_equity'), FIN.balance.equity],
+    [t('trend_liab'), FIN.balance.liab],
   ];
-  const html=charts.map(([t,s])=>miniBarChart(t,s)).filter(Boolean).join('');
-  document.getElementById('trendCharts').innerHTML = html || '<div class="hint">Trend için yeterli geçmiş veri bulunamadı.</div>';
+  const html=charts.map(([title,s])=>miniBarChart(title,s)).filter(Boolean).join('');
+  document.getElementById('trendCharts').innerHTML = html || '<div class="hint">'+t('trend_empty')+'</div>';
 }
 
 /* ---- Bilanço dengesi ---- */
@@ -6190,19 +6202,19 @@ function renderBalCheck(T){
   const el=document.getElementById('balcheck');
   el.className='balcheck '+(ok?'ok':'no');
   el.innerHTML = ok
-    ? `✓ Bilanço dengede: Toplam Varlık (${fmtAbbr(T.cur.toplamV)}) = Yükümlülük + Özkaynak (${fmtAbbr(T.cur.pasifTop)})`
-    : `⚠ Bilanço dengede DEĞİL — Aktif ${fmtAbbr(T.cur.toplamV)} ≠ Pasif ${fmtAbbr(T.cur.pasifTop)} (fark ${fmtAbbr(diff)}). Girdileri kontrol edin.`;
+    ? tf('bal_ok',{a:fmtAbbr(T.cur.toplamV), p:fmtAbbr(T.cur.pasifTop)})
+    : tf('bal_bad',{a:fmtAbbr(T.cur.toplamV), p:fmtAbbr(T.cur.pasifTop), d:fmtAbbr(diff)});
 }
 
 /* ---- KPI kartları ---- */
 function renderKPIs(T){
   const cards=[
-    ['Toplam Varlık', T.cur.toplamV, T.prev.toplamV, false],
-    ['Toplam Yükümlülük', T.cur.toplamYuk, T.prev.toplamYuk, true],
-    ['Özkaynak', T.cur.ozkaynak, T.prev.ozkaynak, false],
-    ['Net İşletme Sermayesi', T.cur.netSermaye, T.prev.netSermaye, false],
-    ['Dönen Varlık', T.cur.donenV, T.prev.donenV, false],
-    ['Kısa Vade. Yük.', T.cur.kvYuk, T.prev.kvYuk, true],
+    [t('kpi_total_assets'), T.cur.toplamV, T.prev.toplamV, false],
+    [t('kpi_total_liab'), T.cur.toplamYuk, T.prev.toplamYuk, true],
+    [t('kpi_equity'), T.cur.ozkaynak, T.prev.ozkaynak, false],
+    [t('kpi_nwc'), T.cur.netSermaye, T.prev.netSermaye, false],
+    [t('kpi_ca'), T.cur.donenV, T.prev.donenV, false],
+    [t('kpi_cl'), T.cur.kvYuk, T.prev.kvYuk, true],
   ];
   document.getElementById('kpis').innerHTML = cards.map(([lbl,cur,prev,inv])=>{
     const ch = prev!==0 ? (cur-prev)/Math.abs(prev)*100 : (cur!==0?100:0);
@@ -6211,7 +6223,7 @@ function renderKPIs(T){
     const arrow = Math.abs(ch)<0.05?'→':(ch>0?'▲':'▼');
     return `<div class="kpi"><div class="lbl">${lbl}</div>
       <div class="val">${fmtAbbr(cur)}</div>
-      <div class="delta ${cls}">${arrow} ${pct(ch)} <span class="neutral">(önceki ${fmtAbbr(prev)})</span></div></div>`;
+      <div class="delta ${cls}">${arrow} ${pct(ch)} <span class="neutral">(${t('kpi_prev')} ${fmtAbbr(prev)})</span></div></div>`;
   }).join('');
 }
 
@@ -6233,18 +6245,18 @@ function renderRatios(T){
   const c=build('cur'), pr=build('prev');
   // [ad, formül, curVal, prevVal, biçim, eşik fonksiyonu(durum)]
   const defs=[
-    ['Cari Oran','Dönen V. / KV Yük.', c.cari, pr.cari, 'x', v=> v>=1.5?'good':v>=1?'warn':'bad'],
-    ['Asit-Test (Likidite)','(Dönen V. − Stok) / KV Yük.', c.asit, pr.asit, 'x', v=> v>=1?'good':v>=0.7?'warn':'bad'],
-    ['Nakit Oranı','Nakit / KV Yük.', c.nakit, pr.nakit, 'x', v=> v>=0.2?'good':v>=0.1?'warn':'bad'],
-    ['Borç / Özkaynak','Toplam Yük. / Özkaynak', c.borcOz, pr.borcOz, 'x', v=> v<=1?'good':v<=2?'warn':'bad'],
-    ['Finansal Kaldıraç','Toplam Yük. / Toplam Varlık', c.kaldiraci, pr.kaldiraci, '%', v=> v<=0.5?'good':v<=0.7?'warn':'bad'],
-    ['Özkaynak Oranı','Özkaynak / Toplam Varlık', c.ozkOran, pr.ozkOran, '%', v=> v>=0.4?'good':v>=0.25?'warn':'bad'],
-    ['Duran V. Karşılama','Duran V. / Özkaynak', c.duranOzk, pr.duranOzk, 'x', v=> v<=1?'good':v<=1.5?'warn':'bad'],
+    [t('ratio_current'),t('ratio_current_f'), c.cari, pr.cari, 'x', v=> v>=1.5?'good':v>=1?'warn':'bad'],
+    [t('ratio_quick'),t('ratio_quick_f'), c.asit, pr.asit, 'x', v=> v>=1?'good':v>=0.7?'warn':'bad'],
+    [t('ratio_cash'),t('ratio_cash_f'), c.nakit, pr.nakit, 'x', v=> v>=0.2?'good':v>=0.1?'warn':'bad'],
+    [t('ratio_de'),t('ratio_de_f'), c.borcOz, pr.borcOz, 'x', v=> v<=1?'good':v<=2?'warn':'bad'],
+    [t('ratio_lev'),t('ratio_lev_f'), c.kaldiraci, pr.kaldiraci, '%', v=> v<=0.5?'good':v<=0.7?'warn':'bad'],
+    [t('ratio_eq'),t('ratio_eq_f'), c.ozkOran, pr.ozkOran, '%', v=> v>=0.4?'good':v>=0.25?'warn':'bad'],
+    [t('ratio_fa'),t('ratio_fa_f'), c.duranOzk, pr.duranOzk, 'x', v=> v<=1?'good':v<=1.5?'warn':'bad'],
   ];
   const showV=(v,f)=> v===null?'—':(f==='%'?(v*100).toFixed(1)+'%':v.toFixed(2)+'x');
   document.getElementById('ratioBody').innerHTML = defs.map(([nm,fo,cv,pv,f,st])=>{
     const status = cv===null?'warn':st(cv);
-    const lbl = status==='good'?'İyi':status==='warn'?'Orta':'Zayıf';
+    const lbl = statusPill(status);
     let ch='—';
     if(cv!==null&&pv!==null){ const dv=cv-pv; ch=(dv>=0?'▲ ':'▼ ')+(f==='%'?(dv*100).toFixed(1)+'p':dv.toFixed(2)); }
     return `<tr>
@@ -6270,7 +6282,7 @@ function renderVariance(d){
     const inv = CAT_GROUP[r.cat]!=='asset'; // yükümlülük/özkaynak artışı yorumu farklı
     const fav = inv ? r.dv<0 : r.dv>0;
     const dir = Math.abs(r.dp)<0.05?'neutral':(fav?'up':'down');
-    const tag = CAT_GROUP[r.cat]==='asset' ? (r.dv>0?'Artış':'Azalış') : (r.dv>0?'Artış':'Azalış');
+    const tag = r.dv>0?t('dir_up'):t('dir_down');
     return `<tr>
       <td>${r.name} <span class="ratio-formula">(${CATS[r.cat]})</span></td>
       <td>${fmtAbbr(r.cur)}</td><td>${fmtAbbr(r.prev)}</td>
@@ -6314,28 +6326,28 @@ function renderFlags(d,T){
 
   // Likidite
   if(cari!==null){
-    if(cari<1) add('bad','Likidite riski yüksek',`Cari oran ${cari.toFixed(2)}x — dönen varlıklar kısa vadeli borçları karşılamıyor. Nakit akışı baskısı olabilir.`);
-    else if(cari<1.5) add('warn','Likidite sınırda',`Cari oran ${cari.toFixed(2)}x. 1,5x üzeri daha güvenli kabul edilir.`);
-    else add('good','Likidite güçlü',`Cari oran ${cari.toFixed(2)}x — kısa vadeli yükümlülükler rahatça karşılanıyor.`);
+    if(cari<1) add('bad',t('flag_liq_bad_t'),tf('flag_liq_bad_b',{v:cari.toFixed(2)}));
+    else if(cari<1.5) add('warn',t('flag_liq_warn_t'),tf('flag_liq_warn_b',{v:cari.toFixed(2)}));
+    else add('good',t('flag_liq_ok_t'),tf('flag_liq_ok_b',{v:cari.toFixed(2)}));
   }
-  if(asit!==null && asit<0.7) add('warn','Stoğa bağımlılık',`Asit-test ${asit.toFixed(2)}x. Likidite büyük ölçüde stoklara bağlı; stok devri yavaşsa risk artar.`);
+  if(asit!==null && asit<0.7) add('warn',t('flag_acid_t'),tf('flag_acid_b',{v:asit.toFixed(2)}));
 
   // Kaldıraç
   if(borcOz!==null){
-    if(borcOz>2) add('bad','Yüksek borçluluk',`Borç/Özkaynak ${borcOz.toFixed(2)}x — özkaynağın 2 katından fazla borç. Faiz/kur şoklarına kırılgan.`);
-    else if(borcOz>1) add('warn','Orta düzey kaldıraç',`Borç/Özkaynak ${borcOz.toFixed(2)}x. Borç yükü yakından izlenmeli.`);
-    else add('good','Sağlam sermaye yapısı',`Borç/Özkaynak ${borcOz.toFixed(2)}x — düşük kaldıraç.`);
+    if(borcOz>2) add('bad',t('flag_debt_bad_t'),tf('flag_debt_bad_b',{v:borcOz.toFixed(2)}));
+    else if(borcOz>1) add('warn',t('flag_debt_warn_t'),tf('flag_debt_warn_b',{v:borcOz.toFixed(2)}));
+    else add('good',t('flag_debt_ok_t'),tf('flag_debt_ok_b',{v:borcOz.toFixed(2)}));
   }
-  if(ozkOran!==null && ozkOran<0.25) add('bad','İnce özkaynak tabanı',`Özkaynak oranı %${(ozkOran*100).toFixed(0)} — varlıkların çok büyük kısmı borçla finanse ediliyor.`);
+  if(ozkOran!==null && ozkOran<0.25) add('bad',t('flag_thin_t'),tf('flag_thin_b',{v:(ozkOran*100).toFixed(0)}));
 
   // Net işletme sermayesi
-  if(c.netSermaye<0) add('bad','Negatif işletme sermayesi',`Net işletme sermayesi ${fmtAbbr(c.netSermaye)} ${CUR} — kısa vadeli borçlar dönen varlıkları aşıyor.`);
-  else if(p.netSermaye!==0 && c.netSermaye<p.netSermaye*0.7) add('warn','İşletme sermayesi eridi',`Net işletme sermayesi ${fmtAbbr(p.netSermaye)} → ${fmtAbbr(c.netSermaye)} ${CUR}'ye geriledi.`);
+  if(c.netSermaye<0) add('bad',t('flag_nwc_bad_t'),tf('flag_nwc_bad_b',{v:fmtAbbr(c.netSermaye), c:CUR}));
+  else if(p.netSermaye!==0 && c.netSermaye<p.netSermaye*0.7) add('warn',t('flag_nwc_warn_t'),tf('flag_nwc_warn_b',{a:fmtAbbr(p.netSermaye), b:fmtAbbr(c.netSermaye), c:CUR}));
 
   // KV kredi artışı
-  const kvKredi=d.filter(r=>/banka kred|kredi/i.test(r.name)&&r.cat==='liab_current');
+  const kvKredi=d.filter(r=>/banka kred|kredi|short.?term|loan|debt/i.test(r.name)&&r.cat==='liab_current');
   const kvK=kvKredi.reduce((a,r)=>a+r.cur,0), kvKp=kvKredi.reduce((a,r)=>a+r.prev,0);
-  if(kvKp>0 && kvK>kvKp*1.5) add('warn','Kısa vadeli kredi sıçraması',`Kısa vadeli banka kredileri ${fmtAbbr(kvKp)} → ${fmtAbbr(kvK)} ${CUR} (%${((kvK/kvKp-1)*100).toFixed(0)} artış). Yeniden finansman riski.`);
+  if(kvKp>0 && kvK>kvKp*1.5) add('warn',t('flag_st_debt_t'),tf('flag_st_debt_b',{a:fmtAbbr(kvKp), b:fmtAbbr(kvK), c:CUR, p:((kvK/kvKp-1)*100).toFixed(0)}));
 
   // Alacak / stok şişmesi
   const checkBloat=(rx,label)=>{
@@ -6343,18 +6355,18 @@ function renderFlags(d,T){
     const cv=it.reduce((a,r)=>a+r.cur,0), pv=it.reduce((a,r)=>a+r.prev,0);
     const varG=(c.toplamV-p.toplamV);
     if(pv>0 && cv>pv*1.3 && (cv-pv) > Math.abs(varG)*0.3)
-      add('warn',`${label} hızlı büyüdü`,`${label} ${fmtAbbr(pv)} → ${fmtAbbr(cv)} ${CUR} (%${((cv/pv-1)*100).toFixed(0)}). Toplam varlık büyümesinin önemli kısmını oluşturuyor — tahsilat/devir hızı izlenmeli.`);
+      add('warn',tf('flag_bloat_t',{l:label}),tf('flag_bloat_b',{l:label, a:fmtAbbr(pv), b:fmtAbbr(cv), c:CUR, p:((cv/pv-1)*100).toFixed(0)}));
   };
-  checkBloat(/alacak/i,'Ticari alacaklar');
-  checkBloat(/stok/i,'Stoklar');
+  checkBloat(/alacak|receivable/i,t('flag_recv'));
+  checkBloat(/stok|inventory/i,t('flag_inv'));
 
   // Nakit erimesi
-  if(p.nakit>0 && c.nakit<p.nakit*0.6) add('warn','Nakit pozisyonu zayıfladı',`Nakit ve benzerleri ${fmtAbbr(p.nakit)} → ${fmtAbbr(c.nakit)} ${CUR}'ye düştü (%${((1-c.nakit/p.nakit)*100).toFixed(0)} azalış).`);
+  if(p.nakit>0 && c.nakit<p.nakit*0.6) add('warn',t('flag_cash_t'),tf('flag_cash_b',{a:fmtAbbr(p.nakit), b:fmtAbbr(c.nakit), c:CUR, p:((1-c.nakit/p.nakit)*100).toFixed(0)}));
 
   // Özkaynak büyümesi (olumlu)
-  if(p.ozkaynak>0 && c.ozkaynak>p.ozkaynak*1.05) add('good','Özkaynak güçlendi',`Özkaynak ${fmtAbbr(p.ozkaynak)} → ${fmtAbbr(c.ozkaynak)} ${CUR}'ye yükseldi (kârlılık/sermaye katkısı).`);
+  if(p.ozkaynak>0 && c.ozkaynak>p.ozkaynak*1.05) add('good',t('flag_eq_t'),tf('flag_eq_b',{a:fmtAbbr(p.ozkaynak), b:fmtAbbr(c.ozkaynak), c:CUR}));
 
-  if(F.length===0) add('good','Belirgin risk işareti yok','Girilen verilere göre eşikleri aşan kritik bir sinyal bulunamadı.');
+  if(F.length===0) add('good',t('flag_none_t'),t('flag_none_b'));
 
   const ic={bad:'⛔',warn:'⚠️',good:'✅'};
   // önce kötüler
@@ -7290,18 +7302,71 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerPwa();
   initMarketTape();
   initHomeVoice();
-  window.addEventListener('bilanco-lang',()=>{
-    try{ updateWatchStar(); }catch(_e){}
-    try{
-      const body2=document.getElementById('inputBody');
-      if(body2){
-        body2.querySelectorAll('select').forEach(sel=>{
-          const v=sel.value;
-          const cats=getCats();
-          sel.innerHTML=Object.keys(cats).map(k=>`<option value="${k}" ${k===v?'selected':''}>${cats[k]}</option>`).join('');
-        });
-      }
-    }catch(_e){}
-  });
+  window.addEventListener('bilanco-lang',()=>{ refreshI18nPanels(); });
   // Bugünün Fırsatları + Hisse Takvimi: arama yapılana kadar gizli
 });
+
+/* Dil değişince kart içlerini yeniden çiz (statik data-i18n yetmez) */
+function refillInputFromFin(){
+  if(!FIN || !FIN.balance || !FIN.D0) return false;
+  const D=FIN.balance, D0=FIN.D0, D1=FIN.D1||null;
+  const rows=(FIN.market==='BIST' && FIN.bankGroup==='UFRS')
+    ? buildRowsBank(D,D0,D1)
+    : buildRowsFromSEC(D,D0,D1);
+  const b=document.getElementById('inputBody');
+  if(!b) return false;
+  b.innerHTML='';
+  rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+  const cur=document.getElementById('curNote');
+  if(cur){
+    if(FIN.market==='BIST') cur.textContent=t('cur_tl');
+    else if(FIN.market==='US') cur.textContent=t('cur_usd');
+    else cur.textContent=(FIN.cur||'')+' · '+t('cur_in');
+  }
+  setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+  return true;
+}
+function refreshI18nPanels(){
+  try{ updateWatchStar(); }catch(_e){}
+  try{
+    const body2=document.getElementById('inputBody');
+    if(body2){
+      body2.querySelectorAll('select').forEach(sel=>{
+        const v=sel.value;
+        const cats=getCats();
+        sel.innerHTML=Object.keys(cats).map(k=>`<option value="${k}" ${k===v?'selected':''}>${cats[k]}</option>`).join('');
+      });
+    }
+  }catch(_e){}
+  try{
+    const results=document.getElementById('results');
+    const open=results && !results.classList.contains('hidden');
+    if(FIN && FIN.balance && FIN.D0){
+      refillInputFromFin();
+      analyze();
+      const mcap=(LIVE_PRICE_STATE&&LIVE_PRICE_STATE.lastPrice!=null&&LIVE_PRICE_STATE.shares!=null)
+        ? LIVE_PRICE_STATE.lastPrice*LIVE_PRICE_STATE.shares
+        : LAST_MCAP;
+      if(mcap!=null){ renderValuation(mcap); renderYdf(mcap); }
+      if(EARN_CACHE) try{ renderEarnPanel(EARN_CACHE); }catch(_e){}
+      if(LAST_CMP_LIST) try{ renderComparison(LAST_CMP_LIST); }catch(_e){}
+      try{ renderTechShort(); }catch(_e){}
+      const g=REQ_GEN;
+      let eu=null;
+      if(FIN.market==='EU'&&FIN.euInfo){
+        const base=(FIN.euInfo.base||FIN.ticker||'').replace(/-/g,'_');
+        eu={ scan:FIN.euInfo.scan, tv:FIN.euInfo.tv+':'+base, ysym:FIN.ysym||(FIN.ticker+'.'+FIN.euInfo.suffix) };
+      }
+      try{ fetchTechPanel(FIN.ticker, FIN.market==='EU'?'EU':FIN.market, g, eu); }catch(_e){}
+      try{ fetchNews(FIN.ticker, g); }catch(_e){}
+      if(FIN.market==='US') try{ fetchTargets(FIN.ticker, g); }catch(_e){}
+      try{
+        if(LIVE_PRICE_STATE&&LIVE_PRICE_STATE.lastPrice!=null)
+          paintLivePrice(FIN.ticker, LIVE_PRICE_STATE.lastPrice, null);
+      }catch(_e){}
+    }else if(open){
+      analyze();
+    }
+  }catch(_e){}
+  try{ renderWatchlist(); }catch(_e){}
+}
