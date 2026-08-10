@@ -379,7 +379,7 @@ let KAP_OID_CACHE = { at: 0, map: null };          // BIST kod → mkkMemberOid
 let KAP_FLOAT_CACHE = new Map();                   // HISSE → { at, data }
 let FONO_HOLD_CACHE = new Map(); // code -> {at, holdings}
 let TEFAS_TOP_HOLD_CACHE = { at: 0, date: '', funds: null, ver: 0 };
-const TEFAS_TOP_HOLD_VER = 2; // sektör+varlık zorunlu filtre
+const TEFAS_TOP_HOLD_VER = 3; // hızlı liste (Fonoloji tarama yok)
 /* İş Portföy hisse fonları — çoğu Fonoloji'de varlık listesi yayınlar */
 const IS_PORTFOY_HISSE = ['TI2', 'TTE', 'TIE', 'TAU', 'TI3', 'IHK', 'BIO', 'IDH', 'IML', 'KPH', 'IHT', 'TIL', 'NST'];
 
@@ -390,9 +390,12 @@ function tefasYmd(d) {
 function tefasRecentDates(n) {
   const out = [];
   const d = new Date();
-  for (let i = 0; i < n; i++) {
-    out.push(tefasYmd(d));
+  let guard = 0;
+  while (out.length < n && guard < n + 20) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) out.push(tefasYmd(d)); // hafta sonu boş gelir
     d.setDate(d.getDate() - 1);
+    guard++;
   }
   return out;
 }
@@ -417,7 +420,7 @@ function tefasBody(kind, ymd, fundCode) {
     fonUnvanTip: ''
   };
 }
-function httpsPostJson(urlStr, bodyObj, headers) {
+function httpsPostJson(urlStr, bodyObj, headers, timeoutMs) {
   return new Promise((resolve, reject) => {
     const u = new URL(urlStr);
     const body = JSON.stringify(bodyObj);
@@ -435,7 +438,7 @@ function httpsPostJson(urlStr, bodyObj, headers) {
       });
     });
     preq.on('error', reject);
-    preq.setTimeout(45000, () => { preq.destroy(new Error('tefas_timeout')); });
+    preq.setTimeout(timeoutMs || 15000, () => { preq.destroy(new Error('tefas_timeout')); });
     preq.write(body);
     preq.end();
   });
@@ -497,27 +500,41 @@ function tefasMapFund(f, dist) {
     alloc: tefasAlloc(dist)
   };
 }
+async function tefasTryDate(kind, ymd, fundCode) {
+  const body = tefasBody(kind, ymd, fundCode);
+  const [infoRes, distRes] = await Promise.all([
+    httpsPostJson(TEFAS_INFO_URL, body, TEFAS_HDR, 12000),
+    httpsPostJson(TEFAS_DIST_URL, body, TEFAS_HDR, 12000).catch(() => ({ json: {} }))
+  ]);
+  const rows = (infoRes.json && infoRes.json.resultList) || [];
+  if (!rows.length) return null;
+  const distRows = (distRes.json && distRes.json.resultList) || [];
+  return { date: ymd, info: rows, dist: distRows };
+}
 async function tefasFetchDay(kind, fundCode) {
   const cacheKey = kind + '|' + (fundCode || '*');
   if (!fundCode && TEFAS_CACHE.key === cacheKey && TEFAS_CACHE.pack && (Date.now() - TEFAS_CACHE.at) < 10 * 60 * 1000) {
     return TEFAS_CACHE.pack;
   }
-  const dates = tefasRecentDates(12);
-  for (const ymd of dates) {
-    const body = tefasBody(kind, ymd, fundCode);
-    const infoRes = await httpsPostJson(TEFAS_INFO_URL, body, TEFAS_HDR);
-    const rows = (infoRes.json && infoRes.json.resultList) || [];
-    if (!rows.length) continue;
-    let distRows = [];
-    try {
-      const distRes = await httpsPostJson(TEFAS_DIST_URL, body, TEFAS_HDR);
-      distRows = (distRes.json && distRes.json.resultList) || [];
-    } catch (e) { distRows = []; }
-    const pack = { date: ymd, info: rows, dist: distRows };
-    if (!fundCode) {
-      TEFAS_CACHE = { key: cacheKey, at: Date.now(), pack };
+  // Tek fon için tüm liste cache'i varsa oradan süz (TEFAS'a tekrar gitme)
+  if (fundCode && TEFAS_CACHE.key === kind + '|*' && TEFAS_CACHE.pack && (Date.now() - TEFAS_CACHE.at) < 10 * 60 * 1000) {
+    const pack = TEFAS_CACHE.pack;
+    const info = (pack.info || []).filter(f => String(f.fonKodu || '').toUpperCase() === fundCode);
+    if (info.length) {
+      const dist = (pack.dist || []).filter(f => String(f.fonKodu || '').toUpperCase() === fundCode);
+      return { date: pack.date, info, dist };
     }
-    return pack;
+  }
+  const dates = tefasRecentDates(8);
+  // En yeni 3 iş gününü paralel dene → ilk dolu paketi al
+  for (let i = 0; i < dates.length; i += 3) {
+    const batch = dates.slice(i, i + 3);
+    const results = await Promise.all(batch.map(ymd => tefasTryDate(kind, ymd, fundCode).catch(() => null)));
+    for (const pack of results) {
+      if (!pack) continue;
+      if (!fundCode) TEFAS_CACHE = { key: cacheKey, at: Date.now(), pack };
+      return pack;
+    }
   }
   return null;
 }
@@ -1077,12 +1094,76 @@ function bcAkdKind(title, slug, tags) {
   }
   return 'other';
 }
+function bcTimeMs(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number' && Number.isFinite(v)) return v > 1e11 ? v : v * 1000;
+  const n = Number(v);
+  if (Number.isFinite(n) && String(v).trim() !== '' && !/[^\d.]/.test(String(v).trim())) {
+    return n > 1e11 ? n : (n > 1e9 ? n * 1000 : 0);
+  }
+  const p = Date.parse(v);
+  return Number.isFinite(p) ? p : 0;
+}
 function bcPickLatest(list) {
   return (list || []).slice().sort((a, b) => {
-    const ta = Date.parse(a.publishedAt || a.createdAt || 0) || 0;
-    const tb = Date.parse(b.publishedAt || b.createdAt || 0) || 0;
+    const ta = bcTimeMs(a.publishedAt || a.createdAt);
+    const tb = bcTimeMs(b.publishedAt || b.createdAt);
     return tb - ta;
   })[0] || null;
+}
+function bcMapAkdArticle(a) {
+  const title = a.title || '';
+  const slug = a.slug || '';
+  const tags = a.tags || [];
+  const text = bcStripHtml(a.content || '');
+  const stats = bcParseAkdStats(text);
+  const kind = bcAkdKind(title, slug, tags);
+  const summary = text
+    .replace(/Trend İndikatörleri[\s\S]*$/i, '')
+    .replace(/Yasal Uyarı:[\s\S]*$/i, '')
+    .trim()
+    .slice(0, 420);
+  return {
+    kind,
+    title,
+    slug,
+    url: 'https://borsacaddesi.com/' + slug,
+    image: a.coverImage || a.featuredImage || null,
+    publishedAt: a.publishedAt || a.createdAt || a.updatedAt || null,
+    createdAt: a.createdAt || null,
+    stats,
+    summary,
+    tags: tags.map(t => (t && (t.slug || t.title)) || t).filter(Boolean)
+  };
+}
+/** Search API artık boş category {} döndürüyor → makale HTML'den /category/slug çek */
+async function bcResolveCategoryFromArts(sym, searchArts) {
+  for (const a of searchArts || []) {
+    const cat = a && a.category;
+    if (cat && cat.slug) return { slug: cat.slug, name: cat.name || cat.title || null };
+    const cats = a && a.categories;
+    if (Array.isArray(cats) && cats[0] && cats[0].slug) {
+      return { slug: cats[0].slug, name: cats[0].title || cats[0].name || null };
+    }
+  }
+  const symL = String(sym || '').toLowerCase();
+  const cand = (searchArts || []).find(a => {
+    const slug = String((a && a.slug) || '').toLowerCase();
+    const title = String((a && a.title) || '').toUpperCase();
+    return slug.startsWith(symL + '-') || slug.includes('-' + symL + '-') || title.startsWith(String(sym).toUpperCase());
+  }) || (searchArts || [])[0];
+  if (!cand || !cand.slug) return null;
+  try {
+    const page = await httpsGetText('https://borsacaddesi.com/' + String(cand.slug).replace(/^\/+/, ''), {
+      'User-Agent': BUA,
+      Accept: 'text/html,application/xhtml+xml',
+      Referer: 'https://borsacaddesi.com/'
+    });
+    const html = String((page && page.body) || '');
+    const m = html.match(/\/category\/([a-z0-9][a-z0-9\-]{2,120})/i);
+    if (m) return { slug: m[1], name: null };
+  } catch (_e) { /* ignore */ }
+  return null;
 }
 async function borsaCaddesiAkd(hisse, opts) {
   const sym = String(hisse || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1097,54 +1178,57 @@ async function borsaCaddesiAkd(hisse, opts) {
   let searchJson = null;
   try { searchJson = JSON.parse(search.body || '{}'); } catch (_e) { searchJson = {}; }
   const searchArts = Array.isArray(searchJson.articles) ? searchJson.articles : [];
-  let catSlug = null;
-  let catName = null;
-  for (const a of searchArts) {
-    const cat = a && a.category;
-    if (cat && cat.slug) { catSlug = cat.slug; catName = cat.name || null; break; }
-  }
-  if (!catSlug) {
+  if (!searchArts.length) {
     const miss = { ok: false, symbol: sym, error: 'not_found', source: 'borsacaddesi' };
     BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data: miss });
     return miss;
   }
 
-  const cat = await httpsGetText('https://borsacaddesi.com/api/categories/' + encodeURIComponent(catSlug), {
-    'User-Agent': BUA, 'Accept': 'application/json', 'Referer': 'https://borsacaddesi.com/category/' + encodeURIComponent(catSlug)
-  });
-  let catJson = null;
-  try { catJson = JSON.parse(cat.body || '{}'); } catch (_e) { catJson = {}; }
-  const rawArts = (catJson.data && Array.isArray(catJson.data.articles)) ? catJson.data.articles : [];
+  const resolved = await bcResolveCategoryFromArts(sym, searchArts);
+  let catSlug = resolved && resolved.slug;
+  let catName = resolved && resolved.name;
+  let rawArts = [];
 
-  const mapped = rawArts.map(a => {
-    const title = a.title || '';
-    const slug = a.slug || '';
-    const text = bcStripHtml(a.content || '');
-    const stats = bcParseAkdStats(text);
-    const kind = bcAkdKind(title, slug, a.tags);
-    const summary = text
-      .replace(/Trend İndikatörleri[\s\S]*$/i, '')
-      .replace(/Yasal Uyarı:[\s\S]*$/i, '')
-      .trim()
-      .slice(0, 420);
-    return {
-      kind,
-      title,
-      slug,
-      url: 'https://borsacaddesi.com/' + slug,
-      image: a.coverImage || null,
-      publishedAt: a.createdAt || a.updatedAt || null,
-      createdAt: a.createdAt || null,
-      stats,
-      summary,
-      tags: (a.tags || []).map(t => t.slug || t.title).filter(Boolean)
-    };
-  }).filter(a => a.kind !== 'other');
+  if (catSlug) {
+    const cat = await httpsGetText('https://borsacaddesi.com/api/categories/' + encodeURIComponent(catSlug), {
+      'User-Agent': BUA, 'Accept': 'application/json', 'Referer': 'https://borsacaddesi.com/category/' + encodeURIComponent(catSlug)
+    });
+    let catJson = null;
+    try { catJson = JSON.parse(cat.body || '{}'); } catch (_e) { catJson = {}; }
+    rawArts = (catJson.data && Array.isArray(catJson.data.articles)) ? catJson.data.articles : [];
+    if (!catName && rawArts[0]) {
+      const c0 = (rawArts[0].categories || [])[0];
+      if (c0) catName = c0.title || c0.name || null;
+    }
+  }
+
+  // Kategori boş / kırık olsa bile arama sonuçlarından devam et
+  if (!rawArts.length) rawArts = searchArts;
+
+  const bySlug = new Map();
+  for (const a of rawArts) {
+    const m = bcMapAkdArticle(a);
+    if (m.kind === 'other' || !m.slug) continue;
+    const prev = bySlug.get(m.slug);
+    if (!prev || ((m.stats && m.stats.netLots != null) && !(prev.stats && prev.stats.netLots != null))) {
+      bySlug.set(m.slug, m);
+    }
+  }
+  for (const a of searchArts) {
+    const m = bcMapAkdArticle(a);
+    if (m.kind === 'other' || !m.slug || bySlug.has(m.slug)) continue;
+    bySlug.set(m.slug, m);
+  }
+  const mapped = [...bySlug.values()];
 
   // Tek kayıt (Son kayıtlar tıklaması)
   if (wantSlug) {
-    const art = mapped.find(a => a.slug === wantSlug);
-    if (!art || art.kind === 'gun_ici_akd') {
+    let art = mapped.find(a => a.slug === wantSlug);
+    if (!art) {
+      const fromSearch = searchArts.find(a => a && a.slug === wantSlug);
+      if (fromSearch) art = bcMapAkdArticle(fromSearch);
+    }
+    if (!art || art.kind === 'gun_ici_akd' || art.kind === 'other') {
       const miss = { ok: false, symbol: sym, error: 'not_found', source: 'borsacaddesi' };
       BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data: miss });
       return miss;
@@ -1197,6 +1281,8 @@ async function borsaCaddesiAkd(hisse, opts) {
     latest: byKind,
     recent: mapped
       .filter(a => recentKinds.has(a.kind))
+      .slice()
+      .sort((a, b) => bcTimeMs(b.publishedAt || b.createdAt) - bcTimeMs(a.publishedAt || a.createdAt))
       .slice(0, 16)
       .map(a => ({
         kind: a.kind,
@@ -1242,18 +1328,37 @@ async function kapHisseFundCodes() {
   return codes;
 }
 
+function httpsGetTextTimeout(url, headers, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: headers || {} }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => resolve({ status: pr.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.setTimeout(timeoutMs || 8000, () => {
+      req.destroy(new Error('http_timeout'));
+    });
+  });
+}
 /* Fonoloji kamu sayfasından hisse ağırlıkları (KAP portföy raporundan) */
 async function fonolojiHoldings(code) {
   const c = String(code || '').toUpperCase();
   const hit = FONO_HOLD_CACHE.get(c);
   const ttl = hit && hit.holdings && hit.holdings.length ? 6 * 60 * 60 * 1000 : 10 * 60 * 1000;
   if (hit && (Date.now() - hit.at) < ttl) return hit.holdings;
-  const page = await httpsGetText('https://fonoloji.com/fon/' + encodeURIComponent(c), {
-    'User-Agent': BUA,
-    'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'tr-TR,tr;q=0.9'
-  });
-  if (page.status !== 200 || !page.body) {
+  let page;
+  try {
+    page = await httpsGetTextTimeout('https://fonoloji.com/fon/' + encodeURIComponent(c), {
+      'User-Agent': BUA,
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'tr-TR,tr;q=0.9'
+    }, 8000);
+  } catch (_e) {
+    FONO_HOLD_CACHE.set(c, { at: Date.now(), holdings: [] });
+    return [];
+  }
+  if (!page || page.status !== 200 || !page.body) {
     FONO_HOLD_CACHE.set(c, { at: Date.now(), holdings: [] });
     return [];
   }
@@ -1271,8 +1376,18 @@ async function fonolojiHoldings(code) {
   FONO_HOLD_CACHE.set(c, { at: Date.now(), holdings });
   return holdings;
 }
+/** Arka planda sık tıklanan fonların varlık cache'ini ısıt (yanıtı bekletmez) */
+function warmTefasHoldings(codes) {
+  const list = [...new Set((codes || []).map(c => String(c || '').toUpperCase()).filter(Boolean))].slice(0, 12);
+  (async () => {
+    for (let i = 0; i < list.length; i += 4) {
+      const batch = list.slice(i, i + 4);
+      await Promise.all(batch.map(c => fonolojiHoldings(c).catch(() => [])));
+    }
+  })().catch(() => {});
+}
 
-/* Yalnızca hem varlık hem sektör listesi üretilebilen fonlar */
+/* KAP hisse senedi fonları — TEFAS büyüklük listesi (Fonoloji taraması YOK → hızlı) */
 async function tefasTopWithHoldings(limit) {
   if (
     TEFAS_TOP_HOLD_CACHE.funds &&
@@ -1294,52 +1409,34 @@ async function tefasTopWithHoldings(limit) {
   const byCode = new Map(
     pack.info.map(f => [f.fonKodu, tefasMapFund(f, distMap.get(f.fonKodu))])
   );
+  const prefer = new Set(IS_PORTFOY_HISSE);
   const hsList = [...byCode.values()]
     .filter(f => {
       if (!(f.aum > 0)) return false;
-      if (hsCodes.size) return hsCodes.has(f.code);
-      return /H[İI]SSE\s*SENED[İI]/i.test(f.name);
+      if (hsCodes.size) return hsCodes.has(f.code) || prefer.has(f.code);
+      return prefer.has(f.code) || /H[İI]SSE\s*SENED[İI]/i.test(f.name) || f.stockPct >= 40;
     })
-    .sort((a, b) => b.aum - a.aum);
+    .sort((a, b) => {
+      const ap = prefer.has(a.code) ? 1 : 0;
+      const bp = prefer.has(b.code) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      return b.aum - a.aum;
+    });
 
-  // İş Portföy önce (varlık listesi genelde var), sonra diğer HS
-  const prefer = new Set(IS_PORTFOY_HISSE);
-  const preferred = IS_PORTFOY_HISSE.map(c => byCode.get(c)).filter(Boolean);
-  const rest = hsList.filter(f => !prefer.has(f.code)).slice(0, 70);
-  const withData = [];
-  let scanned = 0;
-  const probeBatch = async (list) => {
-    for (let i = 0; i < list.length && withData.length < limit; i += 3) {
-      const batch = list.slice(i, i + 3);
-      scanned += batch.length;
-      const rows = await Promise.all(batch.map(async (f) => {
-        let holdings = [];
-        let sectors = [];
-        try {
-          holdings = await fonolojiHoldings(f.code);
-          if (holdings.length < 5) return null;
-          sectors = await sectorsFromHoldings(holdings);
-        } catch (e) { return null; }
-        if (!sectors.length) return null;
-        return { ...f, holdingCount: holdings.length, sectorCount: sectors.length };
-      }));
-      for (const r of rows) {
-        if (r) withData.push(r);
-      }
-    }
-  };
-  await probeBatch(preferred);
-  if (withData.length < limit) await probeBatch(rest);
-
-  withData.sort((a, b) => b.aum - a.aum);
+  const funds = hsList.slice(0, limit);
   TEFAS_TOP_HOLD_CACHE = {
     at: Date.now(),
     date: pack.date,
-    funds: withData,
-    scanned,
+    funds,
+    scanned: 0,
     ver: TEFAS_TOP_HOLD_VER
   };
-  return { date: pack.date, funds: withData.slice(0, limit), scanned };
+  // Detay tıklamaları için arka planda ısıt
+  warmTefasHoldings([
+    ...IS_PORTFOY_HISSE,
+    ...funds.slice(0, 8).map(f => f.code)
+  ]);
+  return { date: pack.date, funds, scanned: 0 };
 }
 
 /* TradingView sektör → ağırlıklı sektör dağılımı */
@@ -2952,26 +3049,22 @@ http.createServer((req, res) => {
           let sectors = [];
           try {
             holdings = await fonolojiHoldings(code);
-            sectors = await sectorsFromHoldings(holdings);
-          } catch (e) { holdings = []; sectors = []; }
-          if (holdings.length < 5 || !sectors.length) {
-            // Önbellekteki listeden de düş (bir daha görünmesin)
-            if (TEFAS_TOP_HOLD_CACHE.funds) {
-              TEFAS_TOP_HOLD_CACHE.funds = TEFAS_TOP_HOLD_CACHE.funds.filter(x => x.code !== code);
+            if (holdings.length >= 5) {
+              sectors = await sectorsFromHoldings(holdings);
             }
-            return send({ ok: false, error: 'no_holdings', code });
-          }
+          } catch (e) { holdings = []; sectors = []; }
           fund.holdings = holdings.slice(0, 25).map(h => ({
             symbol: h.symbol,
             name: h.name,
             holdingPercent: h.weight
           }));
-          fund.sectors = localizeSectorWeightings(sectors.slice(0, 15));
+          fund.sectors = localizeSectorWeightings((sectors || []).slice(0, 15));
           return send({
             ok: true,
             source: 'tefas+kap',
             date: pack.date,
             kind,
+            partial: !(fund.holdings.length >= 5),
             fund
           });
         }
@@ -2983,7 +3076,7 @@ http.createServer((req, res) => {
           date: top.date,
           kind,
           category: 'hisse',
-          onlyWithHoldings: true,
+          onlyWithHoldings: false,
           scanned: top.scanned,
           total: top.funds.length,
           funds: top.funds

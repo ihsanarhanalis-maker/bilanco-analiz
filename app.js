@@ -6978,15 +6978,40 @@ const ETF_SECTOR_EN={
   'communication services':'Communication Services', telecommunications:'Telecommunications',
   other:'Other', cash:'Cash', 'n/a':'Other'
 };
+const ETF_TR_TO_EN=(()=>{
+  const out={};
+  for(const [k,tr] of Object.entries(ETF_SECTOR_TR)){
+    const en=ETF_SECTOR_EN[k];
+    if(!en||!tr) continue;
+    out[String(tr).toLowerCase()]=en;
+  }
+  // Common API / display variants already in Turkish
+  Object.assign(out,{
+    'teknoloji':'Technology','sağlık':'Healthcare','saglik':'Healthcare',
+    'finansal hizmetler':'Financial Services','finans':'Financials',
+    'tüketici (döngüsel)':'Consumer Cyclical','tuketici (dongusel)':'Consumer Cyclical',
+    'tüketici (temel)':'Consumer Staples','tuketici (temel)':'Consumer Staples',
+    'tüketici (ihtiyari)':'Consumer Discretionary',
+    'iletişim hizmetleri':'Communication Services','iletisim hizmetleri':'Communication Services',
+    'sanayi':'Industrials','enerji':'Energy','kamu hizmetleri':'Utilities',
+    'gayrimenkul':'Real Estate','temel malzemeler':'Basic Materials','malzemeler':'Materials',
+    'diğer':'Other','diger':'Other','nakit':'Cash'
+  });
+  return out;
+})();
 function sectorLabel(name){
   if(name==null||name==='') return '—';
   const raw=String(name).trim();
-  const lower=raw.toLowerCase();
+  const lower=raw.toLowerCase('tr-TR');
   const spaced=lower.replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
   const compact=spaced.replace(/[\s\-]+/g,'');
   const map=getLang()==='en'?ETF_SECTOR_EN:ETF_SECTOR_TR;
   if(map[lower]||map[spaced]||map[compact]) return map[lower]||map[spaced]||map[compact];
-  if(getLang()==='en') return spaced.replace(/\b\w/g,c=>c.toUpperCase())||raw;
+  if(getLang()==='en'){
+    if(ETF_TR_TO_EN[lower]||ETF_TR_TO_EN[spaced]) return ETF_TR_TO_EN[lower]||ETF_TR_TO_EN[spaced];
+    // ASCII-safe title case (avoid breaking Turkish letters with /\b\w/)
+    return spaced.replace(/(^|[\s\-/])([a-z])/g,(_,p,c)=>p+c.toUpperCase())||raw;
+  }
   return raw;
 }
 function trSectorLabel(name){ return sectorLabel(name); }
@@ -7137,7 +7162,13 @@ async function loadTefasFund(code){
         <div class="hint" style="margin-bottom:8px">${t('etf_hold_sub')}</div>
         <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>${t('th_code')}</th><th style="text-align:left">${t('etf_th_asset')}</th><th>${t('etf_th_weight')}</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
     }
-    if(!sectors.length && !holdings.length){
+    const alloc=(f.alloc||[]).filter(a=>a&&a.pct>0);
+    if(!sectors.length && !holdings.length && alloc.length){
+      const arows=alloc.map(a=>`<tr><td style="text-align:left">${safeHTML(a.label||a.key||'')}</td><td><b>%${Number(a.pct).toFixed(1)}</b></td></tr>`).join('');
+      html+=`<div style="font-weight:700;margin-bottom:8px">${t('etf_sector_w')}</div>
+        <div class="hint" style="margin-bottom:8px">${t('etf_alloc_sub')}</div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">${t('etf_th_sector')}</th><th>${t('etf_th_weight')}</th></tr></thead><tbody>${arows}</tbody></table></div>`;
+    }else if(!sectors.length && !holdings.length){
       html+='<div class="hint">'+t('etf_no_hold')+'</div>';
     }
     box.innerHTML=html;
@@ -7368,7 +7399,8 @@ async function loadTakasAkd(){
     const j=await r.json();
     if(!j || !j.ok){
       TAKAS_LIST=null;
-      box.innerHTML=`<div class="hint">${safeHTML(sym)} için AKD kaydı bulunamadı.</div>`;
+      const why=j&&j.error?` (${j.error})`:'';
+      box.innerHTML=`<div class="hint">${safeHTML(sym)} için AKD kaydı bulunamadı${safeHTML(why)}.</div>`;
       if(st) st.textContent='Bulunamadı';
       return;
     }
