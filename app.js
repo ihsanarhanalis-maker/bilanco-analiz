@@ -12,7 +12,19 @@ function switchPage(p){
   if(p==='top100') initTop100Page();
   if(p==='scan') initScanPage();
   if(p==='sect') initSectPage();
-  if(p==='etf') initEtfPage();
+  if(p==='econ'||p==='top100'||p==='scan'||p==='sect'){
+    try{ paintCountryBoxLabels(); }catch(_e){}
+  }
+  if(p==='etf'){
+    const etfWas=ETF_PAGE_INIT;
+    initEtfPage();
+    try{
+      if(etfWas && ETF_LAST_CODE){
+        if(ETF_MKT==='TR') loadTefasFund(ETF_LAST_CODE);
+        else loadEtf(ETF_LAST_CODE);
+      }
+    }catch(_e){}
+  }
   if(p==='wnews') initWnewsPage();
   if(p==='takas') initTakasPage();
   if(p==='st') initStPage();
@@ -1258,29 +1270,79 @@ function euCountry(info){
 function ccName(cc){
   if(!cc) return '';
   if(cc==='WORLD'||cc==='GLOBAL') return t('cc_GLOBAL');
+  /* EN ülke kutularında kısa etiket — taşmayı önler */
+  if(getLang()==='en'){
+    if(cc==='US') return 'US';
+    if(cc==='GB') return 'UK';
+  }
   const k='cc_'+cc;
   const v=t(k);
   return v===k?cc:v;
 }
+/* Ülke kutusu etiketlerini güncelle (id: cbox-US / tbox-GB / scanbox-DE / sbox-GLOBAL) */
+function paintCountryBoxLabels(){
+  [['econCountries','cbox-'],['topCountries','tbox-'],['scanCountries','scanbox-'],['sectCountries','sbox-']].forEach(([rootId,pfx])=>{
+    const root=document.getElementById(rootId);
+    if(!root) return;
+    root.querySelectorAll('button.cbox').forEach(btn=>{
+      const id=btn.id||'';
+      if(id.indexOf(pfx)!==0) return;
+      const cc=id.slice(pfx.length);
+      const nameSpan=[...btn.querySelectorAll('span')].filter(s=>!s.classList.contains('cfl')).pop();
+      if(nameSpan) nameSpan.textContent=ccName(cc);
+    });
+  });
+}
+/* Bilinen kalem adları (TR/EN + eski örnek metinler) → i18n anahtarı */
+const LN_KEYS=['ln_cash','ln_st_inv','ln_recv','ln_inv','ln_other_ca','ln_ppe','ln_gw','ln_intang','ln_lt_inv','ln_other_nca','ln_ap','ln_st_debt','ln_def_rev','ln_other_cl','ln_lt_debt','ln_other_ncl','ln_common','ln_retained','ln_other_eq','ln_def_tax','ln_period_ni','ln_bank_cash','ln_bank_banks','ln_bank_loans','ln_bank_other_a','ln_bank_dep','ln_bank_other_l','ln_bank_ret'];
+const LN_ALIAS={
+  'banka kredileri (kısa v.)':'ln_st_debt',
+  'banka kredileri (uzun v.)':'ln_lt_debt',
+  'finansal yatırımlar (uzun v.)':'ln_lt_inv',
+  'geçmiş yıl kârları':'ln_retained',
+  'gecmis yil karlari':'ln_retained',
+  'ertelenmiş vergi yük.':'ln_def_tax',
+  'ertelenmis vergi yuk.':'ln_def_tax',
+  'dönem net kârı':'ln_period_ni',
+  'donem net kari':'ln_period_ni'
+};
+function resolveLineKey(name){
+  if(!name) return null;
+  const raw=String(name).trim();
+  if(LN_KEYS.indexOf(raw)>=0) return raw;
+  const low=raw.toLowerCase();
+  if(LN_ALIAS[low]) return LN_ALIAS[low];
+  for(const lang of ['tr','en']){
+    const pack=(typeof I18N!=='undefined' && I18N[lang])||{};
+    for(const k of LN_KEYS){ if(pack[k] && String(pack[k]).toLowerCase()===low) return k; }
+  }
+  return null;
+}
+function localizeLineName(name){
+  const k=resolveLineKey(name);
+  return k?t(k):(name||'');
+}
+function isInvName(n){ return /stok|inventor/i.test(n||''); }
+function isCashName(n){ return /(nakit|kasa|cash(\s|&|and)*\s*equiv)/i.test(n||'') && !/kredi|debt|loan/i.test(n||''); }
 let LAST_MCAP=null, LAST_CMP_LIST=null;
 
-/* Örnek bilanço (Türk tipi) */
+/* Örnek bilanço — satır adları i18n anahtarı (loadSample → t()) */
 const SAMPLE = [
-  ["Nakit ve Nakit Benzerleri","asset_current",450000,620000],
-  ["Ticari Alacaklar","asset_current",1850000,1200000],
-  ["Stoklar","asset_current",2100000,1450000],
-  ["Diğer Dönen Varlıklar","asset_current",320000,280000],
-  ["Maddi Duran Varlıklar","asset_noncur",3400000,3550000],
-  ["Maddi Olmayan Duran Varlıklar","asset_noncur",480000,520000],
-  ["Finansal Yatırımlar (Uzun V.)","asset_noncur",600000,600000],
-  ["Banka Kredileri (Kısa V.)","liab_current",1900000,900000],
-  ["Ticari Borçlar","liab_current",1350000,1100000],
-  ["Diğer Kısa Vadeli Yük.","liab_current",420000,390000],
-  ["Banka Kredileri (Uzun V.)","liab_noncur",1800000,2050000],
-  ["Ertelenmiş Vergi Yük.","liab_noncur",230000,210000],
-  ["Ödenmiş Sermaye","equity",2000000,2000000],
-  ["Geçmiş Yıl Kârları","equity",900000,700000],
-  ["Dönem Net Kârı","equity",600000,870000]
+  ["ln_cash","asset_current",450000,620000],
+  ["ln_recv","asset_current",1850000,1200000],
+  ["ln_inv","asset_current",2100000,1450000],
+  ["ln_other_ca","asset_current",320000,280000],
+  ["ln_ppe","asset_noncur",3400000,3550000],
+  ["ln_intang","asset_noncur",480000,520000],
+  ["ln_lt_inv","asset_noncur",600000,600000],
+  ["ln_st_debt","liab_current",1900000,900000],
+  ["ln_ap","liab_current",1350000,1100000],
+  ["ln_other_cl","liab_current",420000,390000],
+  ["ln_lt_debt","liab_noncur",1800000,2050000],
+  ["ln_def_tax","liab_noncur",230000,210000],
+  ["ln_common","equity",2000000,2000000],
+  ["ln_retained","equity",900000,700000],
+  ["ln_period_ni","equity",600000,870000]
 ];
 /* Denge kontrolü (cari): Aktif 9.200.000 = KV 3.670.000 + UV 2.030.000 + Özkaynak 3.500.000
    Denge kontrolü (önceki): Aktif 8.220.000 = KV 2.390.000 + UV 2.260.000 + Özkaynak 3.570.000 */
@@ -5184,11 +5246,13 @@ function buildRowsFromSEC(D,D0,D1){
 }
 
 /* ---------- Tablo satır ekleme ---------- */
-function rowHTML(name='', cat='asset_current', cur='', prev=''){
+function rowHTML(name='', cat='asset_current', cur='', prev='', lnKey=''){
+  const key=lnKey||resolveLineKey(name)||'';
+  const label=key?t(key):(name||'');
   const opts = Object.keys(getCats()).map(k=>`<option value="${k}" ${k===cat?'selected':''}>${getCats()[k]}</option>`).join('');
   const cell = v => (v===''||v===null||v===undefined) ? '' : fmtAbbr(Number(v));
   return `<tr>
-    <td><input class="name" value="${name.replace(/"/g,'&quot;')}" placeholder="${t('ph_item')}"></td>
+    <td><input class="name" ${key?`data-ln="${key}"`:''} value="${String(label).replace(/"/g,'&quot;')}" placeholder="${t('ph_item')}"></td>
     <td><select class="cell catsel">${opts}</select></td>
     <td><input class="cell cur" value="${cell(cur)}" inputmode="text"></td>
     <td><input class="cell prev" value="${cell(prev)}" inputmode="text"></td>
@@ -5231,7 +5295,7 @@ function hidePriceUI(){
 function loadSample(){
   REQ_GEN++; FIN=null; hidePriceUI();
   const b=document.getElementById('inputBody'); b.innerHTML='';
-  SAMPLE.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
+  SAMPLE.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(t(r[0]),r[1],r[2],r[3],r[0])));
   setPeriodHeaders(null,null);
   analyze();
 }
@@ -5240,12 +5304,18 @@ function clearAll(){ REQ_GEN++; FIN=null; hidePriceUI(); document.getElementById
 /* ---------- Verileri oku ---------- */
 function readData(){
   const rows=[...document.querySelectorAll('#inputBody tr')];
-  return rows.map(tr=>({
-    name: tr.querySelector('.name').value.trim()||'(adsız)',
-    cat:  tr.querySelector('.catsel').value,
-    cur:  num(tr.querySelector('.cur').value),
-    prev: num(tr.querySelector('.prev').value)
-  })).filter(r=>r.cur!==0||r.prev!==0);
+  return rows.map(tr=>{
+    const inp=tr.querySelector('.name');
+    const key=(inp && inp.dataset && inp.dataset.ln)||resolveLineKey(inp?inp.value:'');
+    const raw=(inp && inp.value || '').trim();
+    return {
+      name: key?t(key):(raw||t('unnamed')),
+      lnKey: key||'',
+      cat:  tr.querySelector('.catsel').value,
+      cur:  num(tr.querySelector('.cur').value),
+      prev: num(tr.querySelector('.prev').value)
+    };
+  }).filter(r=>r.cur!==0||r.prev!==0);
 }
 const sum=(rows,f,key)=>rows.filter(f).reduce((a,r)=>a+r[key],0);
 
@@ -5283,8 +5353,8 @@ function analyze(myGen){
       kvYuk:    sum(d,r=>r.cat==='liab_current',p),
       uvYuk:    sum(d,r=>r.cat==='liab_noncur',p),
       ozkaynak: sum(d,isE,p),
-      stok:     sum(d,r=>/stok/i.test(r.name)&&r.cat==='asset_current',p),
-      nakit:    sum(d,r=>/(nakit|kasa|banka(?!\s*kred))/i.test(r.name)&&r.cat==='asset_current',p),
+      stok:     sum(d,r=>r.cat==='asset_current'&&(r.lnKey==='ln_inv'||isInvName(r.name)),p),
+      nakit:    sum(d,r=>r.cat==='asset_current'&&(r.lnKey==='ln_cash'||isCashName(r.name)),p),
     };
     T[p].toplamV = T[p].donenV+T[p].duranV;
     T[p].toplamYuk = T[p].kvYuk+T[p].uvYuk;
@@ -6856,8 +6926,8 @@ async function loadEqCalendar(){
 
 /* ---------- ETF (ABD Yahoo) · TR hisse fonları (TEFAS/KAP + holdings) ---------- */
 const ETF_PRESETS_US=['SPY','QQQ','IWM','DIA','EEM','VEA','VWO','GLD','TLT','XLK','XLF','XLE','VNQ','ARKK','SMH'];
-let ETF_MKT='US', ETF_PAGE_INIT=false, TEFAS_TOP=[];
-/* Yahoo / TradingView / ETFDB sektör adları → Türkçe etiket */
+let ETF_MKT='US', ETF_PAGE_INIT=false, TEFAS_TOP=[], ETF_LAST_CODE='SPY';
+/* Yahoo / TradingView / ETFDB sektör adları → TR / EN etiket */
 const ETF_SECTOR_TR={
   technology:'Teknoloji', healthcare:'Sağlık', financialservices:'Finansal Hizmetler',
   financial_services:'Finansal Hizmetler', financials:'Finans', finance:'Finans',
@@ -6883,14 +6953,43 @@ const ETF_SECTOR_TR={
   'communication services':'İletişim Hizmetleri', telecommunications:'Telekomünikasyon',
   other:'Diğer', cash:'Nakit', 'n/a':'Diğer'
 };
-function trSectorLabel(name){
+const ETF_SECTOR_EN={
+  technology:'Technology', healthcare:'Healthcare', financialservices:'Financial Services',
+  financial_services:'Financial Services', financials:'Financials', finance:'Finance',
+  consumercyclical:'Consumer Cyclical', consumer_cyclical:'Consumer Cyclical',
+  consumerdefensive:'Consumer Defensive', consumer_defensive:'Consumer Defensive',
+  consumerdiscretionary:'Consumer Discretionary', consumerstaples:'Consumer Staples',
+  communication_services:'Communication Services', communicationservices:'Communication Services',
+  communication:'Communication',
+  industrials:'Industrials', industrial:'Industrials', energy:'Energy', utilities:'Utilities',
+  realestate:'Real Estate', real_estate:'Real Estate', basicmaterials:'Basic Materials',
+  basic_materials:'Basic Materials', materials:'Materials',
+  'electronic technology':'Electronic Technology', 'technology services':'Technology Services',
+  'health technology':'Health Technology', 'health services':'Health Services',
+  'consumer services':'Consumer Services', 'consumer durables':'Consumer Durables',
+  'consumer non-durables':'Consumer Non-Durables', 'retail trade':'Retail Trade',
+  'producer manufacturing':'Producer Manufacturing', 'process industries':'Process Industries',
+  'non-energy minerals':'Non-Energy Minerals', 'energy minerals':'Energy Minerals',
+  'commercial services':'Commercial Services', transportation:'Transportation',
+  'distribution services':'Distribution Services', 'miscellaneous':'Other',
+  'health care':'Healthcare', healthcare_sector:'Healthcare', 'information technology':'Information Technology',
+  'real estate':'Real Estate', 'basic materials':'Basic Materials',
+  'consumer discretionary':'Consumer Discretionary', 'consumer staples':'Consumer Staples',
+  'communication services':'Communication Services', telecommunications:'Telecommunications',
+  other:'Other', cash:'Cash', 'n/a':'Other'
+};
+function sectorLabel(name){
   if(name==null||name==='') return '—';
   const raw=String(name).trim();
   const lower=raw.toLowerCase();
   const spaced=lower.replace(/[_/]+/g,' ').replace(/\s+/g,' ').trim();
   const compact=spaced.replace(/[\s\-]+/g,'');
-  return ETF_SECTOR_TR[lower]||ETF_SECTOR_TR[spaced]||ETF_SECTOR_TR[compact]||raw;
+  const map=getLang()==='en'?ETF_SECTOR_EN:ETF_SECTOR_TR;
+  if(map[lower]||map[spaced]||map[compact]) return map[lower]||map[spaced]||map[compact];
+  if(getLang()==='en') return spaced.replace(/\b\w/g,c=>c.toUpperCase())||raw;
+  return raw;
 }
+function trSectorLabel(name){ return sectorLabel(name); }
 function fmtAumTr(n){
   if(n==null||!isFinite(n)) return '—';
   if(n>=1e12) return (n/1e12).toLocaleString('tr-TR',{maximumFractionDigits:2})+' Tr ₺';
@@ -6915,11 +7014,11 @@ function renderEtfChips(){
     const list=TEFAS_TOP.slice(0,16).map(f=>f.code);
     chips.innerHTML=list.map(s=>
       `<button type="button" class="scan-chip" data-etf="${s}" onclick="loadTefasFund('${s}')">${s}</button>`).join('');
-    if(inp) inp.placeholder='örn. PHE';
+    if(inp) inp.placeholder=t('etf_ph_tr');
   }else{
     chips.innerHTML=ETF_PRESETS_US.map(s=>
       `<button type="button" class="scan-chip" data-etf="${s}" onclick="loadEtf('${s}')">${s}</button>`).join('');
-    if(inp) inp.placeholder='örn. SPY';
+    if(inp) inp.placeholder=t('etf_ph_us');
   }
 }
 function initEtfPage(){
@@ -6938,9 +7037,10 @@ function renderTefasTable(highlight){
   const box=document.getElementById('etfBody');
   if(!box||ETF_MKT!=='TR') return;
   if(!TEFAS_TOP.length){
-    box.innerHTML='<div class="hint">Hisse fonu listesi boş.</div>';
+    box.innerHTML='<div class="hint">'+t('etf_list_empty')+'</div>';
     return;
   }
+  const loc=localeTag();
   const rows=TEFAS_TOP.map((f,i)=>{
     const act=highlight&&highlight===f.code?'background:rgba(79,156,249,.08)':'';
     return `<tr style="cursor:pointer;${act}" onclick="loadTefasFund('${safeHTML(f.code)}')">
@@ -6948,14 +7048,14 @@ function renderTefasTable(highlight){
       <td><b>${safeHTML(f.code)}</b></td>
       <td style="text-align:left">${safeHTML(f.name)}</td>
       <td><b>${fmtAumTr(f.aum)}</b></td>
-      <td>${(f.investors||0).toLocaleString('tr-TR')}</td>
-      <td>${f.price==null?'—':Number(f.price).toLocaleString('tr-TR',{maximumFractionDigits:6})}</td>
+      <td>${(f.investors||0).toLocaleString(loc)}</td>
+      <td>${f.price==null?'—':Number(f.price).toLocaleString(loc,{maximumFractionDigits:6})}</td>
     </tr>`;
   }).join('');
-  box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">Türkiye hisse senedi fonları</div>
-    <div class="hint" style="margin-bottom:10px">Yalnızca sektör + varlık listesi olan fonlar · büyüklüğe göre. Satıra tıkla → detay.</div>
+  box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">${t('etf_tr_list_title')}</div>
+    <div class="hint" style="margin-bottom:10px">${t('etf_tr_list_sub')}</div>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>#</th><th>Kod</th><th style="text-align:left">Fon</th><th>Büyüklük</th><th>Yatırımcı</th><th>Fiyat</th>
+      <th>#</th><th>${t('th_code')}</th><th style="text-align:left">${t('etf_th_fund')}</th><th>${t('etf_th_aum')}</th><th>${t('etf_th_inv')}</th><th>${t('th_px')}</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 async function loadTefasTop(){
@@ -6963,12 +7063,12 @@ async function loadTefasTop(){
   const meta=document.getElementById('etfMeta');
   const filters=document.getElementById('etfTefasFilters');
   if(filters) filters.style.display='none';
-  if(box) box.innerHTML='<div class="hint">Hisse fonları yükleniyor…</div>';
+  if(box) box.innerHTML='<div class="hint">'+t('etf_tr_loading')+'</div>';
   if(meta) meta.textContent='';
   try{
     const j=await fetch('/tefas?view=top&limit=40').then(r=>r.ok?r.json():null);
     if(!j||!j.ok||!(j.funds||[]).length){
-      if(box) box.innerHTML='<div class="hint">Hisse fonları alınamadı'+(j&&j.error?(': '+safeHTML(j.error)):'')+'.</div>';
+      if(box) box.innerHTML='<div class="hint">'+t('etf_tr_fail')+(j&&j.error?(': '+safeHTML(j.error)):'')+'.</div>';
       return;
     }
     TEFAS_TOP=j.funds;
@@ -6976,11 +7076,11 @@ async function loadTefasTop(){
     if(meta){
       const d=j.date||'';
       const dd=d.length===8?(d.slice(6,8)+'.'+d.slice(4,6)+'.'+d.slice(0,4)):d;
-      meta.innerHTML=`<b>Hisse fonları</b> · sektör/varlık verisi olan <b>${TEFAS_TOP.length}</b> fon · ${safeHTML(dd)}`;
+      meta.innerHTML=`<b>${t('etf_tr_funds')}</b> · ${tf('etf_tr_meta',{n:TEFAS_TOP.length})} · ${safeHTML(dd)}`;
     }
     renderTefasTable();
   }catch(e){
-    if(box) box.innerHTML='<div class="hint">TEFAS alınamadı: '+safeHTML(e.message)+'</div>';
+    if(box) box.innerHTML='<div class="hint">'+t('etf_tr_fail')+': '+safeHTML(e.message)+'</div>';
   }
 }
 async function loadTefasFund(code){
@@ -6991,7 +7091,8 @@ async function loadTefasFund(code){
   if(!c||!box) return;
   if(input) input.value=c;
   document.querySelectorAll('#etfChips .scan-chip').forEach(b=>b.classList.toggle('active', b.dataset.etf===c));
-  box.innerHTML='<div class="hint">Fon detayı yükleniyor…</div>';
+  ETF_LAST_CODE=c;
+  box.innerHTML='<div class="hint">'+t('etf_fund_loading')+'</div>';
   try{
     const j=await fetch('/tefas?view=fund&code='+encodeURIComponent(c)).then(r=>r.ok?r.json():null);
     if(!j||!j.ok||!j.fund){
@@ -7000,9 +7101,9 @@ async function loadTefasFund(code){
       renderEtfChips();
       if(TEFAS_TOP.length){
         renderTefasTable();
-        if(meta) meta.innerHTML=`<b>Hisse fonları</b> · sektör/varlık verisi olan <b>${TEFAS_TOP.length}</b> fon`;
+        if(meta) meta.innerHTML=`<b>${t('etf_tr_funds')}</b> · ${tf('etf_tr_meta',{n:TEFAS_TOP.length})}`;
       }else{
-        box.innerHTML='<div class="hint">Gösterilecek fon kalmadı.</div>';
+        box.innerHTML='<div class="hint">'+t('etf_list_empty')+'</div>';
       }
       return;
     }
@@ -7010,17 +7111,17 @@ async function loadTefasFund(code){
     const d=j.date||'';
     const dd=d.length===8?(d.slice(6,8)+'.'+d.slice(4,6)+'.'+d.slice(0,4)):d;
     if(meta){
-      meta.innerHTML=`<b>${safeHTML(f.name)}</b> · <b>${safeHTML(f.code)}</b> · ${fmtAumTr(f.aum)} · ${(f.investors||0).toLocaleString('tr-TR')} yatırımcı · ${safeHTML(dd)}
+      meta.innerHTML=`<b>${safeHTML(f.name)}</b> · <b>${safeHTML(f.code)}</b> · ${fmtAumTr(f.aum)} · ${(f.investors||0).toLocaleString(localeTag())} ${t('etf_investors')} · ${safeHTML(dd)}
         · <a href="https://www.tefas.gov.tr/tr/fon-karsilastirma?fon=${encodeURIComponent(f.code)}" target="_blank" rel="noopener">TEFAS</a>`;
     }
-    let html=`<div style="margin-bottom:12px"><button type="button" class="scan-chip" onclick="renderTefasTable('${safeHTML(f.code)}')">← Listeye dön</button></div>`;
+    let html=`<div style="margin-bottom:12px"><button type="button" class="scan-chip" onclick="renderTefasTable('${safeHTML(f.code)}')">← ${t('etf_back_list')}</button></div>`;
     const sectors=f.sectors||[];
     const holdings=f.holdings||[];
     if(sectors.length){
-      const srows=sectors.map(s=>`<tr><td style="text-align:left">${safeHTML(trSectorLabel(s.sector))}</td><td><b>%${Number(s.weight).toFixed(1)}</b></td></tr>`).join('');
-      html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Sektör Ağırlıkları</div>
-        <div class="hint" style="margin-bottom:8px">Portföy hisselerinin TradingView sektörlerine göre ağırlıklı dağılımı.</div>
-        <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">Sektör</th><th>Ağırlık</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
+      const srows=sectors.map(s=>`<tr><td style="text-align:left">${safeHTML(sectorLabel(s.sector))}</td><td><b>%${Number(s.weight).toFixed(1)}</b></td></tr>`).join('');
+      html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">${t('etf_sector_w')}</div>
+        <div class="hint" style="margin-bottom:8px">${t('etf_sector_sub')}</div>
+        <div style="overflow-x:auto"><table><thead><tr><th style="text-align:left">${t('etf_th_sector')}</th><th>${t('etf_th_weight')}</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
     }
     if(holdings.length){
       const hrows=holdings.map((h,i)=>{
@@ -7032,15 +7133,15 @@ async function loadTefasFund(code){
           <td style="text-align:left">${safeHTML(h.name||'')}</td>
           <td>${pct==null?'—':'%'+pct.toFixed(2)}</td></tr>`;
       }).join('');
-      html+=`<div style="font-weight:700;margin-bottom:8px">En Büyük Varlıklar</div>
-        <div class="hint" style="margin-bottom:8px">KAP portföy dağılım raporundan. Satıra tıkla → hisse analizi.</div>
-        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Kod</th><th style="text-align:left">Varlık</th><th>Ağırlık</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
+      html+=`<div style="font-weight:700;margin-bottom:8px">${t('etf_top_hold')}</div>
+        <div class="hint" style="margin-bottom:8px">${t('etf_hold_sub')}</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>${t('th_code')}</th><th style="text-align:left">${t('etf_th_asset')}</th><th>${t('etf_th_weight')}</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
     }
     if(!sectors.length && !holdings.length){
-      html+='<div class="hint">Bu fon için sektör / varlık listesi henüz yok. Üstte fiyat ve büyüklük TEFAS’tan.</div>';
+      html+='<div class="hint">'+t('etf_no_hold')+'</div>';
     }
     box.innerHTML=html;
-  }catch(e){ box.innerHTML='<div class="hint">Fon alınamadı: '+safeHTML(e.message)+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('etf_fund_fail')+': '+safeHTML(e.message)+'</div>'; }
 }
 async function loadEtf(code){
   if(ETF_MKT==='TR'){
@@ -7058,13 +7159,14 @@ async function loadEtf(code){
   if(!ysym) return;
   if(input) input.value=ysym;
   document.querySelectorAll('#etfChips .scan-chip').forEach(b=>b.classList.toggle('active', b.dataset.etf===ysym));
-  box.innerHTML='<div class="hint">ETF verisi yükleniyor…</div>';
+  ETF_LAST_CODE=ysym;
+  box.innerHTML='<div class="hint">'+t('etf_loading')+'</div>';
   if(meta) meta.textContent='';
   try{
     const j=await fetch('/yqs?s='+encodeURIComponent(ysym)+'&m=topHoldings,fundProfile,summaryDetail,quoteType,price').then(r=>r.ok?r.json():null);
     const hasHold=j&&j.topHoldings&&((j.topHoldings.holdings||[]).length||(j.topHoldings.sectorWeightings||[]).length);
     if(!j || (!hasHold && j.error && !j.quoteType && !j.summaryDetail && !j.price)){
-      box.innerHTML='<div class="hint">Fon bulunamadı. ABD için <b>SPY</b> dene.</div>';
+      box.innerHTML='<div class="hint">'+t('etf_not_found')+'</div>';
       return;
     }
     const th=j.topHoldings||{};
@@ -7080,7 +7182,7 @@ async function loadEtf(code){
       const fam=(fp.family||'');
       const chgTxt=chg==null?'':(` · <span class="${chg>0?'up':chg<0?'down':'neutral'}">${(chg>0?'+':'')+chg.toFixed(2)}%</span>`);
       const pxTxt=px==null?'':('$'+Number(px).toLocaleString('en-US',{maximumFractionDigits:2}));
-      meta.innerHTML=`<b>${safeHTML(name)}</b> · <b>${safeHTML(ysym)}</b>${pxTxt?' · '+pxTxt:''}${chgTxt} · ABD${fam?' · '+safeHTML(fam):''}${cat?' · '+safeHTML(cat):''}`;
+      meta.innerHTML=`<b>${safeHTML(name)}</b> · <b>${safeHTML(ysym)}</b>${pxTxt?' · '+pxTxt:''}${chgTxt} · ${t('etf_us')}${fam?' · '+safeHTML(fam):''}${cat?' · '+safeHTML(cat):''}`;
     }
     let html='';
     if(sectors.length){
@@ -7088,10 +7190,10 @@ async function loadEtf(code){
         const k=Object.keys(s||{})[0];
         const v=k!=null?s[k]:null;
         const pct=v==null?null:(v<=1?v*100:v);
-        return `<tr><td>${safeHTML(trSectorLabel(k))}</td><td><b>${pct==null?'—':'%'+Number(pct).toFixed(1)}</b></td></tr>`;
+        return `<tr><td>${safeHTML(sectorLabel(k))}</td><td><b>${pct==null?'—':'%'+Number(pct).toFixed(1)}</b></td></tr>`;
       }).join('');
-      html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">Sektör Ağırlıkları</div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Sektör</th><th>Ağırlık</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
+      html+=`<div style="margin-bottom:16px"><div style="font-weight:700;margin-bottom:8px">${t('etf_sector_w')}</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>${t('etf_th_sector')}</th><th>${t('etf_th_weight')}</th></tr></thead><tbody>${srows}</tbody></table></div></div>`;
     }
     if(holdings.length){
       const hrows=holdings.map((h,i)=>{
@@ -7103,12 +7205,12 @@ async function loadEtf(code){
           <td>${safeHTML(h.holdingName||'')}</td>
           <td>${pct==null?'—':'%'+Number(pct).toFixed(2)}</td></tr>`;
       }).join('');
-      html+=`<div style="font-weight:700;margin-bottom:8px">En Büyük Varlıklar</div>
-        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Kod</th><th>Varlık</th><th>Ağırlık</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
+      html+=`<div style="font-weight:700;margin-bottom:8px">${t('etf_top_hold')}</div>
+        <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>${t('th_code')}</th><th>${t('etf_th_asset')}</th><th>${t('etf_th_weight')}</th></tr></thead><tbody>${hrows}</tbody></table></div>`;
     }
-    if(!html) html='<div class="hint">Bu ETF için holdings verisi yok.</div>';
+    if(!html) html='<div class="hint">'+t('etf_no_hold')+'</div>';
     box.innerHTML=html;
-  }catch(e){ box.innerHTML='<div class="hint">ETF alınamadı: '+safeHTML(e.message)+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('etf_fail')+': '+safeHTML(e.message)+'</div>'; }
 }
 
 /* ---------- Takas & AKD (BIST · BorsaCaddesi) ---------- */
@@ -7321,6 +7423,8 @@ window.loadTakasAkdItem=loadTakasAkdItem;
 
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
+  /* Dil dinleyicisi initLang'den ÖNCE — yoksa ilk bilanco-lang kaçırılır */
+  window.addEventListener('bilanco-lang',()=>{ refreshI18nPanels(); });
   if(typeof initLang==='function') initLang();
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
@@ -7331,7 +7435,6 @@ window.addEventListener('DOMContentLoaded',()=>{
   registerPwa();
   initMarketTape();
   initHomeVoice();
-  window.addEventListener('bilanco-lang',()=>{ refreshI18nPanels(); });
   // Bugünün Fırsatları + Hisse Takvimi: arama yapılana kadar gizli
 });
 
@@ -7356,6 +7459,17 @@ function refillInputFromFin(){
   return true;
 }
 function refreshI18nPanels(){
+  try{ paintCountryBoxLabels(); }catch(_e){}
+  try{
+    if(typeof ETF_PAGE_INIT!=='undefined' && ETF_PAGE_INIT){
+      renderEtfChips();
+      if(ETF_MKT==='TR'){
+        if(ETF_LAST_CODE && TEFAS_TOP.some(f=>f.code===ETF_LAST_CODE)) loadTefasFund(ETF_LAST_CODE);
+        else if(TEFAS_TOP.length) renderTefasTable();
+        else loadTefasTop();
+      }else if(ETF_LAST_CODE) loadEtf(ETF_LAST_CODE);
+    }
+  }catch(_e){}
   try{ updateWatchStar(); }catch(_e){}
   try{
     const body2=document.getElementById('inputBody');
@@ -7393,8 +7507,9 @@ function refreshI18nPanels(){
         if(LIVE_PRICE_STATE&&LIVE_PRICE_STATE.lastPrice!=null)
           paintLivePrice(FIN.ticker, LIVE_PRICE_STATE.lastPrice, null);
       }catch(_e){}
-    }else if(open){
-      analyze();
+    }else{
+      /* Hisse yokken örnek satırlar da dile göre yenilensin */
+      loadSample();
     }
   }catch(_e){}
   try{ renderWatchlist(); }catch(_e){}
