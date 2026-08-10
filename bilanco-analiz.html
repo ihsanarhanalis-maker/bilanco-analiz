@@ -514,6 +514,8 @@
     #inputBody td:nth-child(5){grid-column:1 / -1;text-align:right} /* sil */
     #inputBody td:nth-child(3)::before{content:"Cari Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
     #inputBody td:nth-child(4)::before{content:"Önceki Dönem";display:block;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+    html[lang="en"] #inputBody td:nth-child(3)::before{content:"Current"}
+    html[lang="en"] #inputBody td:nth-child(4)::before{content:"Previous"}
     #inputBody input.name{width:100%;background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;font-weight:600}
     #inputBody select.catsel{width:100%}
     #inputBody td input.cell.cur, #inputBody td input.cell.prev{width:100%;max-width:none;text-align:right}
@@ -975,8 +977,8 @@
           </div>
           <div class="scan-row">
             <span class="scan-lbl" data-i18n="scan_trend">Trend</span>
-            <button type="button" class="scan-chip" data-ma="sma50" onclick="toggleScanMa(this)">Fiyat &gt; SMA50</button>
-            <button type="button" class="scan-chip" data-ma="sma200" onclick="toggleScanMa(this)">Fiyat &gt; SMA200</button>
+            <button type="button" class="scan-chip" data-ma="sma50" data-i18n="scan_price_sma50" onclick="toggleScanMa(this)">Fiyat &gt; SMA50</button>
+            <button type="button" class="scan-chip" data-ma="sma200" data-i18n="scan_price_sma200" onclick="toggleScanMa(this)">Fiyat &gt; SMA200</button>
           </div>
           <div class="scan-row">
             <span class="scan-lbl" data-i18n="scan_quant">Quant</span>
@@ -987,7 +989,7 @@
           <div class="scan-row scan-inputs">
             <button type="button" class="scan-chip" data-qf="value" onclick="toggleScanQ(this)">Value</button>
             <button type="button" class="scan-chip" data-qf="quality" onclick="toggleScanQ(this)">Quality</button>
-            <button type="button" class="scan-chip" data-qf="relvol" onclick="toggleScanQ(this)">Hacim ↑</button>
+            <button type="button" class="scan-chip" data-qf="relvol" data-i18n="scan_vol_up" onclick="toggleScanQ(this)">Hacim ↑</button>
             <span id="scanYdfFilter" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
               <label style="flex-direction:row;align-items:center;gap:8px"><span data-i18n="scan_ydf_min">YDF min</span>
                 <input id="scanYdfMin" type="number" step="0.05" placeholder="0.80" style="width:88px" title="Toplam yedekler / piyasa değeri — BIST ve ABD">
@@ -1123,8 +1125,8 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=150"></script>
-<script src="app.js?v=150"></script>
+<script src="i18n.js?v=151"></script>
+<script src="app.js?v=151"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

@@ -886,10 +886,10 @@ function runVoiceIntent(intent){
       if(intent.sector){
         if(SECT_OPEN!==intent.sector) toggleSectSector(intent.sector);
         else loadSectPanel();
-        const sn=(SECT_SECTORS.find(x=>x[0]===intent.sector)||[])[2]||intent.sector;
+        const sn=t('sect_'+intent.sector)||intent.sector;
         bits.push(sn);
       }
-      const nm=cc==='GLOBAL'?'Bütün Dünya':((ECON_COUNTRIES.find(x=>x[0]===cc)||[])[1]||cc);
+      const nm=ccName(cc);
       bits.unshift(nm);
       break;
     }
@@ -1198,7 +1198,7 @@ async function homeSearch(forcedSym){
     if(myGen!==REQ_GEN) return;
     if(!cands.length){
       _voicePendingCard=null;
-      if(st) st.innerHTML='✕ <b>'+safeHTML(sym)+'</b> hiçbir borsada bulunamadı.';
+      if(st) st.innerHTML='✕ <b>'+safeHTML(sym)+'</b> '+t('home_not_found');
       return;
     }
     const pick=cands.find(c=>c.market==='US')||cands.find(c=>c.market==='BIST')||cands[0];
@@ -1209,12 +1209,12 @@ async function homeSearch(forcedSym){
   if(myGen!==REQ_GEN) return;
   if(!cc || !TOP100_MARKETS[cc]){
     _voicePendingCard=null;
-    if(st) st.innerHTML='✕ Bu kod için ülke eşlemesi yapılamadı.';
+    if(st) st.innerHTML='✕ '+t('home_no_country');
     return;
   }
 
-  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
-  if(st) st.innerHTML='✓ <b>'+safeHTML(pickCode)+'</b> → <b>'+safeHTML(cName)+'</b> · ana sayfada Fırsatlar + Takvim hazır';
+  const cName=ccName(cc);
+  if(st) st.innerHTML='✓ <b>'+safeHTML(pickCode)+'</b> → <b>'+safeHTML(cName)+'</b> · '+t('home_ready_disc_cal');
 
   document.getElementById('ticker').value=pickCode;
   /* Önce bilançoyu çekmeye başla — keşif/takvim UI işi ağı bloklamasın */
@@ -1248,6 +1248,19 @@ function tf(key, vars){
   let s=t(key);
   if(vars) Object.keys(vars).forEach(k=>{ s=s.split('{'+k+'}').join(String(vars[k])); });
   return s;
+}
+function localeTag(){ return getLang()==='en'?'en-US':'tr-TR'; }
+function euCountry(info){
+  if(!info) return '';
+  if(info.iso) return ccName(info.iso);
+  return info.country||'';
+}
+function ccName(cc){
+  if(!cc) return '';
+  if(cc==='WORLD'||cc==='GLOBAL') return t('cc_GLOBAL');
+  const k='cc_'+cc;
+  const v=t(k);
+  return v===k?cc:v;
 }
 let LAST_MCAP=null, LAST_CMP_LIST=null;
 
@@ -1338,7 +1351,7 @@ function setMarketOrigin(info){
     return;
   }
   const parts=[
-    info.country ? ('Ülke: '+info.country) : null,
+    info.country ? (t('mkt_country_prefix')+info.country) : null,
     info.exchange || null,
     info.ccy || null,
     info.code || null
@@ -1586,13 +1599,13 @@ async function fetchMetrics(sym, mode){
 let CMP_GEN=0;
 async function compareTickers(){
   const st=document.getElementById('cmpStatus');
-  if(location.protocol==='file:'){ st.textContent='⚠ Bu dosyayı "Bilanco-Baslat.bat" ile açın.'; st.style.color='var(--bad)'; return; }
+  if(location.protocol==='file:'){ st.textContent='⚠ '+t('status_file_protocol'); st.style.color='var(--bad)'; return; }
   const raw=(document.getElementById('cmpTickers').value||'').toUpperCase();
   const syms=[...new Set(raw.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean))].slice(0,4);
   const mode=document.getElementById('cmpPeriod').value;
-  if(syms.length<2){ st.textContent='En az 2 hisse kodu girin (virgülle ayırın).'; st.style.color='var(--bad)'; return; }
+  if(syms.length<2){ st.textContent=t('cmp_need_two'); st.style.color='var(--bad)'; return; }
   const myCmp=++CMP_GEN;
-  st.textContent='⏳ '+syms.join(', ')+' çekiliyor…'; st.style.color='var(--muted)';
+  st.textContent='⏳ '+syms.join(', ')+' '+t('cmp_loading'); st.style.color='var(--muted)';
   const data=[];
   for(const s of syms){
     if(myCmp!==CMP_GEN) return;
@@ -1600,8 +1613,8 @@ async function compareTickers(){
   }
   if(myCmp!==CMP_GEN) return;
   const okData=data.filter(d=>d.ok), bad=data.filter(d=>!d.ok);
-  if(!okData.length){ st.textContent='✕ Hiçbiri için veri alınamadı.'; st.style.color='var(--bad)'; document.getElementById('cmpResult').innerHTML=''; return; }
-  st.textContent='✓ '+okData.map(d=>d.sym).join(', ')+(bad.length?'  ·  alınamadı: '+bad.map(d=>d.sym+' ('+d.err+')').join(', '):'');
+  if(!okData.length){ st.textContent='✕ '+t('cmp_none'); st.style.color='var(--bad)'; document.getElementById('cmpResult').innerHTML=''; return; }
+  st.textContent='✓ '+okData.map(d=>d.sym).join(', ')+(bad.length?'  ·  '+t('cmp_none')+': '+bad.map(d=>d.sym+' ('+d.err+')').join(', '):'');
   st.style.color = bad.length?'var(--warn)':'var(--good)';
   renderComparison(okData);
 }
@@ -1802,7 +1815,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     const s=await fetchBistSeries(sym, mode);
     if(myGen!==REQ_GEN) return;
     if(!s || !Object.keys(s.D.assets).length){
-      setStatus('✕ "'+sym+'" ne ABD listesinde ne BIST\'te bulunamadı (ya da mali tablo verisi yok).','bad'); return;
+      setStatus(tf('status_not_found_us_bist',{s:sym}),'bad'); return;
     }
     const {D,I,group}=s;
     if(myGen!==REQ_GEN) return;
@@ -1817,8 +1830,8 @@ async function fetchTickerBIST(sym, mode, myGen){
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
     document.getElementById('curNote').textContent=t('cur_tl');
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
-    setMarketOrigin({ country:t('mkt_tr'), exchange:'Borsa İstanbul', ccy:'TRY', code:sym+'.IS' });
-    setStatus(`✓ ${sym} — Türkiye (BIST)${group==='UFRS'?' · banka/sigorta':''} — ${mode==='annual'?t('data_annual'):t('quarterly')} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — TL`,'good');
+    setMarketOrigin({ country:ccName('TR'), exchange:t('exch_bist'), ccy:'TRY', code:sym+'.IS' });
+    setStatus(tf('status_ok_bist',{s:sym, bank:group==='UFRS'?t('status_bank'):'', mode:mode==='annual'?t('data_annual'):t('quarterly'), d:fmtDate(D0)+(D1?'  ↔  '+fmtDate(D1):'')}),'good');
     analyze(myGen);
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym: sym+'.IS', shares });
@@ -1834,7 +1847,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     updateWatchStar();
     startBistClock();               // İstanbul saati + seans içi/dışı
   }catch(e){
-    if(myGen===REQ_GEN) setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+    if(myGen===REQ_GEN) setStatus(tf('status_net_err',{e:e.message}),'bad');
   }
 }
 
@@ -2182,10 +2195,10 @@ async function fetchTickerEU(euInfo, mode, myGen){
     const j=await scanP;
     if(myGen!==REQ_GEN) return;
     const row=j&&j.data&&j.data.find(x=>x.d&&x.d[4]!=null);   // close (index 4) doluysa hisse gerçek
-    if(!row){ setStatus('✕ "'+sym+'.'+euInfo.suffix+'" '+euInfo.country+' borsasında bulunamadı.','bad'); return; }
+    if(!row){ setStatus(tf('status_ex_not_found',{s:sym+'.'+euInfo.suffix, c:euCountry(euInfo)}),'bad'); return; }
     const R=euReshape(row.d);
     if(!Object.keys(R.D.assets).length && !Object.keys(R.I.revenue).length){
-      setStatus('✕ '+sym+' için finansal veri bulunamadı.','bad'); return;
+      setStatus(tf('status_no_fin',{s:sym}),'bad'); return;
     }
     CUR=R.ccy||euInfo.ccy; CURSYM=euInfo.sym;
     // TV'nin tek-dönemlik özeti varsayılan; IFRS/ESEF çok-yıllı veri bulunursa onunla DEĞİŞTİRİLİR
@@ -2231,15 +2244,15 @@ async function fetchTickerEU(euInfo, mode, myGen){
     const rows=buildRowsFromSEC(D, D0, D1);
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(rr=>b.insertAdjacentHTML('beforeend', rowHTML(rr[0],rr[1],rr[2],rr[3])));
-    document.getElementById('curNote').textContent=CUR+' cinsinden';
-    if(D1) setPeriodHeaders(fmtDate(D0), fmtDate(D1)); else setPeriodHeaders(ifrs?fmtDate(D0):'Güncel Dönem', null);
+    document.getElementById('curNote').textContent=CUR+' '+t('cur_in');
+    if(D1) setPeriodHeaders(fmtDate(D0), fmtDate(D1)); else setPeriodHeaders(ifrs?fmtDate(D0):t('th_cur'), null);
     setMarketOrigin({
-      country: euInfo.country,
+      country: euCountry(euInfo),
       exchange: euInfo.tv || euInfo.city || ('ek .'+euInfo.suffix),
       ccy: CUR || euInfo.ccy,
       code: sym+'.'+euInfo.suffix
     });
-    setStatus(`✓ ${sym}.${euInfo.suffix} — ${euInfo.country} — ${D1?(mode==='quarter'?t('quarterly'):t('data_annual')):(getLang()==='en'?'latest period':'en güncel dönem')} — ${CUR} — ${srcNote}`,'good');
+    setStatus(`✓ ${sym}.${euInfo.suffix} — ${euCountry(euInfo)} — ${D1?(mode==='quarter'?t('quarterly'):t('data_annual')):t('status_latest_period')} — ${CUR} — ${srcNote}`,'good');
     analyze(myGen);
     fetchNews(sym, myGen);
     fetchPrice(sym, null, myGen, { ysym, shares:R.shares });
@@ -2255,7 +2268,7 @@ async function fetchTickerEU(euInfo, mode, myGen){
     // KAP/İçeriden işlem: Avrupa'da anahtarsız kaynak yok (KAP=TR, Form 4=ABD) — kart gizlenir
     ['kapCard','insiderCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }catch(e){
-    if(myGen===REQ_GEN) setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+    if(myGen===REQ_GEN) setStatus(tf('status_net_err',{e:e.message}),'bad');
   }
 }
 
@@ -2288,7 +2301,7 @@ async function detectBareMarkets(sym){
       scanOk=true;
       const rows=(j.data||[]).filter(x=>x.d && x.d[2]!=null);   // close dolu = gerçek kotasyon
       const bistRow=rows.find(x=>x.s.indexOf('BIST:')===0);
-      if(bistRow) cands.push({ market:'BIST', code:key+'.IS', label:'🇹🇷 Borsa İstanbul', desc:bistRow.d[4]||'' });
+      if(bistRow) cands.push({ market:'BIST', code:key+'.IS', label:'🇹🇷 '+t('exch_bist'), desc:bistRow.d[4]||'' });
       let euRows=rows.filter(x=>x.s.indexOf('BIST:')!==0);
       const prim=euRows.filter(x=>x.d[1]===true);
       // Birincil kotasyon varsa çapraz kotasyonları ele; hiç birincil yoksa ve başka aday da
@@ -2300,7 +2313,7 @@ async function detectBareMarkets(sym){
         if(pfx==='EURONEXT') sfx=EURONEXT_COUNTRY_SUFFIX[x.d[3]]||null;
         else{ const ent=Object.entries(EU_EXCHANGES).find(([s,e])=>e.tv===pfx); sfx=ent?ent[0]:null; }
         if(sfx && !cands.some(c=>c.code===key+'.'+sfx))
-          cands.push({ market:'EU', code:key+'.'+sfx, label:EU_EXCHANGES[sfx].flag+' '+EU_EXCHANGES[sfx].country, desc:x.d[4]||'' });
+          cands.push({ market:'EU', code:key+'.'+sfx, label:EU_EXCHANGES[sfx].flag+' '+euCountry(EU_EXCHANGES[sfx]), desc:x.d[4]||'' });
       });
     }
   }catch(e){}
@@ -2313,9 +2326,9 @@ async function detectBareMarkets(sym){
 function renderMarketChoices(sym,cands){
   const el=document.getElementById('fetchStatus');
   el.style.color='var(--warn)';
-  el.innerHTML='⚠ <b>'+safeHTML(sym)+'</b> birden fazla borsada bulundu — hangisini istiyorsun?<br>'+
+  el.innerHTML='⚠ <b>'+safeHTML(sym)+'</b> '+t('mkt_multi_prompt')+'<br>'+
     cands.map(c=>`<button type="button" style="margin:4px 4px 0 0;padding:5px 11px;font-size:12px" onclick="searchExact('${c.code}')">${c.label}${c.desc?' · '+safeHTML(c.desc).slice(0,30):''}</button>`).join('')+
-    '<br><span class="hint">İstersen eki elle de yazabilirsin: '+cands.map(c=>'<b>'+c.code+'</b>').join(' · ')+'</span>';
+    '<br><span class="hint">'+t('mkt_multi_hint')+' '+cands.map(c=>'<b>'+c.code+'</b>').join(' · ')+'</span>';
 }
 function searchExact(code){
   document.getElementById('ticker').value=code;
@@ -2324,7 +2337,7 @@ function searchExact(code){
 }
 async function fetchTicker(forcedSym){
   if(location.protocol==='file:'){
-    setStatus('⚠ Bu dosyayı çift tıklamak yerine "Bilanco-Baslat.bat" ile açın (anahtarsız veri için yerel köprü gerekir).','bad');
+    setStatus('⚠ '+t('status_file_protocol'),'bad');
     return;
   }
   let sym=(forcedSym!=null&&forcedSym!==''
@@ -2340,21 +2353,21 @@ async function fetchTicker(forcedSym){
   // Elle yazılmış ekler her zaman doğrudan yönlendirir: Avrupa (SAP.DE…), BIST (.IS), ABD (.US)
   const euInfo=parseEUSymbol(sym);
   if(euInfo && euInfo.suffix!=='US' && euInfo.suffix!=='IS'){
-    setStatus('⏳ '+euInfo.base+'.'+euInfo.suffix+' '+euInfo.country+' borsasından çekiliyor…','muted');
+    setStatus(tf('status_fetch_ex',{s:euInfo.base+'.'+euInfo.suffix, c:euCountry(euInfo)}),'muted');
     const myGen=++REQ_GEN;
     fetchTickerEU(euInfo, mode, myGen);
     return;
   }
   if(/\.IS$/.test(sym)){
     sym=sym.replace(/\.IS$/,'');
-    setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
+    setStatus(tf('status_fetch_kap',{s:sym}),'muted');
     const myGen=++REQ_GEN;
     fetchTickerBIST(sym, mode, myGen);
     return;
   }
   if(/\.US$/.test(sym)){
     sym=sym.replace(/\.US$/,'');
-    if(!map[sym]){ setStatus('✕ "'+sym+'" ABD listesinde bulunamadı.','bad'); return; }
+    if(!map[sym]){ setStatus(tf('status_us_list_miss',{s:sym}),'bad'); return; }
     const myGen=++REQ_GEN;
     fetchTickerUS(sym, mode, myGen);
     return;
@@ -2362,13 +2375,13 @@ async function fetchTicker(forcedSym){
   /* ABD listesinde bilinen kod → ikinci detectBareMarkets beklemeden çek (AAPL→AMD yarışını kısaltır) */
   if(map[sym]){
     const myGen=++REQ_GEN;
-    setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
+    setStatus(tf('status_fetch_sec',{s:sym}),'muted');
     fetchTickerUS(sym, mode, myGen);
     return;
   }
   // Eksiz kod → borsayı otomatik bul
   const myGen=++REQ_GEN;
-  setStatus('⏳ '+sym+' borsalarda aranıyor…','muted');
+  setStatus(tf('status_searching_mkts',{s:sym}),'muted');
   const { cands, scanOk }=await detectBareMarkets(sym);
   if(myGen!==REQ_GEN) return;   // beklerken daha yeni bir arama başlamış
   if(!cands.length){
@@ -2378,18 +2391,18 @@ async function fetchTicker(forcedSym){
       else fetchTickerBIST(sym, mode, myGen);
       return;
     }
-    setStatus('✕ "'+sym+'" hiçbir borsada bulunamadı (ABD · BIST · Avrupa · Asya-Pasifik · Kanada tarandı).','bad');
+    setStatus(tf('status_not_found_all',{s:sym}),'bad');
     return;
   }
   // Birden fazla borsa → bayrak/seçim yok; ABD > BIST > diğer önceliğiyle otomatik aç
   const c = cands.find(x=>x.market==='US') || cands.find(x=>x.market==='BIST') || cands[0];
   if(c.market==='US') fetchTickerUS(sym, mode, myGen);
   else if(c.market==='BIST'){
-    setStatus('⏳ '+sym+' mali tabloları KAP/İş Yatırım\'dan çekiliyor…','muted');
+    setStatus(tf('status_fetch_kap',{s:sym}),'muted');
     fetchTickerBIST(sym, mode, myGen);
   }else{
     const eu=parseEUSymbol(c.code);
-    setStatus('⏳ '+eu.base+'.'+eu.suffix+' '+eu.country+' borsasından çekiliyor…','muted');
+    setStatus(tf('status_fetch_ex',{s:eu.base+'.'+eu.suffix, c:euCountry(eu)}),'muted');
     fetchTickerEU(eu, mode, myGen);
   }
 }
@@ -2397,7 +2410,7 @@ async function fetchTickerUS(sym, mode, myGen){
   const map=window.CIK_MAP||{};
   const formPrefix = mode==='annual' ? '10-K' : '10-Q';
   const cik=String(map[sym]).padStart(10,'0');
-  setStatus('⏳ '+sym+' bilançosu SEC EDGAR\'dan çekiliyor…','muted');
+  setStatus(tf('status_fetch_sec',{s:sym}),'muted');
 
   try{
     let { D, I, filed } = await fetchSeries(cik, mode, formPrefix);
@@ -2412,12 +2425,12 @@ async function fetchTickerUS(sym, mode, myGen){
       if(ifrs && Object.keys(ifrs.D.assets).length){ D=ifrs.D; I=ifrs.I; filed=null; isIfrs20F=true; }
     }
 
-    if(!Object.keys(D.assets).length){ setStatus('✕ '+sym+' için bilanço verisi bulunamadı (form: '+formPrefix+').','bad'); return; }
+    if(!Object.keys(D.assets).length){ setStatus(tf('status_no_bs',{s:sym, f:formPrefix}),'bad'); return; }
     if(myGen!==REQ_GEN) return;
     // Referans dönem tarihleri: toplam aktiften en güncel iki dönem sonu
     const dates=Object.keys(D.assets).sort().reverse();
     const D0=dates[0], D1=dates[1]||null;
-    if(!D1){ setStatus('⚠ '+sym+' için yalnızca tek dönem bulundu; değişim analizi sınırlı olacak.','muted'); }
+    if(!D1){ setStatus(tf('status_one_period',{s:sym}),'muted'); }
     if(myGen!==REQ_GEN) return;
 
     CUR='USD'; CURSYM='$';
@@ -2436,7 +2449,7 @@ async function fetchTickerUS(sym, mode, myGen){
     setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
     const periodLbl = isIfrs20F ? (getLang()==='en'?'annual (20-F)':'yıllık (20-F)') : (mode==='annual'?t('data_annual'):t('quarterly'));
     setMarketOrigin({ country:getLang()==='en'?'United States':t('mkt_us'), exchange:getLang()==='en'?'US (SEC EDGAR)':'ABD (SEC EDGAR)', ccy:'USD', code:sym+'.US' });
-    setStatus(`✓ ${sym} — ABD — ${periodLbl} — ${fmtDate(D0)}${D1?'  ↔  '+fmtDate(D1):''} — USD`,'good');
+    setStatus(tf('status_ok_us',{s:sym, mode:periodLbl, d:fmtDate(D0)+(D1?'  ↔  '+fmtDate(D1):'')}),'good');
     analyze(myGen);
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
@@ -2451,7 +2464,7 @@ async function fetchTickerUS(sym, mode, myGen){
     updateWatchStar();
     const kc=document.getElementById('kapCard'); if(kc) kc.classList.add('hidden');  // KAP yalnızca BIST
   }catch(e){
-    if(myGen===REQ_GEN) setStatus('✕ Bağlantı hatası: '+e.message+' (internet erişimi gerekir).','bad');
+    if(myGen===REQ_GEN) setStatus(tf('status_net_err',{e:e.message}),'bad');
   }
 }
 
@@ -2551,34 +2564,38 @@ let EXCH_TIMER=null;
 function startExchangeClock(cfg){
   const el=document.getElementById('nyClock');
   if(!el) return;
-  const fTime=new Intl.DateTimeFormat('tr-TR',{timeZone:cfg.tz,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-  const fDay =new Intl.DateTimeFormat('tr-TR',{timeZone:cfg.tz,weekday:'long'});
+  const loc=localeTag();
+  const fTime=new Intl.DateTimeFormat(loc,{timeZone:cfg.tz,hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const fDay =new Intl.DateTimeFormat(loc,{timeZone:cfg.tz,weekday:'long'});
   const fNum =new Intl.DateTimeFormat('en-US',{timeZone:cfg.tz,weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
   const tick=()=>{
     const now=new Date();
-    const p=fNum.formatToParts(now), g=t=>p.find(x=>x.type===t)?.value||'';
+    const p=fNum.formatToParts(now), g=k=>p.find(x=>x.type===k)?.value||'';
     const wd=g('weekday'), mins=parseInt(g('hour'),10)*60+parseInt(g('minute'),10);
     const inSession=!['Sat','Sun'].includes(wd) && mins>=cfg.open && mins<cfg.close;
-    el.innerHTML=cfg.flag+' '+cfg.city+': <span style="color:#fff">'+fTime.format(now)+'</span> · '+fDay.format(now)+
-      (inSession?' · <span style="color:var(--good)">● seans içi</span>'
-                :' · <span style="color:var(--muted)">○ seans dışı</span>');
+    const city=typeof cfg.city==='function'?cfg.city():cfg.city;
+    el.innerHTML=cfg.flag+' '+city+': <span style="color:#fff">'+fTime.format(now)+'</span> · '+fDay.format(now)+
+      (inSession?' · <span style="color:var(--good)">'+t('sess_in')+'</span>'
+                :' · <span style="color:var(--muted)">'+t('sess_out')+'</span>');
   };
   tick();
   if(EXCH_TIMER) clearInterval(EXCH_TIMER);
   EXCH_TIMER=setInterval(tick,1000);
   el.classList.remove('hidden');
+  window._exchClockCfg=cfg;
 }
 function stopNyClock(){
   const el=document.getElementById('nyClock');
   if(EXCH_TIMER){ clearInterval(EXCH_TIMER); EXCH_TIMER=null; }
   if(el){ el.classList.add('hidden'); el.innerHTML=''; }
+  window._exchClockCfg=null;
 }
 function startNyClock(){
   startExchangeClock({flag:'🗽',city:'New York',tz:'America/New_York',open:570,close:960});   // 09:30–16:00
 }
 function startBistClock(){
   // BIST pay piyasası: 10:00–18:00 (Europe/Istanbul), hafta içi
-  startExchangeClock({flag:'🇹🇷',city:'İstanbul',tz:'Europe/Istanbul',open:600,close:1080});
+  startExchangeClock({flag:'🇹🇷',city:()=>t('city_istanbul'),tz:'Europe/Istanbul',open:600,close:1080});
 }
 function startEuExchangeClock(euInfo){
   startExchangeClock({flag:euInfo.flag,city:euInfo.city,tz:euInfo.tz,open:euInfo.open,close:euInfo.close});
@@ -2759,16 +2776,16 @@ function renderEarnPanel(data){
   const rows=[];
   if(data.nextDate){
     const d=new Date(data.nextDate*1000);
-    rows.push(['Bir sonraki kazanç raporu', d.toLocaleDateString('tr-TR',{day:'numeric',month:'short',year:'numeric'})]);
+    rows.push([t('earn_next'), d.toLocaleDateString(localeTag(),{day:'numeric',month:'short',year:'numeric'})]);
   }
-  if(data.nextPeriod) rows.push(['Rapor dönemi', data.nextPeriod]);
-  if(data.nextEps!=null) rows.push(['HBK beklenti', fmtEarnEps(data.nextEps, ccy)]);
-  if(data.nextRev!=null) rows.push(['Gelir tahmini', fmtEarnCcy(data.nextRev, ccy)]);
+  if(data.nextPeriod) rows.push([t('earn_period'), data.nextPeriod]);
+  if(data.nextEps!=null) rows.push([t('earn_eps_est'), fmtEarnEps(data.nextEps, ccy)]);
+  if(data.nextRev!=null) rows.push([t('earn_rev_est'), fmtEarnCcy(data.nextRev, ccy)]);
   if(data.lastEps!=null && data.lastEpsEst!=null)
-    rows.push(['Son HBK (gerç. / tah.)', fmtEarnEps(data.lastEps, ccy)+' / '+fmtEarnEps(data.lastEpsEst, ccy)]);
+    rows.push([t('earn_last_eps'), fmtEarnEps(data.lastEps, ccy)+' / '+fmtEarnEps(data.lastEpsEst, ccy)]);
   meta.innerHTML=rows.length
     ? `<div class="earn-meta">${rows.map(([k,v])=>`<div class="earn-tile"><div class="k">${safeHTML(k)}</div><div class="v">${safeHTML(v)}</div></div>`).join('')}</div>`
-    : '<div class="hint">Özet veri yok.</div>';
+    : '<div class="hint">'+t('earn_no_sum')+'</div>';
 }
 async function fetchNextEarnings(sym, market, myGen, euOpt){
   const el=document.getElementById('earnNote');
@@ -2882,7 +2899,7 @@ async function drawPriceChart(myGen){
   const key=CHART_YSYM+':'+CHART_RANGE;
   let d=CHART_CACHE[key];
   if(!d || Date.now()-d.ts>10*60000){
-    body.innerHTML='<div class="hint">Grafik yükleniyor…</div>';
+    body.innerHTML='<div class="hint">'+t('chart_loading')+'</div>';
     try{
       const j=await fetch('/price?s='+encodeURIComponent(CHART_YSYM)+'&range='+CHART_RANGE).then(r=>r.json());
       if(myGen!=null && myGen!==REQ_GEN) return;
@@ -2915,7 +2932,7 @@ async function drawPriceChart(myGen){
     if(t>=x0 && t<=x1) marks+=`<line x1="${X(t).toFixed(1)}" x2="${X(t).toFixed(1)}" y1="${padT}" y2="${H-padB}" stroke="var(--gold)" stroke-dasharray="3 3" opacity=".7"><title>Bilanço açıklanma: ${fmtDate(fd)}</title></line>`;
   });
   const lbl=(v,y,c,w)=>`<text x="${W-padR+6}" y="${y.toFixed(1)}" font-size="10.5" fill="${c||'var(--muted)'}" font-weight="${w||400}">${fmtUSD(v)}</text>`;
-  info.innerHTML=`<b style="color:${col}">${chg>=0?'▲':'▼'} ${pct(chg)}</b> <span class="neutral">seçili aralıkta</span> · En düşük ${fmtUSD(yMin)} · en yüksek ${fmtUSD(yMax)}${marks?' · <span style="color:var(--gold)">┆ bilanço açıklanma günü</span>':''}`;
+  info.innerHTML=`<b style="color:${col}">${chg>=0?'▲':'▼'} ${pct(chg)}</b> <span class="neutral">${t('chart_range')}</span> · ${t('chart_low')} ${fmtUSD(yMin)} · ${t('chart_high')} ${fmtUSD(yMax)}${marks?' · <span style="color:var(--gold)">'+t('chart_filing_mark')+'</span>':''}`;
   body.innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block">
     <defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="${col}" stop-opacity=".22"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs>
@@ -2931,7 +2948,7 @@ async function fetchSectorPeers(sym, market, myGen){
   const card=document.getElementById('sectorCard'), box=document.getElementById('sectorBody'), sub=document.getElementById('sectorSub');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Sektör verisi yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('sector_loading')+'</div>';
   try{
     const scan= market==='BIST'?'turkey':'america';
     const tickers= market==='BIST'?['BIST:'+sym]:['NASDAQ:'+sym,'NYSE:'+sym,'AMEX:'+sym];
@@ -2956,7 +2973,7 @@ async function fetchSectorPeers(sym, market, myGen){
     if(!top.some(r=>r.t===meT)) top.unshift({t:meT, d:meRow.d, me:true});
     else top.forEach(r=>{ if(r.t===meT) r.me=true; });
     const rowHtml=r=>`<tr${r.me?' style="background:var(--surface-3)"':''}>
-      <td><b>${safeHTML(r.t)}</b>${r.me?' <span class="thd">bu hisse</span>':''}</td>
+      <td><b>${safeHTML(r.t)}</b>${r.me?' <span class="thd">'+t('peer_this')+'</span>':''}</td>
       <td>${fmtMcap(r.d[idx.mc])}</td>
       <td>${fmtN(r.d[idx.pe],'x')}</td><td>${fmtN(r.d[idx.pb],'x',2)}</td>
       <td>${fmtN(r.d[idx.roe],'%')}</td><td>${fmtN(r.d[idx.nm],'%')}</td></tr>`;
@@ -2964,14 +2981,14 @@ async function fetchSectorPeers(sym, market, myGen){
     let prim='';
     if(myPe!=null && isFinite(myPe) && medians.pe){
       const df=(myPe-medians.pe)/medians.pe*100;
-      prim=` · F/K sektör medyanına göre <b class="${df>0?'down':'up'}">%${Math.abs(df).toFixed(0)} ${df>0?'primli':'iskontolu'}</b>`;
+      prim=' · '+tf('peer_vs_med',{pct:Math.abs(df).toFixed(0), dir:df>0?t('peer_prem'):t('peer_disc'), cls:df>0?'down':'up'});
     }
-    sub.innerHTML=`Sektör: <b>${safeHTML(sector)}</b> · ${rows.length} şirket${prim}. Kaynak: TradingView.`;
-    box.innerHTML=`<table><thead><tr><th>Şirket</th><th>Piyasa Değ.</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th></tr></thead><tbody>
+    sub.innerHTML=tf('peer_sub',{sector:safeHTML(sector), n:rows.length})+prim;
+    box.innerHTML=`<table><thead><tr><th>${t('th_co')}</th><th>${t('th_mcap')}</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>${t('peer_nm')}</th></tr></thead><tbody>
       ${top.map(rowHtml).join('')}
-      <tr class="total"><td>Sektör Medyanı</td><td>—</td><td>${fmtN(medians.pe,'x')}</td><td>${fmtN(medians.pb,'x',2)}</td><td>${fmtN(medians.roe,'%')}</td><td>${fmtN(medians.nm,'%')}</td></tr>
+      <tr class="total"><td>${t('peer_median')}</td><td>—</td><td>${fmtN(medians.pe,'x')}</td><td>${fmtN(medians.pb,'x',2)}</td><td>${fmtN(medians.roe,'%')}</td><td>${fmtN(medians.nm,'%')}</td></tr>
     </tbody></table>`;
-  }catch(e){ box.innerHTML='<div class="hint">Sektör verisi alınamadı: '+e.message+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('sector_fail')+' '+e.message+'</div>'; }
 }
 
 /* ---------- İzleme Listesi (localStorage; canlı fiyatlar TV scanner'dan toplu) ---------- */
@@ -3009,7 +3026,7 @@ async function renderWatchlist(){
   const w=getWatch();
   if(!w.length){ card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Fiyatlar yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('loading')+'</div>';
   try{
     const q={};
     for(const scanMk of ['turkey','america']){
@@ -3032,15 +3049,15 @@ async function renderWatchlist(){
       const cur= x.market==='BIST'?'₺':'$';
       if(d.logo) rememberLogoid(x.sym, x.market, d.logo);
       return `<tr style="cursor:pointer" onclick="openWatch('${x.sym}')" title="Analizi aç">
-        <td><span class="sym-cell">${logoHtml(d.logo, x.sym, 22, {sym:x.sym, market:x.market, cc:x.market==='BIST'?'TR':'US'})}<b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':'ABD'}</span></span></td>
+        <td><span class="sym-cell">${logoHtml(d.logo, x.sym, 22, {sym:x.sym, market:x.market, cc:x.market==='BIST'?'TR':'US'})}<b>${safeHTML(x.sym)}</b> <span class="thd">${x.market==='BIST'?'BIST':t('mkt_us')}</span></span></td>
         <td>${d.close!=null? cur+Number(d.close).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}</td>
         <td class="${cls}">${d.chg!=null? (d.chg>0?'▲ ':d.chg<0?'▼ ':'')+pct(d.chg) : '—'}</td>
         <td>${(d.pe!=null && isFinite(d.pe))? d.pe.toFixed(1)+'x' : '—'}</td>
         <td class="row-actions"><button class="delrow" onclick="event.stopPropagation();removeWatch('${x.sym}','${x.market}')" title="Listeden çıkar">✕</button></td>
       </tr>`;
     }).join('');
-    box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Fiyat</th><th>Günlük</th><th>F/K</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-  }catch(e){ box.innerHTML='<div class="hint">İzleme listesi fiyatları alınamadı.</div>'; }
+    box.innerHTML=`<table><thead><tr><th>${t('th_code')}</th><th>${t('th_px')}</th><th>${t('th_day')}</th><th>F/K</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  }catch(e){ box.innerHTML='<div class="hint">'+t('list_fail')+'</div>'; }
 }
 
 /* ---------- Ekonomik Takvim (BIST → Türkiye, ABD → ABD) ----------
@@ -3230,7 +3247,11 @@ function econDir(title){
 }
 function econClassify(title){
   let base=null, imp=null, mapped=false;
-  for(const [rx,tr,mi] of ECON_MAP){ if(rx.test(title)){ base=tr; imp=mi; mapped=true; break; } }
+  if(getLang()==='en'){
+    /* keep English event titles */
+  } else {
+    for(const [rx,tr,mi] of ECON_MAP){ if(rx.test(title)){ base=tr; imp=mi; mapped=true; break; } }
+  }
   if(!mapped){
     const t=(title||'').toLowerCase(); imp=-1;
     if(/inflation|cpi|pce|interest rate|rate decision|non.?farm|unemployment rate|gdp|retail sales|ism/.test(t)) imp=1;
@@ -3279,14 +3300,17 @@ async function tvRowsForTab(cc, time){
       d:new Date(e.date), aRaw:e.actualRaw, fRaw:e.forecastRaw, pRaw:e.previousRaw,
       aStr:econVal(e.actual,e), fStr:econVal(e.forecast,e), pStr:econVal(e.previous,e), dir:econDir(e.title) };
   }).filter(e=>!isNaN(e.d) && econInTime(e,time)).sort((a,b)=>a.d-b.d);   // sadece bu döneme ait
-  const need=[...new Set(evs.filter(e=>!e.mappedTr).map(e=>e.title))];
-  if(need.length){
-    const tr=await translateTR(need);
-    const tmap={}; need.forEach((t,i)=>tmap[t]=tr[i]||t);
-    evs.forEach(e=>{ if(!e.mappedTr) e.trName=tmap[e.title]; });
+  if(getLang()!=='en'){
+    const need=[...new Set(evs.filter(e=>!e.mappedTr).map(e=>e.title))];
+    if(need.length){
+      const tr=await translateTR(need);
+      const tmap={}; need.forEach((tt,i)=>tmap[tt]=tr[i]||tt);
+      evs.forEach(e=>{ if(!e.mappedTr) e.trName=tmap[e.title]; });
+    }
   }
-  const fD=new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',day:'2-digit',month:'short',weekday:'short'});
-  const fT=new Intl.DateTimeFormat('tr-TR',{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'});
+  const loc=localeTag();
+  const fD=new Intl.DateTimeFormat(loc,{timeZone:'Europe/Istanbul',day:'2-digit',month:'short',weekday:'short'});
+  const fT=new Intl.DateTimeFormat(loc,{timeZone:'Europe/Istanbul',hour:'2-digit',minute:'2-digit'});
   return evs.map(e=>{
     const base=e.mappedTr||e.trName||e.title;
     const quals=e.mappedTr?econQualifiers(e.title, base):[];
@@ -3300,8 +3324,8 @@ async function tvRowsForTab(cc, time){
 function initEconPage(){
   if(ECON_PAGE_INIT) return;
   ECON_PAGE_INIT=true;
-  document.getElementById('econCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
-    `<button class="cbox" id="cbox-${cc}" onclick="toggleEconCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  document.getElementById('econCountries').innerHTML=ECON_COUNTRIES.map(([cc])=>
+    `<button class="cbox" id="cbox-${cc}" onclick="toggleEconCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
   toggleEconCountry('TR');
 }
 function toggleEconCountry(cc){
@@ -3315,19 +3339,18 @@ function toggleEconCountry(cc){
     // Kapalı → aç: panel oluştur (tıklama sırasına göre en alta eklenir), veriyi yükle
     ECON_PANELS[cc]={ time:'buhafta', imp:1, gen:0 };
     box?.classList.add('active');
-    const c=ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc];
     const el=document.createElement('div');
     el.className='card'; el.id='epanel-'+cc;
-    el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${flagSpan(cc)}${c[1]} Ekonomik Takvimi</h2>
+    el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${flagSpan(cc)}${tf('econ_panel_title',{c:ccName(cc)})}</h2>
       <div class="toolbar" id="econTime-${cc}" style="margin:10px 0 6px">
-        ${[['dun','Dün'],['bugun','Bugün'],['yarin','Yarın'],['buhafta','Bu Hafta'],['gelecekhafta','Gelecek Hafta']]
-          .map(([t,l])=>`<button data-t="${t}" onclick="setEconTime('${cc}','${t}')">${l}</button>`).join('')}
+        ${[['dun','econ_yesterday'],['bugun','econ_today'],['yarin','econ_tomorrow'],['buhafta','econ_this_week'],['gelecekhafta','econ_next_week']]
+          .map(([tk,lk])=>`<button data-t="${tk}" onclick="setEconTime('${cc}','${tk}')">${t(lk)}</button>`).join('')}
       </div>
       <div class="toolbar" id="econImp-${cc}">
-        ${[[-1,'★ Düşük'],[0,'★★ Orta'],[1,'★★★ Yüksek']]
-          .map(([i,l])=>`<button data-imp="${i}" onclick="setEconImp('${cc}',${i})">${l}</button>`).join('')}
+        ${[[-1,'econ_imp_lo'],[0,'econ_imp_mid'],[1,'econ_imp_hi']]
+          .map(([i,lk])=>`<button data-imp="${i}" onclick="setEconImp('${cc}',${i})">${t(lk)}</button>`).join('')}
       </div>
-      <div id="econBody-${cc}"><div class="hint">Ekonomik takvim yükleniyor…</div></div>`;
+      <div id="econBody-${cc}"><div class="hint">${t('econ_loading')}</div></div>`;
     document.getElementById('econPanels').appendChild(el);
     syncEconBtns(cc);
     loadEconPanel(cc);
@@ -3349,7 +3372,7 @@ async function loadEconPanel(cc){
   const c=ECON_CACHE[key];
   if(c && (Date.now()-c.ts)<30*60000){ renderEconPanel(cc); return; }
   const box=document.getElementById('econBody-'+cc);
-  if(box) box.innerHTML='<div class="hint">Ekonomik takvim yükleniyor…</div>';
+  if(box) box.innerHTML='<div class="hint">'+t('econ_loading')+'</div>';
   const myGen=++st.gen;   // panel kapatılıp açılırsa / dönem değişirse eski yanıt çöpe gider
   let rows=[], src='', investingOk=false;
   // 1) BİRİNCİL: Investing (kaynağın kendi isim/önem/renkleri) — 25 ülkenin tamamı
@@ -3381,9 +3404,9 @@ function renderEconPanel(cc){
   if(!c){ box.innerHTML='<div class="hint">—</div>'; return; }
   const list=c.rows.filter(e=>e.imp===st.imp);
   if(!list.length){
-    const timeAd={dun:'dün',bugun:'bugün',yarin:'yarın',buhafta:'bu hafta',gelecekhafta:'gelecek hafta'}[st.time]||'';
-    const impAd={'-1':'düşük (★)','0':'orta (★★)','1':'yüksek (★★★)'}[String(st.imp)];
-    box.innerHTML='<div class="hint">'+timeAd.charAt(0).toUpperCase()+timeAd.slice(1)+' için '+impAd+' önem düzeyinde veri yok. Farklı bir dönem veya önem düzeyi seçebilirsin.</div>';
+    const timeAd={dun:t('econ_yesterday'),bugun:t('econ_today'),yarin:t('econ_tomorrow'),buhafta:t('econ_this_week'),gelecekhafta:t('econ_next_week')}[st.time]||'';
+    const impAd={'-1':t('econ_imp_lo'),'0':t('econ_imp_mid'),'1':t('econ_imp_hi')}[String(st.imp)];
+    box.innerHTML='<div class="hint">'+tf('econ_no_rows',{time:timeAd,imp:impAd})+'</div>';
     return;
   }
   const rows=list.map(e=>`<tr>
@@ -3393,11 +3416,9 @@ function renderEconPanel(cc){
     <td>${safeHTML(e.fStr)}</td>
     <td>${safeHTML(e.pStr)}</td>
   </tr>`).join('');
-  const kaynak = c.src==='Investing.com'
-    ? 'İsim, önem yıldızı ve renkler doğrudan <b>Investing.com</b> ekonomik takviminden alınır.'
-    : 'Investing.com şu an alınamadı → yedek kaynak <b>TradingView</b> (isim/önem yaklaşık).';
-  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>Tarih (TSİ)</th><th>Veri</th><th>Açıklanan</th><th>Beklenti</th><th>Önceki</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span>/<span class="down">kırmızı</span> açıklanan değer, beklentiye göre olumlu/olumsuz demektir. "—" henüz açıklanmadı. ${kaynak}</div>`;
+  const kaynak = c.src==='Investing.com' ? t('econ_src_inv') : t('econ_src_tv');
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>${t('econ_th_date')}</th><th>${t('econ_th_data')}</th><th>${t('econ_th_act')}</th><th>${t('econ_th_exp')}</th><th>${t('econ_th_prev')}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="hint" style="margin-top:8px">${t('econ_foot')} ${kaynak}</div>`;
 }
 
 /* ---------- İlk 100 Şirket sayfası (companiesmarketcap.com karşılığı) ----------
@@ -3445,8 +3466,8 @@ function fmtMcapSym(n, sym){
 function initTop100Page(){
   if(TOP100_PAGE_INIT) return;
   TOP100_PAGE_INIT=true;
-  document.getElementById('topCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
-    `<button class="cbox" id="tbox-${cc}" onclick="toggleTopCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  document.getElementById('topCountries').innerHTML=ECON_COUNTRIES.map(([cc])=>
+    `<button class="cbox" id="tbox-${cc}" onclick="toggleTopCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
   toggleTopCountry('TR');
 }
 function toggleTopCountry(cc){
@@ -3460,12 +3481,11 @@ function toggleTopCountry(cc){
   if(prev!==cc){
     TOP100_OPEN=cc;
     document.getElementById('tbox-'+cc)?.classList.add('active');
-    const c=ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc];
     const el=document.createElement('div');
     el.className='card'; el.id='tpanel-'+cc;
-    el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${flagSpan(cc)}${c[1]} — Piyasa Değerine Göre İlk 100</h2>
-      <div class="sub">Canlı sıralama (TradingView) — yalnızca bu borsada birincil kote şirketler. <b>Satıra tıklayınca analiz açılır.</b></div>
-      <div id="topBody-${cc}"><div class="hint">İlk 100 listesi yükleniyor…</div></div>`;
+    el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${flagSpan(cc)}${ccName(cc)} ${t('top100_panel_title')}</h2>
+      <div class="sub">${t('top100_sub')}</div>
+      <div id="topBody-${cc}"><div class="hint">${t('loading')}</div></div>`;
     document.getElementById('topPanels').appendChild(el);
     loadTop100Panel(cc);
   }
@@ -3490,11 +3510,11 @@ async function loadTop100Panel(cc){
     const j=r.ok?await r.json():null;
     if(myGen!==TOP100_GEN || TOP100_OPEN!==cc) return;   // bu arada kapatıldı/değişti
     const rows=(j&&j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
-    if(!rows.length){ box.innerHTML='<div class="hint">Liste alınamadı.</div>'; return; }
+    if(!rows.length){ box.innerHTML='<div class="hint">'+t('list_fail')+'</div>'; return; }
     TOP100_CACHE[cc]={ rows, ts:Date.now() };
     renderTop100Panel(cc, rows);
   }catch(e){
-    if(TOP100_OPEN===cc) box.innerHTML='<div class="hint">Liste alınamadı: '+e.message+'</div>';
+    if(TOP100_OPEN===cc) box.innerHTML='<div class="hint">'+t('list_fail')+'  '+e.message+'</div>';
   }
 }
 function renderTop100Panel(cc, rows){
@@ -3519,7 +3539,7 @@ function renderTop100Panel(cc, rows){
       <td>${fmtEmployees(d[9])}</td>
     </tr>`;
   }).join('');
-  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>${t('th_co')}</th><th>${t('th_mcap')}</th><th>${t('th_px')}</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>${t('peer_nm')}</th><th>${t('th_emp')}</th></tr></thead>
     <tbody>${trRows}</tbody></table></div>`;
 }
 
@@ -3615,8 +3635,8 @@ let SCAN_YDF_GEN=0;
 function initScanPage(){
   if(SCAN_PAGE_INIT) return;
   SCAN_PAGE_INIT=true;
-  document.getElementById('scanCountries').innerHTML=ECON_COUNTRIES.map(([cc,name])=>
-    `<button class="cbox" id="scanbox-${cc}" onclick="selectScanCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
+  document.getElementById('scanCountries').innerHTML=ECON_COUNTRIES.map(([cc])=>
+    `<button class="cbox" id="scanbox-${cc}" onclick="selectScanCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
   updateScanYdfUi();
   selectScanCountry('TR');
 }
@@ -3634,7 +3654,7 @@ function updateScanYdfUi(){
   const hint=document.getElementById('scanYdfHint');
   if(filt) filt.style.display=ok?'inline-flex':'none';
   if(opt) opt.style.display=ok?'':'none';
-  if(hint) hint.textContent=SCAN_CC==='TR'?'BIST (KAP) · ≥0,80 tercih':(SCAN_CC==='US'?'ABD (SEC) · ≥0,80 tercih':'BIST / ABD · ≥0,80 tercih');
+  if(hint) hint.textContent=t('scan_ydf_hint');
   if(!ok){
     SCAN_YDF_GEN++;
     const sortEl=document.getElementById('scanSort');
@@ -3719,8 +3739,8 @@ async function loadScanMarket(cc){
   const title=document.getElementById('scanTitle');
   const sub=document.getElementById('scanSub');
   if(!m || !box) return;
-  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
-  if(title) title.innerHTML=`${flagSpan(cc)}${cName} — Hisse Tarayıcı`;
+  const cName=ccName(cc);
+  if(title) title.innerHTML=`${flagSpan(cc)}${tf('scan_title_cc',{c:cName})}`;
   const sortVal=(document.getElementById('scanSort')||{}).value||'mcap-desc';
   const mode=sortVal==='earn-asc'?'earn':'mcap';
   SCAN_MODE=mode;
@@ -3738,12 +3758,8 @@ async function loadScanMarket(cc){
   }
   const myGen=++SCAN_GEN;
   SCAN_RAW=[]; SCAN_VIEW=[]; SCAN_PAGE=0;
-  box.innerHTML=mode==='earn'
-    ? '<div class="hint">TradingView — yaklaşan kazanç tarihine göre sıralanıyor…</div>'
-    : '<div class="hint">TradingView’den tüm hisseler yükleniyor…</div>';
-  if(sub) sub.textContent=mode==='earn'
-    ? 'sortBy=earnings_release_next_date (TradingView)'
-    : 'Sayfalar halinde çekiliyor (type=stock · birincil kotasyon)';
+  box.innerHTML='<div class="hint">'+t('loading')+'</div>';
+  if(sub) sub.textContent=t('loading');
   document.getElementById('scanPager').style.display='none';
   try{
     const filter=[
@@ -3767,8 +3783,8 @@ async function loadScanMarket(cc){
       if(total==null) total=j.totalCount||0;
       const chunk=(j.data||[]).map(x=>x.d).filter(d=>d&&d[0]);
       all.push(...chunk);
-      if(sub) sub.textContent=`Yükleniyor… ${all.length}${total?(' / '+total):''} hisse`;
-      box.innerHTML=`<div class="hint">Yükleniyor… <b>${all.length}</b>${total?(' / <b>'+total+'</b>'):''} hisse</div>`;
+      if(sub) sub.textContent=tf('scan_loading_n',{n:all.length,m:total||'?'});
+      box.innerHTML='<div class="hint">'+tf('scan_loading_n',{n:all.length,m:total||'?'})+'</div>';
       if(!chunk.length || all.length>=total || chunk.length<SCAN_FETCH_SIZE) break;
       start=end;
       // güvenlik: aşırı büyük pazarlarda (ABD) yine de tamamını çek — üst sınır yok, TV totalCount kadar
@@ -3781,7 +3797,7 @@ async function loadScanMarket(cc){
     if(scanYdfMarket()) enrichScanYdf();
   }catch(e){
     if(myGen===SCAN_GEN){
-      box.innerHTML='<div class="hint">Liste alınamadı: '+safeHTML(e.message)+'</div>';
+      box.innerHTML='<div class="hint">'+t('list_fail')+'  '+safeHTML(e.message)+'</div>';
       if(sub) sub.textContent='Hata';
     }
   }
@@ -3986,17 +4002,17 @@ function renderScanPage(){
   if(SCAN_PAGE>=pages) SCAN_PAGE=pages-1;
   const slice=sorted.slice(SCAN_PAGE*SCAN_PAGE_SIZE, (SCAN_PAGE+1)*SCAN_PAGE_SIZE);
   if(sub){
-    const capNote=SCAN_CAPS.has('all')?'tüm dilimler':[...SCAN_CAPS].join('+');
-    const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):'trend yok';
-    const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):'quant filtresi yok';
+    const capNote=SCAN_CAPS.has('all')?t('scan_caps_all'):[...SCAN_CAPS].join('+');
+    const maNote=SCAN_MA.size?[...SCAN_MA].map(x=>x==='sma50'?'>SMA50':'>SMA200').join(' · '):t('scan_trend_none');
+    const qNote=SCAN_QF.size?[...SCAN_QF].join('+'):t('scan_quant_none');
     const ydfMin=scanYdfMarket()?scanNum('scanYdfMin'):null;
     const ydfNote=scanYdfMarket()
-      ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:(SCAN_CC==='TR'?' · YDF (KAP)':' · YDF (SEC)'))
+      ? (ydfMin!=null?` · YDF ≥ ${ydfMin}`:' · YDF')
       : '';
-    sub.innerHTML=`<b>${sorted.length}</b> / ${SCAN_RAW.length} hisse · ${capNote} · ${maNote} · ${qNote}${ydfNote} · sayfa ${SCAN_PAGE+1}/${pages} · TradingView · <b>satıra tıkla → analiz</b>`;
+    sub.innerHTML=tf('scan_sub_fmt',{n:sorted.length+' / '+SCAN_RAW.length, p:(SCAN_PAGE+1)+'/'+pages})+' · '+capNote+' · '+maNote+' · '+qNote+ydfNote;
   }
   if(!sorted.length){
-    box.innerHTML='<div class="hint">Filtreye uyan hisse yok. Dilimleri gevşetin veya aramayı temizleyin.</div>';
+    box.innerHTML='<div class="hint">'+t('scan_no_match')+'</div>';
     if(pager) pager.style.display='none';
     return;
   }
@@ -4028,7 +4044,7 @@ function renderScanPage(){
   const showYdf=scanYdfMarket();
   const earnCell=ts=>{
     if(ts==null || !Number.isFinite(ts)) return '—';
-    return new Date(ts*1000).toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+    return new Date(ts*1000).toLocaleDateString(localeTag(),{day:'2-digit',month:'short',year:'numeric'});
   };
   const trRows=slice.map((d,i)=>{
     const code=m.click(String(d[0]).replace(/_/g,'-'));
@@ -4036,12 +4052,12 @@ function renderScanPage(){
     const qs=scanQuantScore(d);
     const sym=String(d[0]).replace(/_/g,'-');
     rememberLogoid(sym, SCAN_CC==='TR'?'BIST':(SCAN_CC==='US'?'US':''), d[SCAN_I.logo]);
-    return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} analizini aç">
+    return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${safeHTML(d[1]||d[0])} — ${t('open_analysis')}">
       <td style="color:var(--muted)">${n}</td>
       <td><span class="sym-cell">${logoHtml(d[SCAN_I.logo], sym, 22, {sym, cc:SCAN_CC, market:SCAN_CC==='TR'?'BIST':(SCAN_CC==='US'?'US':''), ysym:m.click(sym)})}<b>${safeHTML(sym)}</b></span></td>
       <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
       <td><b>${fmtMcapSym(d[SCAN_I.mcap], m.sym)}</b></td>
-      <td>${d[SCAN_I.close]==null?'—':m.sym+Number(d[SCAN_I.close]).toLocaleString('tr-TR',{maximumFractionDigits:2})}</td>
+      <td>${d[SCAN_I.close]==null?'—':m.sym+Number(d[SCAN_I.close]).toLocaleString(localeTag(),{maximumFractionDigits:2})}</td>
       <td>${chg(d[SCAN_I.chg])}</td>
       ${showEarn?`<td style="white-space:nowrap">${earnCell(d[SCAN_I.earn])}</td>`:''}
       ${showYdf?`<td>${ydfFmt(scanYdfOf(d))}</td>`:''}
@@ -4057,14 +4073,14 @@ function renderScanPage(){
     </tr>`;
   }).join('');
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
-    <th>#</th><th>Kod</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>Günlük</th>
-    ${showEarn?'<th>Yaklaşan kazanç tarihi</th>':''}
-    ${showYdf?'<th title="Toplam yedekler / piyasa değeri">YDF</th>':''}
-    <th>Q</th><th>RSI</th><th>3A</th><th>Vol</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Temettü</th><th>Sektör</th>
+    <th>#</th><th>${t('th_code')}</th><th>${t('th_co')}</th><th>${t('th_mcap')}</th><th>${t('th_px')}</th><th>${t('th_day')}</th>
+    ${showEarn?'<th>'+t('th_earn_date')+'</th>':''}
+    ${showYdf?'<th>YDF</th>':''}
+    <th>Q</th><th>RSI</th><th>3A</th><th>Vol</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>${t('th_div')}</th><th>${t('th_sector')}</th>
   </tr></thead><tbody>${trRows}</tbody></table></div>`;
   if(pager){
     pager.style.display='flex';
-    document.getElementById('scanPageInfo').textContent=`Sayfa ${SCAN_PAGE+1} / ${pages} · ${slice.length} satır`;
+    document.getElementById('scanPageInfo').textContent=tf('scan_page_info',{p:SCAN_PAGE+1, pages, n:slice.length});
     document.getElementById('scanPrev').disabled=SCAN_PAGE<=0;
     document.getElementById('scanNext').disabled=SCAN_PAGE>=pages-1;
   }
@@ -4138,11 +4154,11 @@ function initSectPage(){
   if(SECT_PAGE_INIT) return;
   SECT_PAGE_INIT=true;
   document.getElementById('sectCountries').innerHTML=
-    `<button class="cbox" id="sbox-GLOBAL" onclick="selectSectCountry('GLOBAL')"><span class="cfl" style="font-size:17px;line-height:1">🌍</span><span>Bütün Dünya</span></button>`+
-    ECON_COUNTRIES.map(([cc,name])=>
-      `<button class="cbox" id="sbox-${cc}" onclick="selectSectCountry('${cc}')">${flagSpan(cc)}<span>${name}</span></button>`).join('');
-  document.getElementById('sectSectors').innerHTML=SECT_SECTORS.map(([id,ic,name])=>
-    `<button class="cbox" id="secbox-${id}" onclick="toggleSectSector('${id}')"><span class="cfl" style="font-size:16px;line-height:1">${ic}</span><span>${name}</span></button>`).join('');
+    `<button class="cbox" id="sbox-GLOBAL" onclick="selectSectCountry('GLOBAL')"><span class="cfl" style="font-size:17px;line-height:1">🌍</span><span>${t('cc_GLOBAL')}</span></button>`+
+    ECON_COUNTRIES.map(([cc])=>
+      `<button class="cbox" id="sbox-${cc}" onclick="selectSectCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
+  document.getElementById('sectSectors').innerHTML=SECT_SECTORS.map(([id,ic])=>
+    `<button class="cbox" id="secbox-${id}" onclick="toggleSectSector('${id}')"><span class="cfl" style="font-size:16px;line-height:1">${ic}</span><span>${t('sect_'+id)}</span></button>`).join('');
   document.getElementById('sbox-GLOBAL')?.classList.add('active');
   toggleSectSector('yazilim');   // ilk açılış örneği: dünya yazılım devleri
 }
@@ -4175,13 +4191,13 @@ async function loadSectPanel(){
   const cc=SECT_CC;
   // Paneli (yeniden) kur
   document.getElementById('spanel')?.remove();
-  const cName = cc==='GLOBAL' ? 'Bütün Dünya' : (ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  const cName = ccName(cc==='GLOBAL'?'GLOBAL':cc);
   const cIcon = cc==='GLOBAL' ? '<span class="cfl" style="font-size:17px;line-height:1">🌍</span>' : flagSpan(cc);
   const el=document.createElement('div');
   el.className='card'; el.id='spanel';
-  el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${cIcon}${cName} — ${def[1]} ${def[2]} Devleri</h2>
-    <div class="sub">Piyasa değerine göre canlı sıralama (TradingView${cc==='GLOBAL'?', USD':''}). <b>Satıra tıklayınca analiz açılır.</b>${def[3].curated?' Liste küratörlüdür (TV\'de bu kategori ayrı sektör olarak sınıflandırılmaz).':''}</div>
-    <div id="sectBody"><div class="hint">Yükleniyor…</div></div>`;
+  el.innerHTML=`<h2 style="display:flex;align-items:center;gap:9px">${cIcon}${cName} — ${def[1]} ${t('sect_'+id)}${t('sect_panel_suffix')}</h2>
+    <div class="sub">${t('sect_panel_sub')}${cc==='GLOBAL'?', USD':''}. <b>${t('sect_click')}</b>${def[3].curated?' '+t('sect_curated'):''}</div>
+    <div id="sectBody"><div class="hint">${t('loading')}</div></div>`;
   document.getElementById('sectPanel').appendChild(el);
   const key=id+':'+cc;
   const cached=SECT_CACHE[key];
@@ -4194,7 +4210,7 @@ async function loadSectPanel(){
     if(def[3].curated){
       let list=SECT_CURATED[def[3].curated];
       if(cc!=='GLOBAL') list=list.filter(([,c])=>c===cc);
-      if(!list.length){ if(SECT_OPEN===id) document.getElementById('sectBody').innerHTML='<div class="hint">Bu ülkede bu kategoriden izlenen şirket yok. 🌍 Bütün Dünya görünümünü dene.</div>'; return; }
+      if(!list.length){ if(SECT_OPEN===id) document.getElementById('sectBody').innerHTML='<div class="hint">'+t('sect_empty_cc')+'</div>'; return; }
       const r=await fetch('https://scanner.tradingview.com/global/scan',{method:'POST',body:JSON.stringify({
         symbols:{tickers:list.map(([t])=>t)}, columns:cols })});
       const j=r.ok?await r.json():null;
@@ -4216,11 +4232,11 @@ async function loadSectPanel(){
       const seen=new Set();
       rows=rows.filter(x=>{ const dsc=x.d&&x.d[1]&&x.d[1].replace(/ Class [A-C].*$/,''); if(!dsc||seen.has(dsc)) return false; seen.add(dsc); return true; });
     }
-    if(!rows.length){ document.getElementById('sectBody').innerHTML='<div class="hint">Bu ülke/sektör kombinasyonunda şirket bulunamadı. 🌍 Bütün Dünya görünümünü dene.</div>'; return; }
+    if(!rows.length){ document.getElementById('sectBody').innerHTML='<div class="hint">'+t('sect_empty_cc')+'</div>'; return; }
     SECT_CACHE[key]={ rows, ts:Date.now() };
     renderSectPanel(def, cc, rows);
   }catch(e){
-    if(SECT_OPEN===id) document.getElementById('sectBody').innerHTML='<div class="hint">Liste alınamadı: '+e.message+'</div>';
+    if(SECT_OPEN===id) document.getElementById('sectBody').innerHTML='<div class="hint">'+t('list_fail')+'  '+e.message+'</div>';
   }
 }
 function renderSectPanel(def, cc, rows){
@@ -4251,7 +4267,7 @@ function renderSectPanel(def, cc, rows){
       <td>${fmtEmployees(d[9])}</td>
     </tr>`;
   }).join('');
-  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Şirket</th><th>Piyasa Değeri</th><th>Fiyat</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+  box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>${t('th_co')}</th><th>${t('th_mcap')}</th><th>${t('th_px')}</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>${t('peer_nm')}</th><th>${t('th_emp')}</th></tr></thead>
     <tbody>${trRows}</tbody></table></div>
     ${cc==='GLOBAL'?'<div class="hint" style="margin-top:8px">Dünya görünümünde piyasa değerleri USD\'ye çevrilmiştir; fiyatlar şirketin kendi para birimindedir.</div>':''}`;
 }
@@ -4287,10 +4303,10 @@ async function fetchKapFeed(sym, myGen){
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(n.summary||n.subject||'KAP bildirimi')}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
         <div class="news-sum">${detay||safeHTML(n.subject||'')}<br>
-          <a href="${kapLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()">KAP'ta tam bildirimi oku →</a></div>
+          <a href="${kapLink}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${t('kap_read')}</a></div>
       </div>`;
     }).join('');
-  }catch(e){ box.innerHTML='<div class="hint">KAP bildirimleri alınamadı: '+e.message+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('kap_none')+': '+e.message+'</div>'; }
 }
 
 /* ---------- BIST analist hedef fiyatları ----------
@@ -4305,23 +4321,24 @@ const TVT_COLS=['price_target_average','price_target_high','price_target_low','r
 /* TradingView analist skoru: 1=Al … 3=Sat (Finviz'in 1-5 skalasından farklı) */
 function tvMarkLabel(m){
   if(m==null || isNaN(m)) return null;
-  if(m<=1.3) return ['Güçlü Al','g-buy'];
-  if(m<=1.7) return ['Al','g-buy'];
-  if(m<=2.3) return ['Tut','g-hold'];
-  if(m<=2.7) return ['Sat','g-sell'];
-  return ['Güçlü Sat','g-sell'];
+  if(m<=1.3) return [t('tgt_strong_buy'),'g-buy'];
+  if(m<=1.7) return [t('tgt_buy'),'g-buy'];
+  if(m<=2.3) return [t('tgt_hold'),'g-hold'];
+  if(m<=2.7) return [t('tgt_sell'),'g-sell'];
+  return [t('tgt_strong_sell'),'g-sell'];
 }
-/* Fintables tavsiye tipi → Türkçe rozet (skor: 1=olumlu, 2=nötr, 3=olumsuz — konsensüs için) */
-const FT_TYPE={
-  al:['Al','g-buy',1], endeks_ustu:['Endeks Üstü','g-buy',1], guclu_al:['Güçlü Al','g-buy',1],
-  tut:['Tut','g-hold',2], endekse_paralel:['Endekse Paralel','g-hold',2], notr:['Nötr','g-hold',2],
-  sat:['Sat','g-sell',3], endeks_alti:['Endeks Altı','g-sell',3]
-};
+/* Fintables tavsiye tipi → rozet (skor: 1=olumlu, 2=nötr, 3=olumsuz — konsensüs için) */
+function ftType(k){
+  const map={ al:['tgt_buy','g-buy',1], endeks_ustu:['tgt_over','g-buy',1], guclu_al:['tgt_strong_buy','g-buy',1],
+    tut:['tgt_hold','g-hold',2], endekse_paralel:['tgt_market','g-hold',2], notr:['tgt_neutral','g-hold',2],
+    sat:['tgt_sell','g-sell',3], endeks_alti:['tgt_under','g-sell',3] };
+  const m=map[k]; return m?[t(m[0]),m[1],m[2]]:null;
+}
 async function fetchTargetsBIST(sym, myGen){
   const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('tgt_loading')+'</div>';
   try{
     // 1) BİRİNCİL KAYNAK: Fintables (kurum bazlı!) — tarayıcıdan doğrudan (CORS: *).
     //    Gerçek tarayıcı istekleri Cloudflare'dan geçiyor; sunucu/veri merkezi istekleri geçmez,
@@ -4351,34 +4368,34 @@ async function fetchTargetsBIST(sym, myGen){
       const tgts=rows.map(r=>r.tgt).filter(v=>v!=null);
       const mean=tgts.length?tgts.reduce((a,b)=>a+b,0)/tgts.length:null;
       const hi=tgts.length?Math.max(...tgts):null, lo=tgts.length?Math.min(...tgts):null;
-      const scores=rows.map(r=>FT_TYPE[r.type]&&FT_TYPE[r.type][2]).filter(Boolean);
+      const scores=rows.map(r=>ftType(r.type)&&ftType(r.type)[2]).filter(Boolean);
       const rl=scores.length?tvMarkLabel(scores.reduce((a,b)=>a+b,0)/scores.length):null;
       const up=(cur&&mean)?(mean-cur)/cur*100:null;
       const upCls=up==null?'neutral':(up>0?'up':'down');
       html+=`<div class="tgt-grid">
-        <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+        <div class="tgt-box"><div class="lbl">${t('tgt_mean')}</div>
           <div class="big">${fmtUSD(mean)}</div>
-          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
-          ${cur!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur)}</div>`:''}</div>
-        <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+          ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">${t('tgt_pot')}</span></div>`:''}
+          ${cur!=null?`<div class="sm neutral">${t('cur_price')}: ${fmtUSD(cur)}</div>`:''}</div>
+        <div class="tgt-box"><div class="lbl">${t('tgt_hi_lo')}</div>
           <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
-          <div class="sm neutral">kurum hedef aralığı</div></div>
-        <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+          <div class="sm neutral">${t('tgt_range')}</div></div>
+        <div class="tgt-box"><div class="lbl">${t('tgt_consensus')}</div>
           <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
-          <div class="sm neutral">${rows.length} aracı kurum · son 12 ay</div></div>
+          <div class="sm neutral">${tf('tgt_firms_n',{n:rows.length})}</div></div>
       </div>`;
       // Kurum bazlı tablo — ABD tarafındaki tabloyla aynı düzen
       const trRows=rows.slice(0,20).map(r=>{
-        const t=FT_TYPE[r.type]||['—','g-hold'];
-        const ds=r.d.toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+        const badge=ftType(r.type)||['—','g-hold'];
+        const ds=r.d.toLocaleDateString(localeTag(),{day:'2-digit',month:'short',year:'numeric'});
         return `<tr><td>${safeHTML(r.firm)}</td>
-          <td><span class="grade ${t[1]}">${t[0]}</span></td>
+          <td><span class="grade ${badge[1]}">${badge[0]}</span></td>
           <td>${r.tgt!=null?fmtUSD(r.tgt):'—'}</td>
           <td>${ds}</td></tr>`;
       }).join('');
-      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">Aracı Kurum Hedef Fiyatları — Kurum Bazında</div>
-        <table style="margin-top:8px"><thead><tr><th>Aracı Kurum</th><th>Tavsiye</th><th>Hedef Fiyat</th><th>Tarih</th></tr></thead><tbody>${trRows}</tbody></table>
-        <div class="hint" style="margin-top:10px">Kaynak: Fintables (aracı kurum araştırma raporları) · her kurumun en güncel hedefi.</div>`;
+      html+=`<div style="margin-top:18px;font-weight:700;color:var(--ink)">${t('tgt_by_firm')}</div>
+        <table style="margin-top:8px"><thead><tr><th>${t('tgt_broker')}</th><th>${t('tgt_rec')}</th><th>${t('tgt_price')}</th><th>${t('th_date')}</th></tr></thead><tbody>${trRows}</tbody></table>
+        <div class="hint" style="margin-top:10px">${t('tgt_src_ft')}</div>`;
       box.innerHTML=html;
       return;
     }
@@ -4395,7 +4412,7 @@ async function fetchTargetsBIST(sym, myGen){
     }
     if(myGen!=null && myGen!==REQ_GEN) return;
     if(!d || d[0]==null){
-      box.innerHTML='<div class="hint">Bu hisse için analist verisi bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
+      box.innerHTML='<div class="hint">'+t('tgt_none')+'</div>';
       return;
     }
     const [mean,hi,lo,tot]=d, mark=d[9], close=d[10];
@@ -4404,19 +4421,19 @@ async function fetchTargetsBIST(sym, myGen){
     const upCls=up==null?'neutral':(up>0?'up':'down');
     const rl=tvMarkLabel(mark);
     box.innerHTML=`<div class="tgt-grid">
-      <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+      <div class="tgt-box"><div class="lbl">${t('tgt_mean')}</div>
         <div class="big">${fmtUSD(mean)}</div>
-        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
-        ${cur2!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(cur2)}</div>`:''}</div>
-      <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">${t('tgt_pot')}</span></div>`:''}
+        ${cur2!=null?`<div class="sm neutral">${t('cur_price')}: ${fmtUSD(cur2)}</div>`:''}</div>
+      <div class="tgt-box"><div class="lbl">${t('tgt_hi_lo')}</div>
         <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
-        <div class="sm neutral">aracı kurum hedef aralığı</div></div>
-      <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+        <div class="sm neutral">${t('tgt_range')}</div></div>
+      <div class="tgt-box"><div class="lbl">${t('tgt_rec')}</div>
         <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
-        <div class="sm neutral">${tot!=null?tot+' aracı kurum analisti':''}</div></div>
+        <div class="sm neutral">${tot!=null?tf('tgt_analysts_n',{n:tot}):''}</div></div>
     </div>
-    <div class="hint" style="margin-top:10px">Kurum bazlı liste şu an alınamadı; TradingView/Refinitiv konsensüsü gösteriliyor.</div>`;
-  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+    <div class="hint" style="margin-top:10px">${t('tgt_fallback_tv')}</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">'+t('tgt_none')+': '+e.message+'</div>'; }
 }
 
 /* Avrupa analist hedefleri — Fintables/Finviz Avrupa'yı kapsamıyor; doğrudan TradingView/Refinitiv
@@ -4425,7 +4442,7 @@ async function fetchTargetsEU(sym, euInfo, myGen){
   const card=document.getElementById('targetCard'), box=document.getElementById('targetBody');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Analist verisi yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('tgt_loading')+'</div>';
   try{
     const tvTicker=euInfo.tv+':'+euInfo.base.replace(/-/g,'_');
     const r=await fetch('https://scanner.tradingview.com/'+euInfo.scan+'/scan',
@@ -4434,7 +4451,7 @@ async function fetchTargetsEU(sym, euInfo, myGen){
     if(myGen!=null && myGen!==REQ_GEN) return;
     const d=j&&j.data&&j.data[0]&&j.data[0].d;
     if(!d || d[0]==null){
-      box.innerHTML='<div class="hint">Bu hisse için analist hedef fiyatı bulunamadı. (Küçük/az izlenen şirketlerde aracı kurum kapsaması olmayabilir.)</div>';
+      box.innerHTML='<div class="hint">'+t('tgt_none')+'</div>';
       return;
     }
     const [mean,hi,lo,tot]=d, mark=d[9], close=d[10];
@@ -4442,19 +4459,19 @@ async function fetchTargetsEU(sym, euInfo, myGen){
     const upCls=up==null?'neutral':(up>0?'up':'down');
     const rl=tvMarkLabel(mark);
     box.innerHTML=`<div class="tgt-grid">
-      <div class="tgt-box"><div class="lbl">Konsensüs Hedef (Ort.)</div>
+      <div class="tgt-box"><div class="lbl">${t('tgt_mean')}</div>
         <div class="big">${fmtUSD(mean)}</div>
-        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">cari fiyata göre potansiyel</span></div>`:''}
-        ${close!=null?`<div class="sm neutral">Cari fiyat: ${fmtUSD(close)}</div>`:''}</div>
-      <div class="tgt-box"><div class="lbl">En Yüksek / En Düşük</div>
+        ${up!=null?`<div class="sm ${upCls}">${up>0?'▲':'▼'} ${pct(up)} <span class="neutral">${t('tgt_pot')}</span></div>`:''}
+        ${close!=null?`<div class="sm neutral">${t('cur_price')}: ${fmtUSD(close)}</div>`:''}</div>
+      <div class="tgt-box"><div class="lbl">${t('tgt_hi_lo')}</div>
         <div class="big" style="font-size:19px">${fmtUSD(hi)} <span class="neutral" style="font-size:14px">/ ${fmtUSD(lo)}</span></div>
-        <div class="sm neutral">aracı kurum hedef aralığı</div></div>
-      <div class="tgt-box"><div class="lbl">Genel Tavsiye</div>
+        <div class="sm neutral">${t('tgt_range')}</div></div>
+      <div class="tgt-box"><div class="lbl">${t('tgt_rec')}</div>
         <div class="big">${rl?`<span class="grade ${rl[1]}">${rl[0]}</span>`:'—'}</div>
-        <div class="sm neutral">${tot!=null?tot+' aracı kurum analisti':''}</div></div>
+        <div class="sm neutral">${tot!=null?tf('tgt_analysts_n',{n:tot}):''}</div></div>
     </div>
-    <div class="hint" style="margin-top:10px">Kurum bazlı liste Avrupa'da mevcut değil (Fintables/Finviz bu bölgeyi kapsamıyor) — TradingView/Refinitiv konsensüsü gösteriliyor. Kaynak: TradingView.</div>`;
-  }catch(e){ box.innerHTML='<div class="hint">Analist verisi alınamadı: '+e.message+'</div>'; }
+    <div class="hint" style="margin-top:10px">${t('tgt_fallback_eu')}</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">'+t('tgt_none')+': '+e.message+'</div>'; }
 }
 
 /* ---------- Canlı + dönemsel hisse fiyatı (Yahoo Finance — anahtarsız köprü) ---------- */
@@ -4998,21 +5015,27 @@ const WNEWS_SITES='(site:bloomberg.com OR site:reuters.com OR site:cnbc.com OR s
    filtresiz "genel" sorgu KULLANILMAZ çünkü Bing'de kalitesiz/MSN kaynak sızdırıyor).
    Sorgular tek tek test edildi — her biri ~12 ham haber döndürüyor. */
 const WNEWS_TOPICS=[
-  ['dunya',      '🌍 Dünya Gündemi',      'world news',                     'international breaking news'],
-  ['piyasa',     '💹 Piyasalar',          'stock market',                   'global markets'],
-  ['ekonomi',    '💼 Ekonomi',            'economy inflation',              'global economy'],
-  ['merkez',     '🏦 Merkez Bankaları',   'federal reserve interest rates', 'central bank policy'],
-  ['teknoloji',  '⚡ Teknoloji',          'technology',                     'artificial intelligence'],
-  ['enerji',     '🛢️ Enerji & Emtia',     'oil prices',                     'gold commodities'],
-  ['jeopolitik', '🌐 Jeopolitik',         'geopolitics',                    'diplomacy sanctions'],
+  ['dunya',      'wnews_t_world',    'world news',                     'international breaking news'],
+  ['piyasa',     'wnews_t_markets',  'stock market',                   'global markets'],
+  ['ekonomi',    'wnews_t_econ',     'economy inflation',              'global economy'],
+  ['merkez',     'wnews_t_cb',       'federal reserve interest rates', 'central bank policy'],
+  ['teknoloji',  'wnews_t_tech',     'technology',                     'artificial intelligence'],
+  ['enerji',     'wnews_t_energy',   'oil prices',                     'gold commodities'],
+  ['jeopolitik', 'wnews_t_geo',      'geopolitics',                    'diplomacy sanctions'],
 ];
 let WNEWS_TOPIC='dunya', WNEWS_GEN=0, WNEWS_PAGE_INIT=false;
 const WNEWS_CACHE={};   // konu → { html, ts } (10 dk — çeviri maliyetli, hazır HTML saklanır)
+function paintWnewsTopics(){
+  const box=document.getElementById('wnewsTopics');
+  if(!box) return;
+  box.innerHTML=WNEWS_TOPICS.map(([id,lk])=>
+    `<button data-t="${id}" onclick="setWnewsTopic('${id}')">${t(lk)}</button>`).join('');
+  box.querySelectorAll('button').forEach(b=>b.classList.toggle('primary', b.dataset.t===WNEWS_TOPIC));
+}
 function initWnewsPage(){
-  if(WNEWS_PAGE_INIT){ return; }
+  if(WNEWS_PAGE_INIT){ paintWnewsTopics(); return; }
   WNEWS_PAGE_INIT=true;
-  document.getElementById('wnewsTopics').innerHTML=WNEWS_TOPICS.map(([id,label])=>
-    `<button data-t="${id}" onclick="setWnewsTopic('${id}')">${label}</button>`).join('');
+  paintWnewsTopics();
   setWnewsTopic('dunya');
 }
 function setWnewsTopic(id){
@@ -5024,9 +5047,11 @@ async function loadWnews(){
   const box=document.getElementById('wnewsList');
   const topic=WNEWS_TOPICS.find(t=>t[0]===WNEWS_TOPIC);
   if(!box||!topic) return;
-  const cached=WNEWS_CACHE[topic[0]];
+  const cacheKey=topic[0]+'|'+getLang();
+  const cached=WNEWS_CACHE[cacheKey];
   if(cached && (Date.now()-cached.ts)<10*60000){ box.innerHTML=cached.html; return; }
-  box.innerHTML='<div class="hint">Haberler yükleniyor ve Türkçe\'ye çevriliyor…</div>';
+  const langEn=getLang()==='en';
+  box.innerHTML='<div class="hint">'+(langEn?t('wnews_loading'):t('wnews_loading_tr'))+'</div>';
   const myGen=++WNEWS_GEN;
   try{
     const [x1, x2]=await Promise.all([
@@ -5066,24 +5091,24 @@ async function loadWnews(){
       items.forEach((it,i)=>{ if(n>=MIN_ITEMS || included[i]) return; included[i]=true; n++; });
     }
     items=items.filter((it,i)=>included[i]).slice(0,MAX_ITEMS);
-    if(!items.length){ box.innerHTML='<div class="hint">Bu konuda güncel haber bulunamadı — başka bir konu dene.</div>'; return; }
-    // Başlık + özetleri Türkçe'ye çevir (şirket haberleriyle aynı zincir: Google gtx → MyMemory)
+    if(!items.length){ box.innerHTML='<div class="hint">'+t('news_none')+'</div>'; return; }
+    // EN: kaynak dil; TR: Türkçe'ye çevir
     const allTexts=[...items.map(i=>i.title), ...items.map(i=>i.desc||'—')];
-    const tr=await translateTR(allTexts);
+    const tr=langEn?allTexts:await translateTR(allTexts);
     if(myGen!==WNEWS_GEN || WNEWS_TOPIC!==topic[0]) return;
     const trTitles=tr.slice(0,items.length), trDescs=tr.slice(items.length);
     const html=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
-      const sum=safeHTML(trDescs[idx]||it.desc||'Bu haber için özet bulunamadı.');
+      const sum=safeHTML(trDescs[idx]||it.desc||t('news_no_sum'));
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
-        <div class="news-sum">${sum}<br><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Orijinal habere git (İng.) →</a></div>
+        <div class="news-sum">${sum}<br><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${t('news_orig')}</a></div>
       </div>`;
     }).join('');
-    WNEWS_CACHE[topic[0]]={ html, ts:Date.now() };
+    WNEWS_CACHE[cacheKey]={ html, ts:Date.now() };
     box.innerHTML=html;
-  }catch(e){ box.innerHTML='<div class="hint">Haberler alınamadı: '+e.message+'</div>'; }
+  }catch(e){ box.innerHTML='<div class="hint">'+t('news_none')+': '+e.message+'</div>'; }
 }
 
 /* ---- Sağlam yükümlülük/özkaynak toplamları (eksik SEC etiketlerini telafi eder) ---- */
@@ -5611,8 +5636,8 @@ function renderOwnerFloatKpis({ floatPct, floatShares, floatLabel, note }){
   if(floatShares==null && floatPct==null){ hideOwnerFloat(); return; }
   const cell=(lbl,val,sub)=>`<div class="kpi"><div class="lbl">${lbl}</div><div class="val">${val}</div>${sub?`<div class="hint">${sub}</div>`:''}</div>`;
   el.innerHTML=`<div class="grid" style="margin:0">
-    ${cell('Halka Açıklık', floatPct!=null?('%'+Number(floatPct).toFixed(2)):'—', 'Fiili dolaşım oranı')}
-    ${cell('Fiili Dolaşımdaki Senet', floatShares!=null?fmtShort(floatShares):'—', floatLabel||'KAP / MKK güncel')}
+    ${cell(t('owner_float_kpi'), floatPct!=null?('%'+Number(floatPct).toFixed(2)):'—', t('owner_float_sub'))}
+    ${cell(t('owner_float_shares'), floatShares!=null?fmtShort(floatShares):'—', floatLabel||t('owner_float_src'))}
   </div>
   ${note?`<div class="hint" style="margin-top:8px">${note}</div>`:''}`;
   el.classList.remove('hidden');
@@ -5719,14 +5744,17 @@ async function fetchInstitutionalHolders(ysym){
 /* ---- İçeriden Alım-Satım — SEC Form 4 (yalnızca ABD) ----
    submissions JSON'dan son Form 4'ler → her birinin ham form4.xml'i /secw köprüsünden
    (xsl klasör öneki atılır) → isim, ünvan, işlem kodu, adet, fiyat DOMParser ile çözülür. */
-const FORM4_CODE={ P:['Alım','up'], S:['Satış','down'], M:['Opsiyon Kullanımı','neutral'],
-  A:['Hisse Ödülü','neutral'], F:['Vergi İçin Satış','neutral'], G:['Hediye','neutral'],
-  D:['Elden Çıkarma','down'], C:['Dönüştürme','neutral'], X:['Opsiyon Kullanımı','neutral'] };
+function form4Code(code){
+  const map={ P:['insider_buy','up'], S:['insider_sell','down'], M:['insider_opt','neutral'],
+    A:['insider_award','neutral'], F:['insider_tax','neutral'], G:['insider_gift','neutral'],
+    D:['insider_dispose','down'], C:['insider_conv','neutral'], X:['insider_opt','neutral'] };
+  const m=map[code]; return m?[t(m[0]),m[1]]:[code||'—','neutral'];
+}
 async function fetchInsiders(cik, myGen){
   const card=document.getElementById('insiderCard'), box=document.getElementById('insiderBody');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Form 4 bildirimleri yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('insider_loading')+'</div>';
   try{
     const sub=await fetch('/sec/submissions/CIK'+cik+'.json').then(r=>r.ok?r.json():null);
     if(myGen!=null && myGen!==REQ_GEN) return;
@@ -5764,20 +5792,20 @@ async function fetchInsiders(cik, myGen){
     if(myGen!=null && myGen!==REQ_GEN) return;
     const rows=results.filter(Boolean);
     if(!rows.length){ box.innerHTML='<div class="hint">Form 4 belgeleri okunamadı.</div>'; return; }
-    box.innerHTML=`<table><thead><tr><th>Tarih</th><th>Kişi</th><th>İşlem</th><th>Adet</th><th>Fiyat</th><th></th></tr></thead><tbody>
+    box.innerHTML=`<table><thead><tr><th>${t('th_date')}</th><th>${t('insider_who')}</th><th>${t('insider_tx')}</th><th>${t('insider_shares')}</th><th>${t('th_px')}</th><th></th></tr></thead><tbody>
       ${rows.map(r=>{
-        const [ad,cls]=FORM4_CODE[r.code]||[r.code||'—','neutral'];
+        const [ad,cls]=form4Code(r.code);
         return `<tr>
           <td style="white-space:nowrap">${fmtDate(r.tdate)}</td>
           <td style="white-space:normal">${safeHTML(r.name)}${r.title?`<br><span class="ratio-formula">${safeHTML(r.title)}</span>`:''}</td>
           <td class="${cls}">${ad}</td>
-          <td>${r.shares!=null?Math.round(r.shares).toLocaleString('tr-TR'):'—'}</td>
+          <td>${r.shares!=null?Math.round(r.shares).toLocaleString(localeTag()):'—'}</td>
           <td>${r.price!=null?'$'+r.price.toFixed(2):'—'}</td>
-          <td><a href="${r.view}" target="_blank" rel="noopener">SEC'te gör →</a></td>
+          <td><a href="${r.view}" target="_blank" rel="noopener">${t('insider_see_sec')}</a></td>
         </tr>`;
       }).join('')}
     </tbody></table>
-    <div class="hint" style="margin-top:8px"><b>Alım (P)</b> açık piyasadan gerçek alımdır (en güçlü sinyal); Hisse Ödülü/Opsiyon Kullanımı rutin ödemedir, Vergi İçin Satış otomatiktir. Kaynak: SEC EDGAR Form 4.</div>`;
+    <div class="hint" style="margin-top:8px">${t('insider_note')}</div>`;
   }catch(e){ box.innerHTML='<div class="hint">Form 4 alınamadı: '+e.message+'</div>'; }
 }
 
@@ -5797,7 +5825,7 @@ async function fetchPriceChart(sym, ysym, myGen){
 function setChartRange(r){ CHART_STATE.range=r; document.querySelectorAll('#chartBtns button').forEach(b=>b.classList.toggle('primary', b.dataset.r===r)); loadChartRange(REQ_GEN); }
 async function loadChartRange(myGen){
   const box=document.getElementById('chartBody'), info=document.getElementById('chartInfo');
-  box.innerHTML='<div class="hint">Grafik yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('chart_loading')+'</div>';
   try{
     const yr=CHART_RANGE_MAP[CHART_STATE.range].yrange;
     const r=await fetch(`/price?s=${encodeURIComponent(CHART_STATE.ysym)}&range=${yr}`).then(x=>x.json());
@@ -5855,7 +5883,7 @@ async function fetchSectorComparison(sym, market, myGen, euOpt){
   const card=document.getElementById('sectorCard'), box=document.getElementById('sectorBody'), sub=document.getElementById('sectorSub');
   if(!card) return;
   card.classList.remove('hidden');
-  box.innerHTML='<div class="hint">Sektör verisi yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('sector_loading')+'</div>';
   try{
     const scan = euOpt ? euOpt.scan : (market==='BIST' ? 'turkey' : 'america');
     const cols=['name','description','sector','close','market_cap_basic','price_earnings_ttm','price_book_fq','return_on_equity','net_margin','number_of_employees'];
@@ -5909,12 +5937,12 @@ async function fetchSectorComparison(sym, market, myGen, euOpt){
         <td>${fmtEmployees(d[9])}</td>
       </tr>`;
     }).join('');
-    box.innerHTML=`<table><thead><tr><th>Hisse</th><th>Piyasa Değeri</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>Net Marj</th><th>Çalışan</th></tr></thead>
+    box.innerHTML=`<table><thead><tr><th>${t('th_code')}</th><th>${t('th_mcap')}</th><th>F/K</th><th>PD/DD</th><th>ROE</th><th>${t('peer_nm')}</th><th>${t('th_emp')}</th></tr></thead>
       <tbody>${trRows}
-        <tr class="total"><td>Sektör Medyanı</td><td>—</td><td>${xx(medFK)}</td><td>${xx(medPD)}</td><td>${pp(medROE)}</td><td>—</td><td>—</td></tr>
+        <tr class="total"><td>${t('peer_median')}</td><td>—</td><td>${xx(medFK)}</td><td>${xx(medPD)}</td><td>${pp(medROE)}</td><td>—</td><td>—</td></tr>
       </tbody></table>
-      <div class="hint" style="margin-top:8px"><span class="up">Yeşil</span> = gösterilen şirketler arasında o metrikte en iyi değer (F/K ve PD/DD'de en düşük, ROE ve Net Marj'da en yüksek).</div>`;
-  }catch(e){ box.innerHTML='<div class="hint">Sektör verisi alınamadı: '+e.message+'</div>'; }
+      <div class="hint" style="margin-top:8px">${t('peer_best_hint')}</div>`;
+  }catch(e){ box.innerHTML='<div class="hint">'+t('sector_fail')+' '+e.message+'</div>'; }
 }
 
 /* ---- İzleme Listesi (localStorage) ---- */
@@ -6559,16 +6587,16 @@ function revealDiscoveryForCountry(cc, focusCode){
   DISC_FOCUS_CODE=focusCode||null;
   const card=document.getElementById('discCard');
   if(card) card.classList.remove('hidden');
-  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  const cName=ccName(cc);
   const title=document.getElementById('discTitle');
   const sub=document.getElementById('discSub');
-  if(title) title.textContent='Bugünün Fırsatları — '+cName;
-  if(sub) sub.textContent=cName+' borsasında günün yükselen, düşen ve en aktif hisseleri. Satıra tıkla → analiz. Kaynak: TradingView.';
+  if(title) title.textContent=tf('disc_title_cc',{c:cName});
+  if(sub) sub.textContent=tf('disc_sub_cc',{c:cName});
   const bar=document.getElementById('discOpenBar');
   if(bar && focusCode){
     bar.style.display='flex';
-    bar.innerHTML=`<button type="button" class="primary" onclick="searchExact('${safeHTML(focusCode)}')">📈 ${safeHTML(focusCode)} bilançosunu aç →</button>
-      <span class="hint">Ülke: <b>${safeHTML(cName)}</b></span>`;
+    bar.innerHTML=`<button type="button" class="primary" onclick="searchExact('${safeHTML(focusCode)}')">📈 ${tf('disc_open_bs',{code:safeHTML(focusCode)})}</button>
+      <span class="hint">${t('disc_country')} <b>${safeHTML(cName)}</b></span>`;
   }else if(bar){ bar.style.display='none'; bar.innerHTML=''; }
   // Sekmeleri sıfırla: yükselenler aktif
   DISC_SCR='gainers';
@@ -6587,11 +6615,11 @@ async function loadDiscovery(){
   const card=document.getElementById('discCard');
   if(!box || !DISC_REVEALED || !DISC_CC) return;
   if(card) card.classList.remove('hidden');
-  if(location.protocol==='file:'){ box.innerHTML='<div class="hint">Yerel köprü gerekli.</div>'; return; }
+  if(location.protocol==='file:'){ box.innerHTML='<div class="hint">'+t('need_bridge')+'</div>'; return; }
   const m=TOP100_MARKETS[DISC_CC];
-  if(!m){ box.innerHTML='<div class="hint">Ülke verisi yok.</div>'; return; }
+  if(!m){ box.innerHTML='<div class="hint">'+t('disc_no_cc')+'</div>'; return; }
   const myGen=++DISC_GEN;
-  box.innerHTML='<div class="hint">Yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('loading')+'</div>';
   try{
     const sortBy=DISC_SCR==='actives'?'volume':'change';
     const sortOrder=DISC_SCR==='losers'?'asc':'desc';
@@ -6626,7 +6654,8 @@ async function loadDiscovery(){
       if(DISC_CC==='US' && /OTC/i.test(ex)) return false;
       return true;
     }).slice(0,20);
-    if(!data.length){ box.innerHTML='<div class="hint">Liste boş (piyasa kapalı olabilir).</div>'; return; }
+    if(!data.length){ box.innerHTML='<div class="hint">'+t('disc_empty')+'</div>'; return; }
+    const loc=localeTag();
     const chg=v=>{
       if(v==null) return '—';
       const cls=v>0?'up':(v<0?'down':'neutral');
@@ -6635,26 +6664,26 @@ async function loadDiscovery(){
     const px=v=>{
       if(v==null) return '—';
       const dig=v<10?2:(v<100?2:2);
-      return m.sym+Number(v).toLocaleString('tr-TR',{minimumFractionDigits:dig,maximumFractionDigits:dig});
+      return m.sym+Number(v).toLocaleString(loc,{minimumFractionDigits:dig,maximumFractionDigits:dig});
     };
     const rows=data.map((d,i)=>{
       const code=m.click(String(d[0]).replace(/_/g,'-'));
       const sym=String(d[0]).replace(/_/g,'-');
       rememberLogoid(sym, DISC_CC==='TR'?'BIST':(DISC_CC==='US'?'US':''), d[7]);
-      return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="Analizi aç">
+      return `<tr style="cursor:pointer" onclick="searchExact('${code}')" title="${t('open_analysis')}">
         <td style="color:var(--muted)">${i+1}</td>
         <td><span class="sym-cell">${logoHtml(d[7], sym, 22, {sym, cc:DISC_CC, market:DISC_CC==='TR'?'BIST':(DISC_CC==='US'?'US':''), ysym:m.click(sym)})}<b>${safeHTML(sym)}</b></span></td>
         <td><span class="ratio-formula">${safeHTML(d[1]||'')}</span></td>
         <td>${px(d[2])}</td>
         <td>${chg(d[3])}</td>
-        <td style="color:var(--muted);font-size:12px">${d[4]==null?'—':Number(d[4]).toLocaleString('tr-TR')}</td>
+        <td style="color:var(--muted);font-size:12px">${d[4]==null?'—':Number(d[4]).toLocaleString(loc)}</td>
       </tr>`;
     }).join('');
     box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
-      <th>#</th><th>Kod</th><th>Şirket</th><th>Fiyat</th><th>Değişim</th><th>Hacim</th>
+      <th>#</th><th>${t('th_code')}</th><th>${t('th_co')}</th><th>${t('th_px')}</th><th>${t('th_chg')}</th><th>${t('th_vol')}</th>
     </tr></thead><tbody>${rows}</tbody></table></div>`;
   }catch(e){
-    if(myGen===DISC_GEN) box.innerHTML='<div class="hint">Liste alınamadı: '+safeHTML(e.message)+'</div>';
+    if(myGen===DISC_GEN) box.innerHTML='<div class="hint">'+t('list_fail')+'  '+safeHTML(e.message)+'</div>';
   }
 }
 
@@ -6666,11 +6695,11 @@ function revealEqCalendarForCountry(cc){
   EQCAL_REVEALED=true;
   const card=document.getElementById('eqCalCard');
   if(card) card.classList.remove('hidden');
-  const cName=(ECON_COUNTRIES.find(x=>x[0]===cc)||[cc,cc])[1];
+  const cName=ccName(cc);
   const title=document.getElementById('eqCalTitle');
   const sub=document.getElementById('eqCalSub');
-  if(title) title.textContent='Hisse Takvimi — '+cName;
-  if(sub) sub.textContent=cName+' borsası ajandası. Satıra tıkla → analiz. ABD: Nasdaq · TR: KAP (IPO/bedelsiz) · diğer: TradingView.';
+  if(title) title.textContent=tf('eqcal_title_cc',{c:cName});
+  if(sub) sub.textContent=tf('eqcal_sub_cc',{c:cName});
   // ABD dışı: gün seçici yalnızca Nasdaq gün-bazlı; TV yaklaşan kazançlar için gizle
   const dayWrap=document.getElementById('eqCalDayWrap');
   if(dayWrap) dayWrap.style.display = (cc==='US') ? 'flex' : 'none';
@@ -6690,9 +6719,9 @@ async function loadEqCalendar(){
   const card=document.getElementById('eqCalCard');
   if(!box || !EQCAL_REVEALED || !EQCAL_CC) return;
   if(card) card.classList.remove('hidden');
-  if(location.protocol==='file:'){ box.innerHTML='<div class="hint">Yerel köprü gerekli.</div>'; return; }
+  if(location.protocol==='file:'){ box.innerHTML='<div class="hint">'+t('need_bridge')+'</div>'; return; }
   const myGen=++EQCAL_GEN;
-  box.innerHTML='<div class="hint">Takvim yükleniyor…</div>';
+  box.innerHTML='<div class="hint">'+t('eqcal_loading')+'</div>';
 
   // ABD: Nasdaq gün bazlı (bilanço/temettü/IPO/bölünme)
   if(EQCAL_CC==='US'){
@@ -6706,8 +6735,8 @@ async function loadEqCalendar(){
       const j=await fetch('/ycal?type='+encodeURIComponent(EQCAL_TYPE)+'&day='+encodeURIComponent(day)).then(r=>r.json());
       if(myGen!==EQCAL_GEN) return;
       const rows=j.rows||[];
-      if(!rows.length){ box.innerHTML='<div class="hint">Bu gün için kayıt yok. Başka bir gün seçmeyi dene.</div>'; return; }
-      const extra=EQCAL_TYPE==='earnings'?'<th>EPS Tahmin</th><th>EPS Gerçek</th>':(EQCAL_TYPE==='dividends'?'<th>Tutar</th>':'');
+      if(!rows.length){ box.innerHTML='<div class="hint">'+t('eqcal_empty_day')+'</div>'; return; }
+      const extra=EQCAL_TYPE==='earnings'?'<th>'+t('th_eps_est')+'</th><th>'+t('th_eps_act')+'</th>':(EQCAL_TYPE==='dividends'?'<th>'+t('th_amount')+'</th>':'');
       const tr=rows.map((r,i)=>{
         const code=String(r.symbol||'').replace(/^\^/,'').trim();
         const openCode=code && !/\./.test(code) ? code+'.US' : code;
@@ -6727,11 +6756,11 @@ async function loadEqCalendar(){
         </tr>`;
       }).join('');
       box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
-        <th>#</th><th>Kod</th><th>Şirket</th><th>Tarih</th>${extra}
+        <th>#</th><th>${t('th_code')}</th><th>${t('th_co')}</th><th>${t('th_date')}</th>${extra}
       </tr></thead><tbody>${tr}</tbody></table></div>
       <div class="hint" style="margin-top:8px">ABD · Nasdaq Calendar · ${fmtCalDay(day)}</div>`;
     }catch(e){
-      if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">Takvim alınamadı: '+safeHTML(e.message)+'</div>';
+      if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">'+t('eqcal_fail')+' '+safeHTML(e.message)+'</div>';
     }
     return;
   }
@@ -6759,7 +6788,7 @@ async function loadEqCalendar(){
         </tr>`;
       }).join('');
       box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr>
-        <th>#</th><th>Kod</th><th>Şirket / Özet</th><th>Tarih</th><th>Konu</th><th></th>
+        <th>#</th><th>${t('th_code')}</th><th>${t('th_co')}</th><th>${t('th_date')}</th><th>${t('eqcal_topic')}</th><th></th>
       </tr></thead><tbody>${tr}</tbody></table></div>
       <div class="hint" style="margin-top:8px">Türkiye · KAP · ${EQCAL_TYPE==='ipo'?'halka arz bildirimleri':'bedelsiz sermaye artırımı / bölünme'}</div>`;
     }catch(e){
@@ -6770,11 +6799,11 @@ async function loadEqCalendar(){
 
   // Diğer ülkeler: IPO/splits yalnızca ABD (+ TR yukarıda); TV kazanç/temettü
   if(EQCAL_TYPE==='ipo' || EQCAL_TYPE==='splits'){
-    box.innerHTML='<div class="hint">IPO ve bölünme takvimi şu an <b>ABD</b> (Nasdaq) ve <b>Türkiye</b> (KAP) için. Bu ülke için <b>Bilanço</b> sekmesine bak.</div>';
+    box.innerHTML='<div class="hint">'+t('eqcal_ipo_hint')+'</div>';
     return;
   }
   const m=TOP100_MARKETS[EQCAL_CC];
-  if(!m){ box.innerHTML='<div class="hint">Ülke verisi yok.</div>'; return; }
+  if(!m){ box.innerHTML='<div class="hint">'+t('disc_no_cc')+'</div>'; return; }
   try{
     const dateCol=EQCAL_TYPE==='dividends'?'ex_dividend_date_upcoming':'earnings_release_next_date';
     const filter=[
@@ -6821,7 +6850,7 @@ async function loadEqCalendar(){
     </tr></thead><tbody>${tr}</tbody></table></div>
     <div class="hint" style="margin-top:8px">${safeHTML(cName)} · TradingView · yaklaşan ${EQCAL_TYPE==='dividends'?'temettü (ex-date)':'bilanço'}</div>`;
   }catch(e){
-    if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">Takvim alınamadı: '+safeHTML(e.message)+'</div>';
+    if(myGen===EQCAL_GEN) box.innerHTML='<div class="hint">'+t('eqcal_fail')+' '+safeHTML(e.message)+'</div>';
   }
 }
 
@@ -7369,4 +7398,92 @@ function refreshI18nPanels(){
     }
   }catch(_e){}
   try{ renderWatchlist(); }catch(_e){}
+  try{
+    Object.keys(WNEWS_CACHE||{}).forEach(k=>{ try{ delete WNEWS_CACHE[k]; }catch(_e){} });
+    paintWnewsTopics();
+    const wEl=document.getElementById('wnewsList');
+    if(wEl) loadWnews();
+  }catch(_e){}
+  try{
+    if(typeof ECON_PAGE_INIT!=='undefined' && ECON_PAGE_INIT){
+      const ec=document.getElementById('econCountries');
+      if(ec){
+        ec.innerHTML=ECON_COUNTRIES.map(([cc])=>
+          `<button class="cbox" id="cbox-${cc}" onclick="toggleEconCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
+        Object.keys(ECON_PANELS||{}).forEach(cc=>{
+          document.getElementById('cbox-'+cc)?.classList.add('active');
+          const h=document.querySelector('#epanel-'+cc+' h2');
+          if(h) h.innerHTML=`${flagSpan(cc)}${tf('econ_panel_title',{c:ccName(cc)})}`;
+          // re-paint time/imp chip labels via applyI18n already; refresh table body
+          try{ renderEconPanel(cc); }catch(_e){}
+        });
+      }
+    }
+  }catch(_e){}
+  try{
+    if(typeof SCAN_PAGE_INIT!=='undefined' && SCAN_PAGE_INIT){
+      const sc=document.getElementById('scanCountries');
+      if(sc){
+        sc.innerHTML=ECON_COUNTRIES.map(([cc])=>
+          `<button class="cbox" id="scanbox-${cc}" onclick="selectScanCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
+        document.getElementById('scanbox-'+SCAN_CC)?.classList.add('active');
+      }
+      const st=document.getElementById('scanTitle');
+      if(st && SCAN_CC) st.innerHTML=`${flagSpan(SCAN_CC)}${tf('scan_title_cc',{c:ccName(SCAN_CC)})}`;
+      if(SCAN_RAW && SCAN_RAW.length) renderScanPage();
+      updateScanYdfUi();
+    }
+  }catch(_e){}
+  try{
+    if(typeof SECT_PAGE_INIT!=='undefined' && SECT_PAGE_INIT){
+      const sc=document.getElementById('sectCountries');
+      if(sc){
+        sc.innerHTML=
+          `<button class="cbox" id="sbox-GLOBAL" onclick="selectSectCountry('GLOBAL')"><span class="cfl" style="font-size:17px;line-height:1">🌍</span><span>${t('cc_GLOBAL')}</span></button>`+
+          ECON_COUNTRIES.map(([cc])=>
+            `<button class="cbox" id="sbox-${cc}" onclick="selectSectCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
+        document.getElementById('sbox-'+SECT_CC)?.classList.add('active');
+      }
+      const ss=document.getElementById('sectSectors');
+      if(ss){
+        ss.innerHTML=SECT_SECTORS.map(([id,ic])=>
+          `<button class="cbox" id="secbox-${id}" onclick="toggleSectSector('${id}')"><span class="cfl" style="font-size:16px;line-height:1">${ic}</span><span>${t('sect_'+id)}</span></button>`).join('');
+        if(SECT_OPEN) document.getElementById('secbox-'+SECT_OPEN)?.classList.add('active');
+      }
+      if(SECT_OPEN) loadSectPanel();
+    }
+  }catch(_e){}
+  try{
+    if(typeof TOP100_PAGE_INIT!=='undefined' && TOP100_PAGE_INIT){
+      const tc=document.getElementById('topCountries');
+      if(tc){
+        tc.innerHTML=ECON_COUNTRIES.map(([cc])=>
+          `<button class="cbox" id="tbox-${cc}" onclick="toggleTopCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
+        if(TOP100_OPEN){
+          document.getElementById('tbox-'+TOP100_OPEN)?.classList.add('active');
+          const h=document.querySelector('#tpanel-'+TOP100_OPEN+' h2');
+          if(h) h.innerHTML=`${flagSpan(TOP100_OPEN)}${ccName(TOP100_OPEN)} ${t('top100_panel_title')}`;
+        }
+      }
+    }
+  }catch(_e){}
+  try{
+    if(typeof DISC_REVEALED!=='undefined' && DISC_REVEALED && DISC_CC){
+      const dt=document.getElementById('discTitle');
+      if(dt) dt.innerHTML=`${flagSpan(DISC_CC)}${tf('disc_title_cc',{c:ccName(DISC_CC)})}`;
+      loadDiscovery();
+    }
+  }catch(_e){}
+  try{
+    if(typeof EQCAL_REVEALED!=='undefined' && EQCAL_REVEALED && EQCAL_CC){
+      const et=document.getElementById('eqCalTitle');
+      if(et) et.innerHTML=`${flagSpan(EQCAL_CC)}${tf('eqcal_title_cc',{c:ccName(EQCAL_CC)})}`;
+      loadEqCalendar();
+    }
+  }catch(_e){}
+  try{
+    if(FIN && FIN.euInfo) startEuExchangeClock(FIN.euInfo);
+    else if(FIN && FIN.market==='BIST') startBistClock();
+    else if(FIN && FIN.market==='US') startNyClock();
+  }catch(_e){}
 }
