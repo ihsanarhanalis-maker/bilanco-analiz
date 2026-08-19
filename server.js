@@ -129,6 +129,113 @@ function httpsGetText(url, headers) {
     }).on('error', reject);
   });
 }
+
+/* TipRanks özel şirket profilleri Cloudflare nedeniyle sunucudan doğrudan 403 döndürüyor.
+   Okunabilir TipRanks sayfa çıktısını Jina Reader üzerinden alıp yalnız gerekli alanları ayıklarız.
+   Kullanıcı girdisi URL'ye doğrudan eklenmez; yalnız izin verilen şirket slug'ları kabul edilir. */
+const PRIVATE_COMPANY_SLUGS = new Set([
+  'openai','waymo','stripe','revolut','xai','anthropic','bytedance','shein','canva','databricks'
+]);
+const PRIVATE_COMPANY_CACHE = new Map();
+function privateReaderGet(url){
+  return new Promise((resolve, reject) => {
+    const rq=https.get(url, { headers:{
+      'User-Agent':'Mozilla/5.0',
+      'Accept':'text/plain',
+      'Accept-Language':'en-US,en;q=0.9'
+    }}, pr => {
+      let body='';
+      pr.setEncoding('utf8');
+      pr.on('data', c => { if(body.length < 900000) body += c; });
+      pr.on('end', () => resolve({ status:pr.statusCode||0, body }));
+    });
+    rq.setTimeout(18000, () => rq.destroy(new Error('timeout')));
+    rq.on('error', reject);
+  });
+}
+function privateLineValue(md,label){
+  const esc=label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const m=md.match(new RegExp(esc+'\\s*([^\\n]+)','i'));
+  return m ? m[1].trim().replace(/^[:\-–—\s]+/,'') : null;
+}
+function privateSection(md,heading){
+  const esc=heading.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const hit=new RegExp('^##\\s+'+esc+'(?:\\s+[^\\n]*)?\\r?$','im').exec(String(md||''));
+  if(!hit) return '';
+  const rest=String(md).slice(hit.index+hit[0].length).replace(/^\\r?\\n/,'');
+  const next=rest.search(/^##\\s+/m);
+  return (next<0?rest:rest.slice(0,next)).trim();
+}
+function privateTrendValue(block,noun){
+  const m=String(block||'').match(/\(([-+]?\d+(?:\.\d+)?%)\)/);
+  if(!m) return null;
+  let pct=m[1];
+  if(!/^[+-]/.test(pct)){
+    if(/increased|growing|growth/i.test(block)) pct='+'+pct;
+    else if(/decreased|declined|shrinking/i.test(block)) pct='-'+pct;
+  }
+  return pct+' '+noun;
+}
+function privateNormalizedTrend(value,block,noun){
+  let s=String(value||'').trim();
+  if(!s) return privateTrendValue(block,noun);
+  if(!/^[+\-−]/.test(s)){
+    if(/decreased|declined|shrinking/i.test(block)) s='-'+s;
+    else s='+'+s;
+  }
+  return new RegExp('\\b'+noun+'\\b','i').test(s)?s:s+' '+noun;
+}
+function privateMetric(value){
+  const s=String(value==null?'':value).trim();
+  return !s||/^[\-–—―]+$/.test(s)?null:s;
+}
+function parsePrivateCompanyMarkdown(md,slug){
+  const nameMatch=md.match(/^#\s+([^\n]+)$/m);
+  const valuationBlock=privateSection(md,'Latest Estimated Valuation')||privateSection(md,'Estimated Valuation');
+  const employeeBlock=privateSection(md,'Employee Trend');
+  const socialBlock=privateSection(md,'Social Trend');
+  const leadership=(md.match(/Key Executives\s*\n([\s\S]*?)\nCurrent Number of Employees/i)||[])[1]||'';
+  const executives=leadership.split('\n').map(x=>x.trim()).filter(Boolean).slice(0,8);
+  const clientsBlock=privateSection(md,'Main Enterprise Clients');
+  const clients=[];
+  const clientRe=/\[([^\]]+)\]\(https?:\/\/www\.tipranks\.com\/stocks\//g;
+  let cm;
+  while((cm=clientRe.exec(clientsBlock)) && clients.length<5){
+    const n=cm[1].trim(); if(n && !clients.includes(n)) clients.push(n);
+  }
+  const published=(md.match(/^Published Time:\s*([^\n]+)$/mi)||[])[1]||null;
+  const descriptionBlock=(md.match(/^#\s+[^\n]+[\s\S]*?\n\[([^\]]+)\]\(http:\/\/www\.tipranks\.com\/private-companies\/sector\/[^)]+\)\s*\n\n([^\n]+)/m)||[]);
+  const workforceTrend=privateNormalizedTrend(privateLineValue(md,'Workforce Trend'),employeeBlock,'employees');
+  const linkedInTrend=privateNormalizedTrend(privateLineValue(md,'LinkedIn Trend'),socialBlock,'followers');
+  let momentum=(md.match(/## Company Momentum\s+([^\n]+)/i)||[])[1]||null;
+  if(!momentum && (workforceTrend||linkedInTrend)){
+    const vals=[workforceTrend,linkedInTrend].filter(Boolean);
+    momentum=vals.every(x=>/^\+/.test(x))?'Positive':(vals.every(x=>/^-/.test(x))?'Negative':'Neutral');
+  }
+  return {
+    ok:true,
+    slug,
+    name:nameMatch?nameMatch[1].trim():slug,
+    sector:descriptionBlock[1]||null,
+    description:descriptionBlock[2]||null,
+    valuation:privateMetric(privateLineValue(valuationBlock,'Estimated Valuation')),
+    totalRaised:privateMetric(privateLineValue(valuationBlock,'Total Amount Raised')),
+    fundingRounds:privateMetric(privateLineValue(valuationBlock,'Total Funding Rounds')),
+    latestFunding:privateMetric(privateLineValue(valuationBlock,'Latest Funding Amount')),
+    latestRound:privateMetric(privateLineValue(valuationBlock,'Latest Funding Round')),
+    postMoney:privateMetric(privateLineValue(valuationBlock,'Post-Money Valuation')),
+    employees:privateLineValue(md,'Current Number of Employees'),
+    followers:privateLineValue(md,'Current LinkedIn Followers'),
+    momentum,
+    linkedInTrend,
+    workforceTrend,
+    executives,
+    clients,
+    published,
+    source:'TipRanks',
+    sourceUrl:'https://www.tipranks.com/private-companies/'+slug
+  };
+}
 /* Yahoo crumb + cookie (quoteSummary v10 icin gerekli).
    Akis: fc.yahoo.com -> finance.yahoo.com (cookie) -> getcrumb.
    ~30 dk onbellek; Invalid Crumb gelirse sifirlanir. */
@@ -1942,6 +2049,36 @@ function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
 
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  // --- TipRanks özel şirket profili (güncel değerleme, finansman, ekip ve momentum) ---
+  if (urlPath === '/private-company') {
+    const slug=String(new URLSearchParams(req.url.split('?')[1]||'').get('slug')||'').trim().toLowerCase();
+    const send=(obj,status) => {
+      res.writeHead(status||200, {
+        'Content-Type':'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin':'*',
+        'Cache-Control':'public, max-age=900'
+      });
+      res.end(JSON.stringify(obj));
+    };
+    if(!PRIVATE_COMPANY_SLUGS.has(slug)){ send({ok:false,error:'bad_company'},400); return; }
+    const cached=PRIVATE_COMPANY_CACHE.get(slug);
+    if(cached && Date.now()-cached.at < 30*60*1000){ send(cached.data); return; }
+    (async()=>{
+      try{
+        const readerUrl='https://r.jina.ai/http://www.tipranks.com/private-companies/'+encodeURIComponent(slug);
+        const out=await privateReaderGet(readerUrl);
+        if(out.status!==200 || !out.body || !/## (?:Latest )?Estimated Valuation/i.test(out.body)){
+          send({ok:false,error:'source_unavailable'},502); return;
+        }
+        const data=parsePrivateCompanyMarkdown(out.body,slug);
+        data.fetchedAt=new Date().toISOString();
+        PRIVATE_COMPANY_CACHE.set(slug,{at:Date.now(),data});
+        send(data);
+      }catch(e){ send({ok:false,error:e.message||'private_company_fail'},502); }
+    })();
+    return;
+  }
 
   // --- Avrupa çok-yıllı IFRS/ESEF köprüsü (GLEIF + filings.xbrl.org, anahtarsız) ---
   if (urlPath === '/ifrs') {
