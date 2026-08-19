@@ -18,6 +18,10 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; chars
                '.webmanifest':'application/manifest+json; charset=utf-8',
                '.png':'image/png', '.svg':'image/svg+xml', '.ico':'image/x-icon',
                '.webp':'image/webp' };
+const PUBLIC_FILES = new Set([
+  'bilanco-analiz.html', 'app.js', 'i18n.js', 'cik-map.js', 'sw.js', 'manifest.webmanifest'
+]);
+const isPublicStaticFile = rel => PUBLIC_FILES.has(rel) || rel.startsWith('icons/');
 
 /* Analist hedef fiyatları — Yahoo quoteSummary yerine Finviz'den kazınır.
    Neden: Yahoo'nun crumb doğrulaması bazı bulut sunucu IP'lerinde (Render, AWS vb.)
@@ -1416,12 +1420,7 @@ async function tefasTopWithHoldings(limit) {
       if (hsCodes.size) return hsCodes.has(f.code) || prefer.has(f.code);
       return prefer.has(f.code) || /H[İI]SSE\s*SENED[İI]/i.test(f.name) || f.stockPct >= 40;
     })
-    .sort((a, b) => {
-      const ap = prefer.has(a.code) ? 1 : 0;
-      const bp = prefer.has(b.code) ? 1 : 0;
-      if (ap !== bp) return bp - ap;
-      return b.aum - a.aum;
-    });
+    .sort((a, b) => b.aum - a.aum);
 
   const funds = hsList.slice(0, limit);
   TEFAS_TOP_HOLD_CACHE = {
@@ -2475,7 +2474,7 @@ http.createServer((req, res) => {
   // --- Çeviri köprüsü (çoklu yedekli: Google gtx → MyMemory) ---
   //     Yanıt tek tip: { text: "<türkçe>" } (translateToTR yukarıda açıklandı).
   if (urlPath === '/tr') {
-    const q = decodeURIComponent((req.url.split('?')[1] || '').replace(/^q=/, ''));
+    const q = new URLSearchParams(req.url.split('?')[1] || '').get('q') || '';
     translateToTR(q).then(text => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
       res.end(JSON.stringify({ text }));
@@ -3090,8 +3089,33 @@ http.createServer((req, res) => {
 
   // --- statik dosyalar ---
   let file = urlPath === '/' ? '/bilanco-analiz.html' : urlPath;
-  const fp = path.join(ROOT, decodeURIComponent(file));
-  if (!fp.startsWith(ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
+  let decodedFile = '';
+  try {
+    decodedFile = decodeURIComponent(file);
+  } catch (_e) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Gecersiz URL');
+    return;
+  }
+  if (decodedFile.includes('\0')) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Gecersiz URL');
+    return;
+  }
+  const requestRel = decodedFile.replace(/\\/g, '/').replace(/^\/+/, '');
+  const fp = path.resolve(ROOT, ...requestRel.split('/'));
+  const rel = path.relative(ROOT, fp);
+  const relPosix = rel.split(path.sep).join('/');
+  if (!rel || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+  if (!isPublicStaticFile(relPosix)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Bulunamadi: ' + file);
+    return;
+  }
   fs.readFile(fp, (e, data) => {
     if (e) { res.writeHead(404); res.end('Bulunamadi: ' + file); return; }
     res.writeHead(200, {

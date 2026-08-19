@@ -811,7 +811,7 @@
 
     <div class="card" id="incomeCard">
       <h2 data-i18n="card_income">Gelir Tablosu & Kârlılık</h2>
-      <div class="sub" data-i18n="card_income_sub">SEC'ten çekilen gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
+      <div class="sub" id="incomeSub" data-i18n="card_income_sub">Finansal tablolardan alınan gelir, kâr ve marjlar. Kârlılık oranları cari döneme göredir.</div>
       <div class="grid" id="profKpis" style="margin-bottom:16px"></div>
       <table>
         <thead><tr><th data-i18n="th_item">Kalem</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th data-i18n="th_change">Değişim</th></tr></thead>
@@ -885,7 +885,7 @@
       <h2 data-i18n="card_var">Önemli Değişimler</h2>
       <div class="sub" data-i18n="card_var_sub">Dönemler arası tutarca en büyük 8 değişim. Sıralama mutlak değişime göre.</div>
       <table>
-        <thead><tr><th data-i18n="th_item">Kalem</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th data-i18n="th_chg_abs">Değişim ($)</th><th data-i18n="th_chg_pct">Değişim (%)</th><th data-i18n="th_dir">Yön</th></tr></thead>
+        <thead><tr><th data-i18n="th_item">Kalem</th><th data-i18n="th_cur">Cari</th><th data-i18n="th_prev">Önceki</th><th id="varAbsHead" data-i18n="th_chg_abs">Değişim (tutar)</th><th data-i18n="th_chg_pct">Değişim (%)</th><th data-i18n="th_dir">Yön</th></tr></thead>
         <tbody id="varBody"></tbody>
       </table>
     </div>
@@ -1125,8 +1125,8 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=161"></script>
-<script src="app.js?v=161"></script>
+<script src="i18n.js?v=162"></script>
+<script src="app.js?v=162"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

@@ -6,7 +6,7 @@ services:
     runtime: node
     plan: free
     region: frankfurt
-    buildCommand: "npm install --omit=dev || true"
+    buildCommand: "npm ci --omit=dev"
     startCommand: "npm start"
     healthCheckPath: /
     envVars:

@@ -4718,7 +4718,15 @@ function renderYdf(mcap){
 }
 
 /* Güncel haberler — Google News (en güncel) + Türkçe çeviri (anahtarsız köprü) */
-const safeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const safeHTML = s => String(s==null?'':s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+function safeExternalURL(raw){
+  try{
+    const u=new URL(String(raw||''), location.href);
+    return (u.protocol==='https:'||u.protocol==='http:') ? u.href : '';
+  }catch(_e){ return ''; }
+}
 function relTime(d){
   const diff=(Date.now()-d.getTime())/1000;
   if(diff<3600) return Math.max(1,Math.round(diff/60))+' '+t('rel_min');
@@ -4919,7 +4927,10 @@ async function fetchNews(sym, myGen){
     box.innerHTML=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
       const sum=safeHTML(trDescs[idx]||it.desc||t('news_no_sum'));
-      const links = `<a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${isBist?t('news_go'):t('news_go_orig')}</a>`;
+      const href=safeExternalURL(it.link);
+      const links = href
+        ? `<a href="${safeHTML(href)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${isBist?t('news_go'):t('news_go_orig')}</a>`
+        : '';
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
@@ -5162,10 +5173,12 @@ async function loadWnews(){
     const html=items.map((it,idx)=>{
       const meta=[it.src, it.d?relTime(it.d):''].filter(Boolean).join(' · ');
       const sum=safeHTML(trDescs[idx]||it.desc||t('news_no_sum'));
+      const href=safeExternalURL(it.link);
+      const link=href?`<a href="${safeHTML(href)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${t('news_orig')}</a>`:'';
       return `<div class="news" onclick="toggleNews(this)">
         <div class="news-t"><span class="chev">▶</span><span>${safeHTML(trTitles[idx]||it.title)}</span></div>
         <div class="news-m">${safeHTML(meta)}</div>
-        <div class="news-sum">${sum}<br><a href="${it.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${t('news_orig')}</a></div>
+        <div class="news-sum">${sum}<br>${link}</div>
       </div>`;
     }).join('');
     WNEWS_CACHE[cacheKey]={ html, ts:Date.now() };
@@ -5336,6 +5349,19 @@ function colorInputRows(){
 }
 
 /* ---------- Ana analiz ---------- */
+function marketLabelKey(prefix){
+  if(FIN&&FIN.market==='BIST') return prefix+'_bist';
+  if(FIN&&FIN.market==='EU') return prefix+'_eu';
+  return prefix+'_us';
+}
+function updateMarketSpecificLabels(){
+  const incomeSub=document.getElementById('incomeSub');
+  if(incomeSub) incomeSub.textContent=t(marketLabelKey('card_income_sub'));
+  const absHead=document.getElementById('varAbsHead');
+  if(absHead) absHead.textContent=tf('th_chg_abs_cur',{c:CURSYM||CUR||t('amount')});
+  const chartHint=document.querySelector('#chartBody .chart-source-hint');
+  if(chartHint) chartHint.textContent=t(marketLabelKey('chart_marker'));
+}
 function analyze(myGen){
   if(myGen!=null && myGen!==REQ_GEN) return;
   const d=readData();
@@ -5366,6 +5392,7 @@ function analyze(myGen){
   renderKPIs(T);
   renderRatios(T);
   renderVariance(d);
+  updateMarketSpecificLabels();
   renderVertical(d,T);
   renderFlags(d,T);
 
@@ -5453,7 +5480,7 @@ function exportCSV(){
     section('GELİR TABLOSU', ['Kalem','Cari','Önceki','Değişim'], '#incomeBody');
     section('KÂRLILIK ORANLARI', ['Oran','Cari','Önceki','Değişim','Durum'], '#profBody');
   }
-  section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki','Değişim ($)','Değişim (%)','Yön'], '#varBody');
+  section('ÖNEMLİ DEĞİŞİMLER', ['Kalem','Cari','Önceki',`Değişim (${CURSYM||CUR})`,'Değişim (%)','Yön'], '#varBody');
 
   const csv='﻿'+L.join('\r\n');   // UTF-8 BOM → Excel Türkçe karakterleri doğru okur
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
@@ -5945,7 +5972,7 @@ function drawPriceChart(box, pts){
     ${markers}
     ${xLabels}
   </svg>
-  <div class="hint" style="margin-top:6px">📍 altın çizgi = bilançonun SEC'e açıklandığı gün. Kaynak: Yahoo Finance.</div>`;
+  <div class="hint chart-source-hint" style="margin-top:6px">${safeHTML(t(marketLabelKey('chart_marker')))}</div>`;
 }
 
 /* ---- Sektör Karşılaştırması (TradingView tarayıcı API'si) ---- */
