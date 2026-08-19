@@ -1,6 +1,6 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','takas','econ','top100','scan','sect','etf','wnews','st'].forEach(x=>{
+  ['home','stock','takas','econ','top100','scan','sect','etf','private','wnews','st'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
@@ -26,6 +26,7 @@ function switchPage(p){
     }catch(_e){}
   }
   if(p==='wnews') initWnewsPage();
+  if(p==='private') initPrivateCompaniesPage();
   if(p==='takas') initTakasPage();
   if(p==='st') initStPage();
   if(p==='home'){
@@ -388,6 +389,7 @@ const VOICE_MISHEAR={
 const VOICE_PAGES=[
   { page:'home', label:'Ana Sayfa', keys:['ana sayfa','anasayfa','home','giriş','giris','başlangıç','baslangic'] },
   { page:'stock', label:'Bilanço Analizi', keys:['bilanço analizi','bilanco analizi','bilanço','bilanco','mali tablo'] },
+  { page:'private', label:'Özel Şirketler', keys:['özel şirketler','ozel sirketler','halka açılmamış şirketler','halka acilmamis sirketler','private companies'] },
   { page:'econ', label:'Ekonomik Takvim', keys:['ekonomik takvim','ekonomi takvimi','ekonomi takvim','takvim'] },
   { page:'top100', label:'İlk 100 Şirket', keys:['ilk 100 şirket','ilk yüz şirket','ilk 100','ilk yüz','top 100','top100'] },
   { page:'scan', label:'Hisse Tarayıcı', keys:['hisse tarayıcı','hisse tarayici','tarayıcı','tarayici','scanner','scan'] },
@@ -5075,6 +5077,209 @@ window.loadStockTwits=loadStockTwits;
 window.renderStockTwits=renderStockTwits;
 window.translateStItem=translateStItem;
 
+/* ---------- Halka açılmamış özel şirketler ---------- */
+const PRIVATE_COMPANIES=[
+  {name:'OpenAI',mark:'OAI',logo:'OPAIQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'ai',color:'#10a37f',slug:'openai',
+    tr:'Üretken yapay zekâ modelleri ve ürünleri geliştiren araştırma ve teknoloji şirketi.',
+    en:'Research and technology company developing generative AI models and products.'},
+  {name:'Waymo',mark:'W',logo:'WAYMO',country:'US',countryTr:'ABD',countryEn:'United States',sector:'mobility',color:'#4285f4',slug:'waymo',
+    tr:'Sürücüsüz ulaşım ve otonom araç teknolojileri geliştiren mobilite şirketi.',
+    en:'Mobility company developing autonomous driving and driverless transportation technology.'},
+  {name:'Stripe',mark:'S',logo:'STRPQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'fintech',color:'#635bff',slug:'stripe',
+    tr:'İnternet işletmeleri için ödeme, faturalama ve finansal altyapı sunan fintek şirketi.',
+    en:'Fintech company providing payments, billing, and financial infrastructure for internet businesses.'},
+  {name:'Revolut',mark:'R',logo:'RVOLU',country:'GB',countryTr:'Birleşik Krallık',countryEn:'United Kingdom',sector:'fintech',color:'#161b22',slug:'revolut',
+    tr:'Dijital bankacılık, ödeme, döviz ve yatırım hizmetlerini tek uygulamada sunan finans platformu.',
+    en:'Financial platform combining digital banking, payments, foreign exchange, and investing.'},
+  {name:'xAI',mark:'xAI',logo:'XAIIQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'ai',color:'#111827',slug:'xai',
+    tr:'Büyük dil modelleri ve tüketiciye yönelik yapay zekâ ürünleri geliştiren teknoloji şirketi.',
+    en:'Technology company developing large language models and consumer AI products.'},
+  {name:'Anthropic',mark:'A',logo:'ANTPQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'ai',color:'#d97757',slug:'anthropic',
+    tr:'Güvenilir, yönlendirilebilir ve kurumsal kullanıma uygun yapay zekâ sistemleri geliştiren şirket.',
+    en:'AI company building reliable, steerable systems for consumer and enterprise use.'},
+  {name:'ByteDance',mark:'BD',logo:'BYTDC',country:'CN',countryTr:'Çin',countryEn:'China',sector:'consumer',color:'#18a7b5',slug:'bytedance',
+    tr:'İçerik platformları ve öneri teknolojileri geliştiren küresel tüketici teknolojisi şirketi.',
+    en:'Global consumer technology company building content platforms and recommendation systems.'},
+  {name:'SHEIN',mark:'SH',logo:'SHNQX',country:'SG',countryTr:'Singapur',countryEn:'Singapore',sector:'ecommerce',color:'#111827',slug:'shein',
+    tr:'Dünya çapında faaliyet gösteren moda ve yaşam tarzı odaklı e-ticaret platformu.',
+    en:'Global e-commerce platform focused on fashion and lifestyle products.'},
+  {name:'Canva',mark:'C',logo:'CNVAX',country:'AU',countryTr:'Avustralya',countryEn:'Australia',sector:'software',color:'#7b2ff7',slug:'canva',
+    tr:'Bireyler ve ekipler için ortak çalışmaya uygun çevrimiçi görsel tasarım platformu.',
+    en:'Collaborative online visual design platform for individuals and teams.'},
+  {name:'Databricks',mark:'DB',logo:'DTBRK',country:'US',countryTr:'ABD',countryEn:'United States',sector:'data',color:'#ff5f46',slug:'databricks',
+    tr:'Veri mühendisliği, analitik ve yapay zekâyı birleştiren kurumsal veri platformu.',
+    en:'Enterprise data platform combining data engineering, analytics, and artificial intelligence.'}
+];
+const PRIVATE_SECTORS=['all','ai','fintech','mobility','consumer','ecommerce','software','data'];
+let PRIVATE_PAGE_INIT=false, PRIVATE_FILTER='all', PRIVATE_OPEN_SLUG=null;
+
+function privateSectorLabel(id){ return id==='all'?t('private_all'):t('private_sector_'+id); }
+function privateSearchText(v){
+  return String(v||'').toLocaleLowerCase(getLang()==='en'?'en':'tr').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+function initPrivateCompaniesPage(){
+  if(!PRIVATE_PAGE_INIT){
+    PRIVATE_PAGE_INIT=true;
+    const countries=new Set(PRIVATE_COMPANIES.map(c=>c.country));
+    const cc=document.getElementById('privateCountryCount'); if(cc) cc.textContent=String(countries.size);
+    const co=document.getElementById('privateCompanyCount'); if(co) co.textContent=String(PRIVATE_COMPANIES.length);
+  }
+  const filters=document.getElementById('privateFilters');
+  if(filters) filters.innerHTML=PRIVATE_SECTORS.map(id=>
+    `<button type="button" class="scan-chip ${id===PRIVATE_FILTER?'active':''}" onclick="setPrivateFilter('${id}')">${safeHTML(privateSectorLabel(id))}</button>`
+  ).join('');
+  renderPrivateCompanies();
+}
+function setPrivateFilter(id){
+  PRIVATE_FILTER=PRIVATE_SECTORS.includes(id)?id:'all';
+  initPrivateCompaniesPage();
+}
+function renderPrivateCompanies(){
+  const grid=document.getElementById('privateGrid'); if(!grid) return;
+  const q=privateSearchText(document.getElementById('privateSearch')?.value||'');
+  const en=getLang()==='en';
+  const list=PRIVATE_COMPANIES.filter(c=>{
+    if(PRIVATE_FILTER!=='all' && c.sector!==PRIVATE_FILTER) return false;
+    const hay=privateSearchText([c.name,c.countryTr,c.countryEn,privateSectorLabel(c.sector),c.tr,c.en].join(' '));
+    return !q || hay.includes(q);
+  });
+  if(!list.length){ grid.innerHTML=`<div class="private-empty">${safeHTML(t('private_empty'))}</div>`; return; }
+  grid.innerHTML=list.map(c=>{
+    const logo='https://tr-cdn.tipranks.com/static/v2/static/logos/PC%3A'+encodeURIComponent(c.logo)+'.svg';
+    return `<article class="private-company">
+      <div class="private-company-head">
+        <span class="private-mark" style="--private-color:${c.color}">
+          <img src="${logo}" alt="${safeHTML(c.name)} logo" loading="lazy" referrerpolicy="no-referrer" onerror="this.parentElement.classList.add('fb')">
+          <span class="private-mark-fb">${safeHTML(c.mark)}</span>
+        </span>
+        <div><h3>${safeHTML(c.name)}</h3><div class="private-meta">${safeHTML(en?c.countryEn:c.countryTr)}</div></div>
+      </div>
+      <p class="private-desc">${safeHTML(en?c.en:c.tr)}</p>
+      <div class="private-company-foot">
+        <span class="private-sector">${safeHTML(privateSectorLabel(c.sector))}</span>
+        <button type="button" class="private-link" onclick="openPrivateProfile('${c.slug}')">${safeHTML(t('private_open'))}</button>
+      </div>
+    </article>`;
+  }).join('');
+}
+function privateFocusItems(sector,en){
+  const tr={
+    ai:['Yeni model ve ürün duyuruları','Kurumsal müşteri ve ortaklık gelişmeleri','Çalışan büyümesi ve finansman turları'],
+    fintech:['Kullanıcı ve işlem hacmi büyümesi','Yeni ülke, lisans ve ürün açılımları','Finansman ve olası halka arz gelişmeleri'],
+    mobility:['Otonom sürüş testleri ve güvenlik verileri','Yeni şehir ve filo genişlemeleri','Üretici ve teknoloji ortaklıkları'],
+    consumer:['Kullanıcı büyümesi ve platform etkileşimi','Ürün ve yapay zekâ yatırımları','Düzenleyici gelişmeler'],
+    ecommerce:['Sipariş ve pazar genişlemesi','Tedarik zinciri ve lojistik yatırımları','Düzenleyici ve halka arz gelişmeleri'],
+    software:['Aktif kullanıcı ve ekip büyümesi','Yeni ürün ve yapay zekâ özellikleri','Kurumsal müşteri kazanımları'],
+    data:['Kurumsal müşteri ve bulut ortaklıkları','Yapay zekâ ve veri platformu yenilikleri','Gelir büyümesi ve halka arz hazırlıkları']
+  };
+  const enMap={
+    ai:['New model and product launches','Enterprise customers and partnerships','Workforce growth and funding rounds'],
+    fintech:['User and transaction volume growth','New markets, licenses, and products','Funding and potential IPO developments'],
+    mobility:['Autonomous driving tests and safety data','New cities and fleet expansion','Automaker and technology partnerships'],
+    consumer:['User growth and platform engagement','Product and AI investments','Regulatory developments'],
+    ecommerce:['Order growth and market expansion','Supply-chain and logistics investment','Regulatory and IPO developments'],
+    software:['Active user and team growth','New products and AI features','Enterprise customer wins'],
+    data:['Enterprise customers and cloud partnerships','AI and data-platform innovation','Revenue growth and IPO preparation']
+  };
+  return (en?enMap:tr)[sector]||(en?enMap.consumer:tr.consumer);
+}
+function privateTranslateLive(value,en){
+  let s=String(value==null?'':value);
+  if(en||!s) return s;
+  const pairs=[
+    ['President, Chairman, & Co-Founder','Başkan, Yönetim Kurulu Başkanı ve Kurucu Ortak'],
+    ['CEO & Co-Founder','CEO ve Kurucu Ortak'],['Co-Founder & CEO','Kurucu Ortak ve CEO'],
+    ['Founder & CEO','Kurucu ve CEO'],['Chief Executive Officer','CEO'],
+    ['Chief Operating Officer','Operasyon Direktörü'],['Chief Financial Officer','Finans Direktörü'],
+    ['Chief Product Officer','Ürün Direktörü'],['Chief Technology Officer','Teknoloji Direktörü'],
+    ['Chief Legal Officer','Hukuk Direktörü'],['Chief People Officer','İnsan ve Kültür Direktörü'],
+    ['Co-founder','Kurucu Ortak'],['Co-Founder','Kurucu Ortak'],
+    ['CPO','Ürün Direktörü (CPO)'],['CSO','Strateji Direktörü (CSO)'],
+    [' followers',' takipçi'],[' employees',' çalışan']
+  ];
+  pairs.forEach(([a,b])=>{ s=s.replace(a,b); });
+  return s;
+}
+async function fetchPrivateCompanyData(slug){
+  const qs='/private-company?slug='+encodeURIComponent(slug);
+  let r=await fetch(qs);
+  if(r.ok) return r.json();
+  const local=/^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+  if(local && location.port!=='8725'){
+    r=await fetch('http://'+location.hostname+':8725'+qs);
+    if(r.ok) return r.json();
+  }
+  return null;
+}
+async function openPrivateProfile(slug){
+  const c=PRIVATE_COMPANIES.find(x=>x.slug===slug); if(!c) return;
+  PRIVATE_OPEN_SLUG=slug;
+  const hero=document.getElementById('privateHeroCard');
+  const directory=document.getElementById('privateDirectoryCard');
+  const view=document.getElementById('privateDetailView');
+  if(!hero||!directory||!view) return;
+  const en=getLang()==='en';
+  const logo='https://tr-cdn.tipranks.com/static/v2/static/logos/PC%3A'+encodeURIComponent(c.logo)+'.svg';
+  const source='https://www.tipranks.com/private-companies/'+encodeURIComponent(c.slug);
+  const focus=privateFocusItems(c.sector,en).map(x=>`<div class="private-focus-item">${safeHTML(x)}</div>`).join('');
+  view.innerHTML=`
+    <button type="button" style="margin-bottom:12px" onclick="closePrivateProfile()">${safeHTML(t('private_back'))}</button>
+    <div class="card private-detail-hero">
+      <div class="private-detail-head">
+        <span class="private-mark" style="--private-color:${c.color}"><img src="${logo}" alt="${safeHTML(c.name)} logo" referrerpolicy="no-referrer" onerror="this.parentElement.classList.add('fb')"><span class="private-mark-fb">${safeHTML(c.mark)}</span></span>
+        <div><h2>${safeHTML(c.name)}</h2><div class="private-meta">${safeHTML(en?c.countryEn:c.countryTr)} · ${safeHTML(privateSectorLabel(c.sector))}</div></div>
+        <span class="private-detail-tag" style="margin-left:auto">${safeHTML(t('private_profile_tag'))}</span>
+      </div>
+    </div>
+    <div class="private-detail-grid">
+      <div class="card"><h2>${safeHTML(t('private_profile_about'))}</h2><p class="private-detail-copy">${safeHTML(en?c.en:c.tr)}</p></div>
+      <div class="card"><h2>${safeHTML(t('private_profile_focus'))}</h2><div class="private-focus-list">${focus}</div></div>
+    </div>
+    <div class="card" id="privateLiveData"><h2>${safeHTML(t('private_live_h2'))}</h2><div class="hint">${safeHTML(t('private_live_loading'))}</div></div>
+    <div class="card"><h2>${safeHTML(t('private_profile_source'))}</h2><div class="sub">${safeHTML(t('private_profile_source_sub'))}</div><a href="${source}" target="_blank" rel="noopener" class="private-link">${safeHTML(t('private_profile_source_btn'))}</a></div>`;
+  hero.classList.add('hidden'); directory.classList.add('hidden'); view.classList.remove('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
+  try{
+    const d=await fetchPrivateCompanyData(slug);
+    if(PRIVATE_OPEN_SLUG!==slug) return;
+    const live=document.getElementById('privateLiveData'); if(!live) return;
+    if(!d||!d.ok){ live.innerHTML=`<h2>${safeHTML(t('private_live_h2'))}</h2><div class="hint">${safeHTML(t('private_live_error'))}</div>`; return; }
+    const val=(x)=>x==null||x===''?t('private_not_published'):String(x);
+    const momentum=d.momentum==null?null:(en?String(d.momentum):({Positive:'Pozitif',Negative:'Negatif',Neutral:'Nötr'}[d.momentum]||String(d.momentum)));
+    const round=d.latestRound==null?null:(en?String(d.latestRound):({Investment:'Yatırım',Seed:'Tohum',Grant:'Hibe'}[d.latestRound]||String(d.latestRound)));
+    const cards=[
+      [t('private_val'),d.valuation],[t('private_raised'),d.totalRaised],[t('private_rounds'),d.fundingRounds],
+      [t('private_latest_funding'),d.latestFunding],[t('private_latest_round'),round],[t('private_post_money'),d.postMoney],
+      [t('private_employees'),d.employees],[t('private_followers'),d.followers]
+    ].map(x=>{const missing=x[1]==null||x[1]==='';return `<div class="kpi"><div class="lbl">${safeHTML(x[0])}</div><div class="val${missing?' private-missing':''}">${safeHTML(val(x[1]))}</div></div>`;}).join('');
+    const trends=[
+      [t('private_momentum'),momentum],[t('private_linkedin_trend'),d.linkedInTrend],[t('private_workforce_trend'),d.workforceTrend]
+    ].map(x=>`<div class="private-data-row"><span>${safeHTML(x[0])}</span><b>${safeHTML(privateTranslateLive(val(x[1]),en))}</b></div>`).join('');
+    const leaders=(d.executives||[]).length
+      ? d.executives.map(x=>`<div class="private-focus-item">${safeHTML(privateTranslateLive(x,en))}</div>`).join('')
+      : `<div class="hint">${safeHTML(t('private_no_data'))}</div>`;
+    const clients=(d.clients||[]).length
+      ? d.clients.map(x=>`<div class="private-focus-item">${safeHTML(x)}</div>`).join('')
+      : `<div class="hint">${safeHTML(t('private_no_data'))}</div>`;
+    live.innerHTML=`<h2>${safeHTML(t('private_live_h2'))}</h2>
+      <div class="private-live-grid">${cards}</div>
+      <div class="private-data-cols">
+        <div><h2>${safeHTML(t('private_leadership'))}</h2><div class="private-focus-list">${leaders}</div></div>
+        <div><h2>${safeHTML(t('private_trends'))}</h2>${trends}<h2 style="margin-top:18px">${safeHTML(t('private_clients'))}</h2><div class="private-focus-list">${clients}</div></div>
+      </div>
+      <div class="hint" style="margin-top:14px">${safeHTML(t('private_updated'))}</div>`;
+  }catch(_e){
+    const live=document.getElementById('privateLiveData');
+    if(live&&PRIVATE_OPEN_SLUG===slug) live.innerHTML=`<h2>${safeHTML(t('private_live_h2'))}</h2><div class="hint">${safeHTML(t('private_live_error'))}</div>`;
+  }
+}
+function closePrivateProfile(){
+  PRIVATE_OPEN_SLUG=null;
+  document.getElementById('privateHeroCard')?.classList.remove('hidden');
+  document.getElementById('privateDirectoryCard')?.classList.remove('hidden');
+  document.getElementById('privateDetailView')?.classList.add('hidden');
+}
+
 /* ---------- Dünya Haberleri sekmesi ----------
    Şirket haberleri kartıyla AYNI makine (Bing News RSS köprüsü + parseNewsXML + istemci
    tarafı Türkçe çeviri + .news kart işaretlemesi) — yalnızca sorgular şirket değil KONU
@@ -7572,6 +7777,12 @@ function refreshI18nPanels(){
     }
   }catch(_e){}
   try{ renderWatchlist(); }catch(_e){}
+  try{
+    if(typeof PRIVATE_PAGE_INIT!=='undefined' && PRIVATE_PAGE_INIT){
+      initPrivateCompaniesPage();
+      if(PRIVATE_OPEN_SLUG) openPrivateProfile(PRIVATE_OPEN_SLUG);
+    }
+  }catch(_e){}
   try{
     Object.keys(WNEWS_CACHE||{}).forEach(k=>{ try{ delete WNEWS_CACHE[k]; }catch(_e){} });
     paintWnewsTopics();
