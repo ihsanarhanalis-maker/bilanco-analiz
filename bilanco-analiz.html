@@ -125,6 +125,65 @@
   .page{display:none}
   .page.active{display:block}
 
+  /* --- Halka açılmamış özel şirketler --- */
+  .private-hero{position:relative;overflow:hidden;padding:26px;background:
+    radial-gradient(circle at 88% 12%,rgba(34,211,238,.18),transparent 34%),
+    linear-gradient(135deg,rgba(79,156,249,.16),rgba(139,92,246,.08) 58%,rgba(12,16,34,.2));
+    border-color:rgba(79,156,249,.28)}
+  .private-hero::after{content:"";position:absolute;width:220px;height:220px;border-radius:50%;
+    right:-90px;bottom:-145px;border:34px solid rgba(255,255,255,.035);pointer-events:none}
+  .private-kickers{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+  .private-kicker{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;
+    background:rgba(8,13,28,.48);border:1px solid var(--line-2);font-size:11.5px;font-weight:700;color:var(--ink-2)}
+  .private-kicker b{color:var(--accent-2);font-size:13px}
+  .private-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+  .private-search{flex:1;min-width:230px;background:var(--surface);border:1px solid var(--line-2);
+    color:var(--ink);border-radius:11px;padding:11px 14px;font-size:14px;font-weight:600}
+  .private-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(79,156,249,.14)}
+  .private-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .private-company{display:flex;flex-direction:column;gap:12px;min-height:194px;padding:17px;border-radius:14px;
+    background:linear-gradient(145deg,var(--surface),var(--surface-2));border:1px solid var(--line);
+    transition:transform .16s,border-color .16s,box-shadow .16s}
+  .private-company:hover{transform:translateY(-2px);border-color:rgba(79,156,249,.55);box-shadow:0 12px 28px rgba(0,0,0,.18)}
+  .private-company-head{display:flex;align-items:center;gap:11px}
+  .private-mark{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;flex:0 0 auto;
+    overflow:hidden;background:#fff;box-shadow:inset 0 0 0 1px rgba(15,23,42,.12),0 4px 12px rgba(0,0,0,.16)}
+  .private-mark img{display:block;width:100%;height:100%;object-fit:contain;padding:6px;box-sizing:border-box}
+  .private-mark-fb{display:none;width:100%;height:100%;align-items:center;justify-content:center;
+    background:var(--private-color,#334155);color:#fff;font-size:13px;font-weight:900;letter-spacing:.3px}
+  .private-mark.fb img{display:none}
+  .private-mark.fb .private-mark-fb{display:flex}
+  .private-company h3{margin:0;color:var(--ink);font-size:16px;line-height:1.2}
+  .private-meta{margin-top:3px;color:var(--muted);font-size:11.5px;font-weight:650}
+  .private-desc{color:var(--ink-2);font-size:12.5px;line-height:1.55;flex:1;margin:0}
+  .private-company-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding-top:11px}
+  .private-sector{color:var(--accent-2);font-size:11.5px;font-weight:800}
+  .private-link{font-size:12px;font-weight:800;color:var(--ink);text-decoration:none}
+  .private-link:hover{color:var(--accent-2)}
+  .private-empty{text-align:center;padding:34px 12px;color:var(--muted)}
+  .private-detail-hero{padding:24px;background:radial-gradient(circle at 90% 10%,rgba(79,156,249,.18),transparent 36%),var(--surface)}
+  .private-detail-head{display:flex;align-items:center;gap:15px;flex-wrap:wrap}
+  .private-detail-head .private-mark{width:64px;height:64px;border-radius:16px}
+  .private-detail-head h2{font-size:25px;margin:0 0 5px}
+  .private-detail-tag{display:inline-flex;padding:6px 10px;border-radius:999px;background:rgba(79,156,249,.12);
+    border:1px solid rgba(79,156,249,.34);color:var(--accent-2);font-size:11.5px;font-weight:800}
+  .private-detail-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(230px,.55fr);gap:14px;margin-top:14px}
+  .private-detail-copy{font-size:14px;line-height:1.75;color:var(--ink-2)}
+  .private-focus-list{display:flex;flex-direction:column;gap:9px;margin-top:12px}
+  .private-focus-item{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;border-radius:10px;
+    background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);font-size:12.5px;line-height:1.45}
+  .private-focus-item::before{content:"✓";color:var(--good);font-weight:900}
+  .private-live-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+  .private-live-grid .kpi{min-width:0}
+  .private-live-grid .kpi .val.private-missing{font-size:12px!important;line-height:1.35;color:var(--muted);font-weight:700}
+  .private-data-cols{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+  .private-data-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12.5px}
+  .private-data-row:last-child{border-bottom:0}
+  .private-data-row span{color:var(--muted)}
+  .private-data-row b{color:var(--ink);text-align:right}
+  @media(max-width:720px){.private-grid{grid-template-columns:1fr}.private-hero{padding:20px}}
+  @media(max-width:720px){.private-detail-grid,.private-data-cols{grid-template-columns:1fr}.private-live-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
   /* --- Ana sayfa: büyük arama --- */
   .hero{text-align:center;padding:52px 16px 40px}
   .hero .hero-logo{display:inline-flex;width:88px;height:88px;border-radius:22px;margin-bottom:18px;
@@ -589,6 +648,7 @@
     <button class="tab-btn" id="tabbtn-sect" onclick="switchPage('sect')" data-i18n="tab_sect">🏭 Sektör Devleri</button>
     <button class="tab-btn" id="tabbtn-takas" onclick="switchPage('takas')" data-i18n="tab_takas">🏦 Aracı Kurum Dağılımı</button>
     <button class="tab-btn" id="tabbtn-etf" onclick="switchPage('etf')" data-i18n="tab_etf">📦 ETF</button>
+    <button class="tab-btn" id="tabbtn-private" onclick="switchPage('private')" data-i18n="tab_private">🚀 Özel Şirketler</button>
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')" data-i18n="tab_wnews">🌎 Dünya Haberleri</button>
     <button class="tab-btn" id="tabbtn-st" onclick="switchPage('st')" data-i18n="tab_st">💬 hisseX</button>
   </div>
@@ -1069,6 +1129,32 @@
 
 </div>
 
+<!-- ============ SAYFA: HALKA AÇILMAMIŞ ÖZEL ŞİRKETLER ============ -->
+<div id="page-private" class="page">
+
+  <div class="card private-hero no-print" id="privateHeroCard">
+    <h2 data-i18n="private_h2">Halka Açılmamış Özel Şirketler</h2>
+    <div class="sub" data-i18n-html="private_sub">Yapay zekâdan fintek ve mobiliteye, dünyanın öne çıkan özel şirketlerini keşfet. Şirket kartları güncel profil, finansman ve haberler için <b>TipRanks Private Companies</b> sayfasına bağlanır.</div>
+    <div class="private-kickers">
+      <span class="private-kicker"><b id="privateCompanyCount">10</b> <span data-i18n="private_stat_companies">öne çıkan şirket</span></span>
+      <span class="private-kicker"><b id="privateCountryCount">6</b> <span data-i18n="private_stat_countries">ülke</span></span>
+      <span class="private-kicker"><b>TipRanks</b> <span data-i18n="private_stat_source">kaynak profilleri</span></span>
+    </div>
+  </div>
+
+  <div class="card no-print" id="privateDirectoryCard">
+    <div class="private-controls">
+      <input id="privateSearch" class="private-search" type="search" data-i18n-placeholder="ph_private" placeholder="Şirket, ülke veya sektör ara…" oninput="renderPrivateCompanies()" autocomplete="off">
+      <a class="private-link" href="https://www.tipranks.com/private-companies" target="_blank" rel="noopener" data-i18n="private_center">TipRanks merkezini aç →</a>
+    </div>
+    <div class="toolbar" id="privateFilters" style="margin-bottom:16px;gap:8px;flex-wrap:wrap"></div>
+    <div id="privateGrid" class="private-grid"></div>
+  </div>
+
+  <div id="privateDetailView" class="hidden"></div>
+
+</div>
+
 <!-- ============ SAYFA 6: DÜNYA HABERLERİ ============ -->
 <div id="page-wnews" class="page">
 
@@ -1125,8 +1211,8 @@
 </div>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=162"></script>
-<script src="app.js?v=162"></script>
+<script src="i18n.js?v=174"></script>
+<script src="app.js?v=174"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">
