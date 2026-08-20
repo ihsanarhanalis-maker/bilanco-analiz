@@ -19,7 +19,7 @@ const MIME = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; chars
                '.png':'image/png', '.svg':'image/svg+xml', '.ico':'image/x-icon',
                '.webp':'image/webp' };
 const PUBLIC_FILES = new Set([
-  'bilanco-analiz.html', 'app.js', 'i18n.js', 'cik-map.js', 'sw.js', 'manifest.webmanifest'
+  'bilanco-analiz.html', 'apple-design.css', 'app.js', 'i18n.js', 'cik-map.js', 'sw.js', 'manifest.webmanifest'
 ]);
 const isPublicStaticFile = rel => PUBLIC_FILES.has(rel) || rel.startsWith('icons/');
 

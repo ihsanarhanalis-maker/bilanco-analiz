@@ -5080,33 +5080,43 @@ window.translateStItem=translateStItem;
 /* ---------- Halka açılmamış özel şirketler ---------- */
 const PRIVATE_COMPANIES=[
   {name:'OpenAI',mark:'OAI',logo:'OPAIQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'ai',color:'#10a37f',slug:'openai',
+    ipoTr:'2027 (bildirilen hedef)',ipoEn:'2027 (reported window)',
     tr:'Üretken yapay zekâ modelleri ve ürünleri geliştiren araştırma ve teknoloji şirketi.',
     en:'Research and technology company developing generative AI models and products.'},
   {name:'Waymo',mark:'W',logo:'WAYMO',country:'US',countryTr:'ABD',countryEn:'United States',sector:'mobility',color:'#4285f4',slug:'waymo',
+    ipoTr:'Resmî tarih açıklanmadı',ipoEn:'No official date announced',
     tr:'Sürücüsüz ulaşım ve otonom araç teknolojileri geliştiren mobilite şirketi.',
     en:'Mobility company developing autonomous driving and driverless transportation technology.'},
   {name:'Stripe',mark:'S',logo:'STRPQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'fintech',color:'#635bff',slug:'stripe',
+    ipoTr:'Belirsiz / planlar askıda',ipoEn:'Undetermined / plans on hold',
     tr:'İnternet işletmeleri için ödeme, faturalama ve finansal altyapı sunan fintek şirketi.',
     en:'Fintech company providing payments, billing, and financial infrastructure for internet businesses.'},
   {name:'Revolut',mark:'R',logo:'RVOLU',country:'GB',countryTr:'Birleşik Krallık',countryEn:'United Kingdom',sector:'fintech',color:'#161b22',slug:'revolut',
+    ipoTr:'2028 veya sonrası',ipoEn:'2028 or later',
     tr:'Dijital bankacılık, ödeme, döviz ve yatırım hizmetlerini tek uygulamada sunan finans platformu.',
     en:'Financial platform combining digital banking, payments, foreign exchange, and investing.'},
   {name:'xAI',mark:'xAI',logo:'XAIIQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'ai',color:'#111827',slug:'xai',
+    ipoTr:'Ayrı halka arz tarihi yok',ipoEn:'No separate IPO date',
     tr:'Büyük dil modelleri ve tüketiciye yönelik yapay zekâ ürünleri geliştiren teknoloji şirketi.',
     en:'Technology company developing large language models and consumer AI products.'},
   {name:'Anthropic',mark:'A',logo:'ANTPQ',country:'US',countryTr:'ABD',countryEn:'United States',sector:'ai',color:'#d97757',slug:'anthropic',
+    ipoTr:'2026 sonbaharı (tahmini)',ipoEn:'Autumn 2026 (estimated)',
     tr:'Güvenilir, yönlendirilebilir ve kurumsal kullanıma uygun yapay zekâ sistemleri geliştiren şirket.',
     en:'AI company building reliable, steerable systems for consumer and enterprise use.'},
   {name:'ByteDance',mark:'BD',logo:'BYTDC',country:'CN',countryTr:'Çin',countryEn:'China',sector:'consumer',color:'#18a7b5',slug:'bytedance',
+    ipoTr:'Resmî tarih açıklanmadı',ipoEn:'No official date announced',
     tr:'İçerik platformları ve öneri teknolojileri geliştiren küresel tüketici teknolojisi şirketi.',
     en:'Global consumer technology company building content platforms and recommendation systems.'},
   {name:'SHEIN',mark:'SH',logo:'SHNQX',country:'SG',countryTr:'Singapur',countryEn:'Singapore',sector:'ecommerce',color:'#111827',slug:'shein',
+    ipoTr:'2026 · Hong Kong (planlanan)',ipoEn:'2026 · Hong Kong (planned)',
     tr:'Dünya çapında faaliyet gösteren moda ve yaşam tarzı odaklı e-ticaret platformu.',
     en:'Global e-commerce platform focused on fashion and lifestyle products.'},
   {name:'Canva',mark:'C',logo:'CNVAX',country:'AU',countryTr:'Avustralya',countryEn:'Australia',sector:'software',color:'#7b2ff7',slug:'canva',
+    ipoTr:'2027 veya sonrası (tahmini)',ipoEn:'2027 or later (estimated)',
     tr:'Bireyler ve ekipler için ortak çalışmaya uygun çevrimiçi görsel tasarım platformu.',
     en:'Collaborative online visual design platform for individuals and teams.'},
   {name:'Databricks',mark:'DB',logo:'DTBRK',country:'US',countryTr:'ABD',countryEn:'United States',sector:'data',color:'#ff5f46',slug:'databricks',
+    ipoTr:'2027 veya sonrası (tahmini)',ipoEn:'2027 or later (estimated)',
     tr:'Veri mühendisliği, analitik ve yapay zekâyı birleştiren kurumsal veri platformu.',
     en:'Enterprise data platform combining data engineering, analytics, and artificial intelligence.'}
 ];
@@ -5140,7 +5150,7 @@ function renderPrivateCompanies(){
   const en=getLang()==='en';
   const list=PRIVATE_COMPANIES.filter(c=>{
     if(PRIVATE_FILTER!=='all' && c.sector!==PRIVATE_FILTER) return false;
-    const hay=privateSearchText([c.name,c.countryTr,c.countryEn,privateSectorLabel(c.sector),c.tr,c.en].join(' '));
+    const hay=privateSearchText([c.name,c.countryTr,c.countryEn,privateSectorLabel(c.sector),c.tr,c.en,c.ipoTr,c.ipoEn].join(' '));
     return !q || hay.includes(q);
   });
   if(!list.length){ grid.innerHTML=`<div class="private-empty">${safeHTML(t('private_empty'))}</div>`; return; }
@@ -5155,6 +5165,7 @@ function renderPrivateCompanies(){
         <div><h3>${safeHTML(c.name)}</h3><div class="private-meta">${safeHTML(en?c.countryEn:c.countryTr)}</div></div>
       </div>
       <p class="private-desc">${safeHTML(en?c.en:c.tr)}</p>
+      <div class="private-ipo"><span>${safeHTML(t('private_ipo_label'))}</span><b>${safeHTML(en?c.ipoEn:c.ipoTr)}</b></div>
       <div class="private-company-foot">
         <span class="private-sector">${safeHTML(privateSectorLabel(c.sector))}</span>
         <button type="button" class="private-link" onclick="openPrivateProfile('${c.slug}')">${safeHTML(t('private_open'))}</button>
@@ -5228,7 +5239,7 @@ async function openPrivateProfile(slug){
       <div class="private-detail-head">
         <span class="private-mark" style="--private-color:${c.color}"><img src="${logo}" alt="${safeHTML(c.name)} logo" referrerpolicy="no-referrer" onerror="this.parentElement.classList.add('fb')"><span class="private-mark-fb">${safeHTML(c.mark)}</span></span>
         <div><h2>${safeHTML(c.name)}</h2><div class="private-meta">${safeHTML(en?c.countryEn:c.countryTr)} · ${safeHTML(privateSectorLabel(c.sector))}</div></div>
-        <span class="private-detail-tag" style="margin-left:auto">${safeHTML(t('private_profile_tag'))}</span>
+        <span class="private-detail-tag" style="margin-left:auto">${safeHTML(t('private_ipo_label'))}: ${safeHTML(en?c.ipoEn:c.ipoTr)}</span>
       </div>
     </div>
     <div class="private-detail-grid">

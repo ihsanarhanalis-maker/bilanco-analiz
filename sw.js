@@ -1,9 +1,10 @@
 ﻿/* Bilan├ğo Analiz ÔÇö PWA service worker
    Statik kabu─şu ├Ânbelle─şe al─▒r; API k├Âpr├╝leri (/price, /bist, /secÔÇĞ) her zaman a─şdan gelir. */
-const CACHE = 'bilanco-shell-v174';
+const CACHE = 'bilanco-shell-v179';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
+  '/apple-design.css',
   '/app.js',
   '/i18n.js',
   '/cik-map.js',

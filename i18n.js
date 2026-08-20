@@ -8,6 +8,7 @@ let _lang='tr';
 const I18N={
 tr:{
   brand:'Bilanço Analiz',
+  skip_main:'Ana içeriğe geç',
   install:'📲 Yükle',
   home_title:'Ana Sayfa',
   tape_loading:'Piyasa verisi yükleniyor…',
@@ -31,6 +32,8 @@ tr:{
   private_center:'TipRanks merkezini aç →',
   private_all:'Tümü',
   private_open:'Profili görüntüle →',
+  private_ipo_label:'Tahmini halka arz',
+  private_ipo_note:'Tahmini tarihler kamuya açık açıklamalar ve haber akışına dayanır; resmî teklif tarihi değildir. Son güncelleme: Ağustos 2026.',
   private_empty:'Aramanızla eşleşen özel şirket bulunamadı.',
   private_back:'← Özel şirketlere dön',
   private_profile_tag:'Halka açılmamış şirket',
@@ -803,6 +806,7 @@ st_good:'İyi',
 },
 en:{
   brand:'Balance Sheet Analysis',
+  skip_main:'Skip to main content',
   install:'📲 Install',
   home_title:'Home',
   tape_loading:'Loading market data…',
@@ -826,6 +830,8 @@ en:{
   private_center:'Open TipRanks center →',
   private_all:'All',
   private_open:'View profile →',
+  private_ipo_label:'Estimated IPO',
+  private_ipo_note:'Estimated dates are based on public statements and reporting; they are not official offering dates. Last updated: August 2026.',
   private_empty:'No private companies match your search.',
   private_back:'← Back to private companies',
   private_profile_tag:'Privately held company',
