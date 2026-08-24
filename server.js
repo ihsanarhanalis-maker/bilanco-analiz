@@ -2141,11 +2141,34 @@ async function lunaAnalyzeHandler(req, res){
     lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
   }
 }
+async function lunaChatHandler(req, res){
+  if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
+  if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
+  if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
+  try{
+    const body=await readJsonBody(req,64*1024), lang=body&&body.lang==='en'?'en':'tr';
+    const raw=Array.isArray(body&&body.messages)?body.messages.slice(-12):[];
+    const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
+    if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
+    const instructions=lang==='tr'
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı yardımcı yapay zekâsın. Kullanıcının finans, ekonomi, şirketler ve genel konulardaki sorularına sade, samimi ve doğru Türkçe ile yanıt ver. Bilmediğin veya güncel veri gerektiren konularda bunu açıkça belirt; canlı veriye sahipmiş gibi davranma. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı mümkün olduğunca kısa ve anlaşılır tut; gerektiğinde kısa maddeler kullan.'
+      : 'You are Luna, the helpful AI inside the Balance Sheet Analysis app. Answer questions about finance, economics, companies, and general topics in clear, friendly English. Clearly say when something is unknown or needs current data; never pretend to have live data. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep answers concise and use short bullets when useful.';
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1200,instructions,input:messages});
+    const answer=responseOutputText(out).trim();
+    if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
+    lunaJson(res,200,{ok:true,answer});
+  }catch(e){
+    const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
+    console.error('[Luna Chat]',e.message||e);
+    lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
+  }
+}
 
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
 
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
+  if (urlPath === '/ai/chat') { lunaChatHandler(req,res); return; }
 
   // --- TipRanks özel şirket profili (güncel değerleme, finansman, ekip ve momentum) ---
   if (urlPath === '/private-company') {

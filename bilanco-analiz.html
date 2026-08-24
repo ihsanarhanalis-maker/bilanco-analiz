@@ -621,7 +621,7 @@
     a{color:#1763b8 !important;text-decoration:none}
   }
 </style>
-<link rel="stylesheet" href="/apple-design.css?v=180">
+<link rel="stylesheet" href="/apple-design.css?v=181">
 </head>
 <body>
 <a class="skip-link" href="#mainContent" data-i18n="skip_main">Ana içeriğe geç</a>
@@ -659,6 +659,7 @@
     <button class="tab-btn" id="tabbtn-private" onclick="switchPage('private')" data-i18n="tab_private">🚀 Özel Şirketler</button>
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')" data-i18n="tab_wnews">🌎 Dünya Haberleri</button>
     <button class="tab-btn" id="tabbtn-st" onclick="switchPage('st')" data-i18n="tab_st">💬 hisseX</button>
+    <button class="tab-btn" id="tabbtn-ai" onclick="switchPage('ai')" data-i18n="tab_ai">✦ Luna AI</button>
   </div>
 </nav>
 
@@ -991,6 +992,39 @@
 </div>
 
 <!-- ============ SAYFA 4: İLK 100 ŞİRKET ============ -->
+<!-- ============ LUNA AI ============ -->
+<div id="page-ai" class="page">
+  <section class="ai-chat-shell no-print" aria-labelledby="aiChatTitle">
+    <header class="ai-chat-head">
+      <div class="ai-orb" aria-hidden="true">✦</div>
+      <div>
+        <div class="ai-kicker" data-i18n="ai_kicker">Bilanço Analiz yapay zekâsı</div>
+        <h2 id="aiChatTitle" data-i18n="ai_h2">Luna AI'a Sor</h2>
+        <p data-i18n="ai_sub">Finans, şirketler, ekonomi veya merak ettiğin herhangi bir konuda Luna ile konuş.</p>
+      </div>
+      <button type="button" class="ai-clear" onclick="clearLunaChat()" data-i18n="ai_clear">Yeni sohbet</button>
+    </header>
+    <div id="aiChatMessages" class="ai-chat-messages" aria-live="polite">
+      <div id="aiChatEmpty" class="ai-empty">
+        <div class="ai-empty-mark" aria-hidden="true">✦</div>
+        <h3 data-i18n="ai_empty_h">Bugün neyi merak ediyorsun?</h3>
+        <p data-i18n="ai_empty_p">Sorunu yaz veya aşağıdaki örneklerden biriyle başla.</p>
+        <div class="ai-suggestions">
+          <button type="button" onclick="askLunaSuggestion(this)" data-i18n="ai_s1">F/K oranı nasıl yorumlanır?</button>
+          <button type="button" onclick="askLunaSuggestion(this)" data-i18n="ai_s2">Faiz artışı şirketleri nasıl etkiler?</button>
+          <button type="button" onclick="askLunaSuggestion(this)" data-i18n="ai_s3">Bilanço okumaya nereden başlamalıyım?</button>
+          <button type="button" onclick="askLunaSuggestion(this)" data-i18n="ai_s4">Serbest nakit akışı neden önemlidir?</button>
+        </div>
+      </div>
+    </div>
+    <form class="ai-composer" onsubmit="sendLunaChat(event)">
+      <textarea id="aiChatInput" rows="1" maxlength="4000" data-i18n-placeholder="ai_ph" placeholder="Luna'ya bir şey sor…" onkeydown="lunaChatKeydown(event)"></textarea>
+      <button type="submit" id="aiChatSend" class="primary" data-i18n="ai_send">Gönder ↑</button>
+    </form>
+    <div class="ai-chat-note" data-i18n="ai_note">Luna hata yapabilir. Finansal kararlar vermeden önce bilgileri doğrula.</div>
+  </section>
+</div>
+
 <div id="page-top100" class="page">
 
   <div class="card no-print" style="margin-bottom:16px">
@@ -1233,8 +1267,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=180"></script>
-<script src="app.js?v=180"></script>
+<script src="i18n.js?v=181"></script>
+<script src="app.js?v=181"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

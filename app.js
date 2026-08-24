@@ -1,6 +1,6 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','takas','econ','top100','scan','sect','etf','private','wnews','st'].forEach(x=>{
+  ['home','stock','takas','econ','top100','scan','sect','etf','private','wnews','st','ai'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
@@ -5577,6 +5577,63 @@ function updateMarketSpecificLabels(){
   if(absHead) absHead.textContent=tf('th_chg_abs_cur',{c:CURSYM||CUR||t('amount')});
   const chartHint=document.querySelector('#chartBody .chart-source-hint');
   if(chartHint) chartHint.textContent=t(marketLabelKey('chart_marker'));
+}
+
+/* ---------- Luna AI serbest sohbet ---------- */
+const LUNA_CHAT_MESSAGES=[];
+let LUNA_CHAT_BUSY=false;
+function renderLunaChat(){
+  const box=document.getElementById('aiChatMessages'); if(!box) return;
+  const empty=document.getElementById('aiChatEmpty');
+  box.querySelectorAll('.ai-message').forEach(x=>x.remove());
+  if(empty) empty.classList.toggle('hidden',LUNA_CHAT_MESSAGES.length>0);
+  LUNA_CHAT_MESSAGES.forEach(m=>{
+    const row=document.createElement('div'); row.className='ai-message '+m.role;
+    const bubble=document.createElement('div'); bubble.className='ai-bubble';
+    bubble.textContent=m.content; row.appendChild(bubble); box.appendChild(row);
+  });
+  if(LUNA_CHAT_BUSY){
+    const row=document.createElement('div'); row.className='ai-message assistant ai-thinking';
+    const bubble=document.createElement('div'); bubble.className='ai-bubble'; bubble.textContent=t('ai_thinking');
+    row.appendChild(bubble); box.appendChild(row);
+  }
+  box.scrollTop=box.scrollHeight;
+}
+function clearLunaChat(){
+  if(LUNA_CHAT_BUSY) return;
+  LUNA_CHAT_MESSAGES.length=0; renderLunaChat();
+  const input=document.getElementById('aiChatInput'); if(input){ input.value=''; input.focus(); }
+}
+function askLunaSuggestion(btn){
+  const input=document.getElementById('aiChatInput'); if(!input) return;
+  input.value=btn.textContent.trim(); sendLunaChat();
+}
+function lunaChatKeydown(e){
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendLunaChat(e); }
+}
+async function sendLunaChat(e){
+  if(e&&e.preventDefault) e.preventDefault();
+  const input=document.getElementById('aiChatInput'), btn=document.getElementById('aiChatSend');
+  const question=String(input&&input.value||'').trim();
+  if(!question || LUNA_CHAT_BUSY) return;
+  LUNA_CHAT_MESSAGES.push({role:'user',content:question});
+  if(input) input.value=''; LUNA_CHAT_BUSY=true; if(btn) btn.disabled=true; renderLunaChat();
+  try{
+    const history=LUNA_CHAT_MESSAGES.slice(-12);
+    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:history})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok){
+      if(j.error==='luna_not_configured') throw new Error('not_configured');
+      if(j.error==='rate_limit') throw new Error('rate_limit');
+      throw new Error('unavailable');
+    }
+    LUNA_CHAT_MESSAGES.push({role:'assistant',content:String(j.answer||t('ai_error'))});
+  }catch(err){
+    const key=err.message==='not_configured'?'luna_not_configured':(err.message==='rate_limit'?'luna_rate':'ai_error');
+    LUNA_CHAT_MESSAGES.push({role:'assistant',content:t(key)});
+  }finally{
+    LUNA_CHAT_BUSY=false; if(btn) btn.disabled=false; renderLunaChat(); if(input) input.focus();
+  }
 }
 
 /* ---------- Luna: açık finansal tabloları sunucu üzerinden yorumla ---------- */
