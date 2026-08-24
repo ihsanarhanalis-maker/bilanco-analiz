@@ -2108,6 +2108,19 @@ function responseOutputText(j){
   for(const item of (j.output||[])) for(const part of (item.content||[])) if(part.type==='output_text' && part.text) return part.text;
   return '';
 }
+function responseWebSources(j){
+  const found=[];
+  for(const item of (j.output||[])){
+    const actionSources=item&&item.action&&Array.isArray(item.action.sources)?item.action.sources:[];
+    actionSources.forEach(s=>{ if(s&&s.url) found.push({title:String(s.title||s.url),url:String(s.url)}); });
+    for(const part of (item.content||[])) for(const a of (part.annotations||[])){
+      const c=a&&a.url_citation?a.url_citation:a;
+      if(c&&c.url) found.push({title:String(c.title||c.url),url:String(c.url)});
+    }
+  }
+  const seen=new Set();
+  return found.filter(s=>/^https:\/\//i.test(s.url)&&!seen.has(s.url)&&(seen.add(s.url),true)).slice(0,6);
+}
 async function lunaAnalyzeHandler(req, res){
   if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
   if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
@@ -2209,6 +2222,7 @@ async function lunaFinancialSnapshot(symbol,period){
   return {ok:true,source:'Yahoo Finance via Bilanço Analiz',fetchedAt:new Date().toISOString(),symbol:sym,period:pfx,series};
 }
 const LUNA_APP_TOOLS=[
+  {type:'web_search'},
   {type:'function',name:'get_market_snapshot',description:'Get current or latest available stock/ETF/index price, returns, volume, RSI, MACD, moving averages and 52-week range from the Bilanço Analiz market data service. Use whenever a user asks about a current price, performance or technical analysis.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible ticker, for example NVDA, THYAO.IS, BTC-USD or ^GSPC'}},required:['symbol']}},
   {type:'function',name:'get_financial_snapshot',description:'Get recent income statement, balance sheet and cash-flow series from the Bilanço Analiz financial data service. Use for company financial, profitability, debt, cash flow or balance sheet questions.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible company ticker'},period:{type:'string',enum:['quarterly','annual']}},required:['symbol','period']}}
 ];
@@ -2228,9 +2242,9 @@ async function lunaChatHandler(req, res){
     const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
     if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
     const instructions=lang==='tr'
-      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı yardımcı yapay zekâsın. Kullanıcının finans, ekonomi, şirketler ve genel konulardaki sorularına sade, samimi ve doğru Türkçe ile yanıt ver. Güncel fiyat, teknik analiz veya finansal tablo sorularında tahmin yürütme; mutlaka uygulamanın uygun veri aracını çağır. Araç verisinin kaynağını ve çekilme zamanını belirt, piyasa kapalıysa son mevcut fiyat olduğunu söyle. Araç sonuç vermiyorsa bunu açıkça belirt. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı mümkün olduğunca kısa ve anlaşılır tut; gerektiğinde kısa maddeler kullan.'
-      : 'You are Luna, the helpful AI inside the Balance Sheet Analysis app. Answer questions about finance, economics, companies, and general topics in clear, friendly English. For current price, technical analysis, or financial statement questions, never guess: call the appropriate app data tool. State the tool data source and retrieval time, and identify the last available price when the market is closed. Clearly report unavailable data. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep answers concise and use short bullets when useful.';
-    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1200,instructions,tools:LUNA_APP_TOOLS,tool_choice:'auto'};
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı yardımcı yapay zekâsın. Kullanıcının finans, ekonomi, şirketler ve genel konulardaki sorularına sade, samimi ve doğru Türkçe ile yanıt ver. Güncel fiyat, teknik analiz veya finansal tablo sorularında tahmin yürütme; mutlaka uygulamanın uygun yapılandırılmış veri aracını çağır. Güncel haber, olay veya genel internet araştırması gerektiğinde web aramasını kullan. Yapılandırılmış piyasa verisi mevcutken fiyat için web sonucunu tercih etme. Araç verisinin kaynağını ve çekilme zamanını belirt, piyasa kapalıysa son mevcut fiyat olduğunu söyle. Araç sonuç vermiyorsa bunu açıkça belirt. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı mümkün olduğunca kısa ve anlaşılır tut; gerektiğinde kısa maddeler kullan.'
+      : 'You are Luna, the helpful AI inside the Balance Sheet Analysis app. Answer questions about finance, economics, companies, and general topics in clear, friendly English. For current price, technical analysis, or financial statement questions, never guess: call the appropriate structured app data tool. Use web search for current news, events, or general internet research. Prefer structured market data over web results for prices when available. State the tool data source and retrieval time, and identify the last available price when the market is closed. Clearly report unavailable data. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep answers concise and use short bullets when useful.';
+    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1200,instructions,tools:LUNA_APP_TOOLS,tool_choice:'auto',include:['web_search_call.action.sources']};
     let conversationInput=messages;
     let out=await openAiResponse({...base,input:conversationInput});
     for(let round=0;round<2;round++){
@@ -2242,7 +2256,7 @@ async function lunaChatHandler(req, res){
     }
     const answer=responseOutputText(out).trim();
     if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
-    lunaJson(res,200,{ok:true,answer});
+    lunaJson(res,200,{ok:true,answer,sources:responseWebSources(out)});
   }catch(e){
     const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
     console.error('[Luna Chat]',e.message||e);

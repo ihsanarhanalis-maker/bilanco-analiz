@@ -5590,7 +5590,14 @@ function renderLunaChat(){
   LUNA_CHAT_MESSAGES.forEach(m=>{
     const row=document.createElement('div'); row.className='ai-message '+m.role;
     const bubble=document.createElement('div'); bubble.className='ai-bubble';
-    bubble.textContent=m.content; row.appendChild(bubble); box.appendChild(row);
+    bubble.textContent=m.content;
+    if(Array.isArray(m.sources)&&m.sources.length){
+      const sources=document.createElement('div'); sources.className='ai-sources';
+      const label=document.createElement('strong'); label.textContent=t('ai_sources'); sources.appendChild(label);
+      m.sources.forEach(s=>{ const a=document.createElement('a'); a.href=s.url; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=s.title||s.url; sources.appendChild(a); });
+      bubble.appendChild(sources);
+    }
+    row.appendChild(bubble); box.appendChild(row);
   });
   if(LUNA_CHAT_BUSY){
     const row=document.createElement('div'); row.className='ai-message assistant ai-thinking';
@@ -5627,7 +5634,7 @@ async function sendLunaChat(e){
       if(j.error==='rate_limit') throw new Error('rate_limit');
       throw new Error('unavailable');
     }
-    LUNA_CHAT_MESSAGES.push({role:'assistant',content:String(j.answer||t('ai_error'))});
+    LUNA_CHAT_MESSAGES.push({role:'assistant',content:String(j.answer||t('ai_error')),sources:Array.isArray(j.sources)?j.sources:[]});
   }catch(err){
     const key=err.message==='not_configured'?'luna_not_configured':(err.message==='rate_limit'?'luna_rate':'ai_error');
     LUNA_CHAT_MESSAGES.push({role:'assistant',content:t(key)});
