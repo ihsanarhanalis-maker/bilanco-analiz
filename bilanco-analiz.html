@@ -621,7 +621,7 @@
     a{color:#1763b8 !important;text-decoration:none}
   }
 </style>
-<link rel="stylesheet" href="/apple-design.css?v=179">
+<link rel="stylesheet" href="/apple-design.css?v=180">
 </head>
 <body>
 <a class="skip-link" href="#mainContent" data-i18n="skip_main">Ana içeriğe geç</a>
@@ -824,6 +824,19 @@
       <h2 data-i18n="card_summary">Özet</h2>
       <div id="balcheck" style="margin-bottom:14px"></div>
       <div class="grid" id="kpis"></div>
+    </div>
+
+    <div class="card hidden luna-card" id="lunaCard">
+      <div class="luna-head">
+        <div>
+          <h2 data-i18n="luna_h2">Luna Finansal Yorum</h2>
+          <div class="sub" data-i18n="luna_sub">Açık hissenin bilançosunu, gelir tablosunu, kârlılığını ve nakit akışını yapay zekâ ile birlikte değerlendir.</div>
+        </div>
+        <button type="button" class="primary luna-button no-print" id="lunaAnalyzeBtn" onclick="analyzeWithLuna()" data-i18n="luna_btn">✦ Luna ile Yorumla</button>
+      </div>
+      <div id="lunaStatus" class="hint luna-status" data-i18n="luna_ready">Yorum hazır olduğunda burada görünecek.</div>
+      <div id="lunaBody" class="hidden"></div>
+      <div class="luna-note" data-i18n="luna_note">Eğitim amaçlıdır; yatırım tavsiyesi değildir. Yorum, ekranda görünen finansal dönemlere dayanır.</div>
     </div>
 
     <div class="card hidden" id="valCard">
@@ -1220,8 +1233,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=175"></script>
-<script src="app.js?v=175"></script>
+<script src="i18n.js?v=180"></script>
+<script src="app.js?v=180"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

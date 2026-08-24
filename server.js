@@ -7,6 +7,7 @@ const https = require('https');
 const zlib  = require('zlib');
 const fs    = require('fs');
 const path  = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8723;  // internette sunucu portu atar; yerelde 8723
 const ROOT = __dirname;
@@ -2047,8 +2048,104 @@ function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
   };
 }
 
+/* Luna finansal yorum servisi. API anahtarı yalnızca sunucudaki OPENAI_API_KEY
+   ortam değişkeninden okunur; tarayıcıya hiçbir zaman gönderilmez. */
+const LUNA_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+const LUNA_CACHE = new Map();
+const LUNA_RATE = new Map();
+const LUNA_CACHE_MS = 15 * 60 * 1000;
+const LUNA_RATE_MS = 60 * 60 * 1000;
+const LUNA_RATE_MAX = 20;
+
+function lunaJson(res, status, obj){
+  res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+  res.end(JSON.stringify(obj));
+}
+function readJsonBody(req, maxBytes){
+  return new Promise((resolve, reject) => {
+    let body='', size=0, done=false;
+    req.on('data', chunk => {
+      if(done) return;
+      size += chunk.length;
+      if(size > maxBytes){ done=true; reject(new Error('payload_too_large')); return; }
+      body += chunk;
+    });
+    req.on('end', () => {
+      if(done) return;
+      try{ resolve(JSON.parse(body || '{}')); }catch(_e){ reject(new Error('bad_json')); }
+    });
+    req.on('error', reject);
+  });
+}
+function lunaRateAllowed(req){
+  const forwarded=String(req.headers['x-forwarded-for']||'').split(',')[0].trim();
+  const key=forwarded || req.socket.remoteAddress || 'local';
+  const now=Date.now(), item=LUNA_RATE.get(key);
+  if(!item || now-item.start >= LUNA_RATE_MS){ LUNA_RATE.set(key,{start:now,count:1}); return true; }
+  if(item.count >= LUNA_RATE_MAX) return false;
+  item.count++;
+  return true;
+}
+function openAiResponse(payload){
+  return new Promise((resolve, reject) => {
+    const raw=JSON.stringify(payload);
+    const rq=https.request({hostname:'api.openai.com',path:'/v1/responses',method:'POST',headers:{
+      'Authorization':'Bearer '+process.env.OPENAI_API_KEY,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)
+    },timeout:45000}, pr => {
+      let body='';
+      pr.on('data', c => { if(body.length < 2000000) body += c; });
+      pr.on('end', () => {
+        let parsed=null; try{ parsed=JSON.parse(body); }catch(_e){}
+        if(pr.statusCode<200 || pr.statusCode>=300){ const e=new Error((parsed&&parsed.error&&parsed.error.message)||('openai_'+pr.statusCode)); e.status=pr.statusCode; reject(e); return; }
+        resolve(parsed||{});
+      });
+    });
+    rq.on('timeout', () => rq.destroy(new Error('openai_timeout')));
+    rq.on('error', reject); rq.end(raw);
+  });
+}
+function responseOutputText(j){
+  for(const item of (j.output||[])) for(const part of (item.content||[])) if(part.type==='output_text' && part.text) return part.text;
+  return '';
+}
+async function lunaAnalyzeHandler(req, res){
+  if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
+  if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
+  if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
+  try{
+    const body=await readJsonBody(req,100*1024), snapshot=body&&body.snapshot;
+    const lang=body&&body.lang==='en'?'en':'tr';
+    if(!snapshot || !/^[A-Z0-9.\-]{1,24}$/.test(String(snapshot.ticker||''))){ lunaJson(res,400,{ok:false,error:'bad_snapshot'}); return; }
+    const input=JSON.stringify(snapshot);
+    const cacheKey=crypto.createHash('sha256').update(lang+'\n'+input).digest('hex');
+    const cached=LUNA_CACHE.get(cacheKey);
+    if(cached && Date.now()-cached.at<LUNA_CACHE_MS){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis}); return; }
+    const instructions=lang==='tr'
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı finansal analiz asistanısın. Yalnızca verilen finansal tablo verisini kullan. Rakam uydurma. Dönemleri ve para birimini belirt. Güçlü yönleri ve riskleri dengeli, sade Türkçe ile açıkla. Kesin al/sat tavsiyesi, hedef fiyat veya geleceğe dair garanti verme. Eksik veriyi açıkça söyle. Yanıt eğitim amaçlıdır.'
+      : 'You are Luna, the financial analysis assistant inside the Balance Sheet Analysis app. Use only the supplied financial statement data. Never invent figures. State periods and currency. Explain strengths and risks in clear, balanced English. Do not give definitive buy/sell advice, price targets, or guarantees. Call out missing data. The response is educational.';
+    const schema={type:'object',additionalProperties:false,properties:{
+      summary:{type:'string'},strengths:{type:'array',items:{type:'string'},maxItems:4},risks:{type:'array',items:{type:'string'},maxItems:4},
+      profitability:{type:'string'},cashFlow:{type:'string'},watchNext:{type:'array',items:{type:'string'},maxItems:3},disclaimer:{type:'string'}
+    },required:['summary','strengths','risks','profitability','cashFlow','watchNext','disclaimer']};
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'low'},max_output_tokens:1200,instructions,
+      input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
+      text:{format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
+    let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
+    if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
+    LUNA_CACHE.set(cacheKey,{at:Date.now(),analysis});
+    if(LUNA_CACHE.size>200) [...LUNA_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,50).forEach(([k])=>LUNA_CACHE.delete(k));
+    lunaJson(res,200,{ok:true,analysis});
+  }catch(e){
+    const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
+    console.error('[Luna]', e.message||e);
+    lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
+  }
+}
+
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
 
   // --- TipRanks özel şirket profili (güncel değerleme, finansman, ekip ve momentum) ---
   if (urlPath === '/private-company') {
