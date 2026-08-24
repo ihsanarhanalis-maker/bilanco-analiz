@@ -2121,13 +2121,13 @@ async function lunaAnalyzeHandler(req, res){
     const cached=LUNA_CACHE.get(cacheKey);
     if(cached && Date.now()-cached.at<LUNA_CACHE_MS){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis}); return; }
     const instructions=lang==='tr'
-      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı finansal analiz asistanısın. Yalnızca verilen finansal tablo verisini kullan. Rakam uydurma. Dönemleri ve para birimini belirt. Güçlü yönleri ve riskleri dengeli, sade Türkçe ile açıkla. Kesin al/sat tavsiyesi, hedef fiyat veya geleceğe dair garanti verme. Eksik veriyi açıkça söyle. Yanıt eğitim amaçlıdır.'
-      : 'You are Luna, the financial analysis assistant inside the Balance Sheet Analysis app. Use only the supplied financial statement data. Never invent figures. State periods and currency. Explain strengths and risks in clear, balanced English. Do not give definitive buy/sell advice, price targets, or guarantees. Call out missing data. The response is educational.';
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı finansal analiz asistanısın. Yalnızca verilen finansal tablo verisini kullan. Rakam uydurma. Dönemleri ve para birimini belirt. Güçlü yönleri ve riskleri dengeli, sade Türkçe ile açıkla. Kesin al/sat tavsiyesi, hedef fiyat veya geleceğe dair garanti verme. Eksik veriyi açıkça söyle. Yanıt eğitim amaçlıdır. Her metin alanını en fazla 2 kısa cümle, her liste maddesini tek kısa cümle olarak yaz.'
+      : 'You are Luna, the financial analysis assistant inside the Balance Sheet Analysis app. Use only the supplied financial statement data. Never invent figures. State periods and currency. Explain strengths and risks in clear, balanced English. Do not give definitive buy/sell advice, price targets, or guarantees. Call out missing data. The response is educational. Keep every text field to at most 2 short sentences and every list item to one short sentence.';
     const schema={type:'object',additionalProperties:false,properties:{
       summary:{type:'string'},strengths:{type:'array',items:{type:'string'},maxItems:4},risks:{type:'array',items:{type:'string'},maxItems:4},
       profitability:{type:'string'},cashFlow:{type:'string'},watchNext:{type:'array',items:{type:'string'},maxItems:3},disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','cashFlow','watchNext','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'low'},max_output_tokens:1200,instructions,
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1800,instructions,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
       text:{format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
