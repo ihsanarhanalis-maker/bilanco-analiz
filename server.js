@@ -2141,6 +2141,83 @@ async function lunaAnalyzeHandler(req, res){
     lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
   }
 }
+function lunaFinite(v){ const n=Number(v); return Number.isFinite(n)?n:null; }
+function lunaRound(v,d){ const n=lunaFinite(v); return n==null?null:Number(n.toFixed(d==null?4:d)); }
+function lunaSma(values,n){ const a=values.slice(-n); return a.length===n?a.reduce((s,x)=>s+x,0)/n:null; }
+function lunaEmaSeries(values,n){
+  if(values.length<n) return [];
+  const k=2/(n+1), out=new Array(n-1).fill(null);
+  let prev=values.slice(0,n).reduce((s,x)=>s+x,0)/n; out.push(prev);
+  for(let i=n;i<values.length;i++){ prev=values[i]*k+prev*(1-k); out.push(prev); }
+  return out;
+}
+function lunaRsi(values,n){
+  if(values.length<n+1) return null;
+  let gain=0,loss=0;
+  for(let i=values.length-n;i<values.length;i++){ const d=values[i]-values[i-1]; if(d>0) gain+=d; else loss-=d; }
+  if(loss===0) return 100;
+  const rs=(gain/n)/(loss/n); return 100-(100/(1+rs));
+}
+function lunaChange(values,back){
+  if(values.length<=back || !values[values.length-1-back]) return null;
+  return (values[values.length-1]/values[values.length-1-back]-1)*100;
+}
+async function lunaMarketSnapshot(symbol){
+  const sym=String(symbol||'').trim().toUpperCase();
+  if(!/^[A-Z0-9.^=\-]{1,24}$/.test(sym)) return {ok:false,error:'invalid_symbol'};
+  const url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(sym)+'?range=1y&interval=1d&includePrePost=false';
+  const r=await httpsGetText(url,{'User-Agent':BUA,'Accept':'application/json'});
+  if(r.status!==200) return {ok:false,error:'market_data_unavailable',status:r.status};
+  let j; try{ j=JSON.parse(r.body); }catch(_e){ return {ok:false,error:'invalid_market_data'}; }
+  const result=j&&j.chart&&j.chart.result&&j.chart.result[0];
+  if(!result) return {ok:false,error:'symbol_not_found'};
+  const meta=result.meta||{}, quote=result.indicators&&result.indicators.quote&&result.indicators.quote[0]||{};
+  const rows=[];
+  (result.timestamp||[]).forEach((ts,i)=>{
+    const close=lunaFinite(quote.close&&quote.close[i]); if(close==null) return;
+    rows.push({ts,close,high:lunaFinite(quote.high&&quote.high[i]),low:lunaFinite(quote.low&&quote.low[i]),volume:lunaFinite(quote.volume&&quote.volume[i])});
+  });
+  const closes=rows.map(x=>x.close), volumes=rows.map(x=>x.volume).filter(x=>x!=null);
+  const ema12=lunaEmaSeries(closes,12),ema26=lunaEmaSeries(closes,26),macd=[];
+  for(let i=0;i<closes.length;i++) if(ema12[i]!=null&&ema26[i]!=null) macd.push(ema12[i]-ema26[i]);
+  const signal=lunaEmaSeries(macd,9), macdNow=macd.length?macd[macd.length-1]:null, signalNow=signal.length?signal[signal.length-1]:null;
+  const highs=rows.map(x=>x.high).filter(x=>x!=null), lows=rows.map(x=>x.low).filter(x=>x!=null);
+  const last=rows[rows.length-1]||{};
+  return {ok:true,source:'Yahoo Finance via Bilanço Analiz',fetchedAt:new Date().toISOString(),symbol:meta.symbol||sym,
+    name:meta.longName||meta.shortName||null,exchange:meta.fullExchangeName||meta.exchangeName||null,currency:meta.currency||null,
+    marketState:meta.marketState||null,marketTime:meta.regularMarketTime?new Date(meta.regularMarketTime*1000).toISOString():null,
+    price:lunaRound(meta.regularMarketPrice!=null?meta.regularMarketPrice:last.close,4),previousClose:lunaRound(meta.chartPreviousClose||meta.previousClose,4),
+    dayChangePct:lunaRound(lunaChange(closes,1),2),oneMonthChangePct:lunaRound(lunaChange(closes,21),2),threeMonthChangePct:lunaRound(lunaChange(closes,63),2),oneYearChangePct:lunaRound(lunaChange(closes,Math.min(251,closes.length-1)),2),
+    technical:{sma20:lunaRound(lunaSma(closes,20),4),sma50:lunaRound(lunaSma(closes,50),4),sma200:lunaRound(lunaSma(closes,200),4),rsi14:lunaRound(lunaRsi(closes,14),2),macd:lunaRound(macdNow,4),macdSignal:lunaRound(signalNow,4),macdHistogram:lunaRound(macdNow!=null&&signalNow!=null?macdNow-signalNow:null,4)},
+    range52Week:{high:lunaRound(highs.length?Math.max(...highs):null,4),low:lunaRound(lows.length?Math.min(...lows):null,4)},
+    volume:{latest:last.volume||null,average20:lunaRound(lunaSma(volumes,20),0)},observations:closes.length};
+}
+async function lunaFinancialSnapshot(symbol,period){
+  const sym=String(symbol||'').trim().toUpperCase(), pfx=period==='annual'?'annual':'quarterly';
+  if(!/^[A-Z0-9.^=\-]{1,24}$/.test(sym)) return {ok:false,error:'invalid_symbol'};
+  const names=['TotalRevenue','GrossProfit','OperatingIncome','NetIncome','TotalAssets','CurrentAssets','CashAndCashEquivalents','TotalLiabilitiesNetMinorityInterest','CurrentLiabilities','LongTermDebt','StockholdersEquity','OperatingCashFlow','CapitalExpenditure'];
+  const types=names.map(x=>pfx+x).join(','), now=Math.floor(Date.now()/1000), from=now-(pfx==='annual'?7:3)*365*86400;
+  const url='https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/'+encodeURIComponent(sym)+'?symbol='+encodeURIComponent(sym)+'&type='+types+'&period1='+from+'&period2='+(now+86400);
+  const r=await httpsGetText(url,{'User-Agent':BUA,'Accept':'application/json'});
+  if(r.status!==200) return {ok:false,error:'financial_data_unavailable',status:r.status};
+  let j; try{ j=JSON.parse(r.body); }catch(_e){ return {ok:false,error:'invalid_financial_data'}; }
+  const series={};
+  for(const item of (j&&j.timeseries&&j.timeseries.result||[])){
+    const type=item.meta&&item.meta.type&&item.meta.type[0]; if(!type||!Array.isArray(item[type])) continue;
+    series[type.replace(pfx,'')]=item[type].slice(-4).map(x=>({date:x.asOfDate,value:x.reportedValue&&x.reportedValue.raw!=null?x.reportedValue.raw:null,currency:x.currencyCode||null}));
+  }
+  return {ok:true,source:'Yahoo Finance via Bilanço Analiz',fetchedAt:new Date().toISOString(),symbol:sym,period:pfx,series};
+}
+const LUNA_APP_TOOLS=[
+  {type:'function',name:'get_market_snapshot',description:'Get current or latest available stock/ETF/index price, returns, volume, RSI, MACD, moving averages and 52-week range from the Bilanço Analiz market data service. Use whenever a user asks about a current price, performance or technical analysis.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible ticker, for example NVDA, THYAO.IS, BTC-USD or ^GSPC'}},required:['symbol']}},
+  {type:'function',name:'get_financial_snapshot',description:'Get recent income statement, balance sheet and cash-flow series from the Bilanço Analiz financial data service. Use for company financial, profitability, debt, cash flow or balance sheet questions.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible company ticker'},period:{type:'string',enum:['quarterly','annual']}},required:['symbol','period']}}
+];
+async function lunaRunTool(call){
+  let args={}; try{ args=JSON.parse(call.arguments||'{}'); }catch(_e){ return {ok:false,error:'bad_tool_arguments'}; }
+  if(call.name==='get_market_snapshot') return lunaMarketSnapshot(args.symbol);
+  if(call.name==='get_financial_snapshot') return lunaFinancialSnapshot(args.symbol,args.period);
+  return {ok:false,error:'unknown_tool'};
+}
 async function lunaChatHandler(req, res){
   if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
   if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
@@ -2151,9 +2228,18 @@ async function lunaChatHandler(req, res){
     const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
     if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
     const instructions=lang==='tr'
-      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı yardımcı yapay zekâsın. Kullanıcının finans, ekonomi, şirketler ve genel konulardaki sorularına sade, samimi ve doğru Türkçe ile yanıt ver. Bilmediğin veya güncel veri gerektiren konularda bunu açıkça belirt; canlı veriye sahipmiş gibi davranma. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı mümkün olduğunca kısa ve anlaşılır tut; gerektiğinde kısa maddeler kullan.'
-      : 'You are Luna, the helpful AI inside the Balance Sheet Analysis app. Answer questions about finance, economics, companies, and general topics in clear, friendly English. Clearly say when something is unknown or needs current data; never pretend to have live data. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep answers concise and use short bullets when useful.';
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1200,instructions,input:messages});
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı yardımcı yapay zekâsın. Kullanıcının finans, ekonomi, şirketler ve genel konulardaki sorularına sade, samimi ve doğru Türkçe ile yanıt ver. Güncel fiyat, teknik analiz veya finansal tablo sorularında tahmin yürütme; mutlaka uygulamanın uygun veri aracını çağır. Araç verisinin kaynağını ve çekilme zamanını belirt, piyasa kapalıysa son mevcut fiyat olduğunu söyle. Araç sonuç vermiyorsa bunu açıkça belirt. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı mümkün olduğunca kısa ve anlaşılır tut; gerektiğinde kısa maddeler kullan.'
+      : 'You are Luna, the helpful AI inside the Balance Sheet Analysis app. Answer questions about finance, economics, companies, and general topics in clear, friendly English. For current price, technical analysis, or financial statement questions, never guess: call the appropriate app data tool. State the tool data source and retrieval time, and identify the last available price when the market is closed. Clearly report unavailable data. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep answers concise and use short bullets when useful.';
+    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1200,instructions,tools:LUNA_APP_TOOLS,tool_choice:'auto'};
+    let conversationInput=messages;
+    let out=await openAiResponse({...base,input:conversationInput});
+    for(let round=0;round<2;round++){
+      const calls=(out.output||[]).filter(x=>x.type==='function_call').slice(0,4);
+      if(!calls.length) break;
+      const results=await Promise.all(calls.map(async call=>({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(await lunaRunTool(call))})));
+      conversationInput=[...conversationInput,...(out.output||[]),...results];
+      out=await openAiResponse({...base,input:conversationInput});
+    }
     const answer=responseOutputText(out).trim();
     if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     lunaJson(res,200,{ok:true,answer});
