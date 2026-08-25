@@ -1288,11 +1288,19 @@ async function borsaCaddesiAkd(hisse, opts) {
   // İlk boş yanıtta farklı sorgu biçimiyle bir kez daha dene; geçici boşluğu cache'leme.
   let searchArts = [];
   let searchStatus = 0;
+  const parseSearchArticles=(body)=>{
+    const rawBody=String(body||'');
+    let searchJson=null;
+    try { searchJson=JSON.parse(rawBody||'{}'); } catch (_e) {
+      const marker=rawBody.indexOf('Markdown Content:');
+      const jsonStart=rawBody.indexOf('{',marker>=0?marker:0);
+      try { searchJson=jsonStart>=0?JSON.parse(rawBody.slice(jsonStart).trim()):{}; } catch (_e2) { searchJson={}; }
+    }
+    return Array.isArray(searchJson&&searchJson.articles)?searchJson.articles:[];
+  };
   for (const searchUrl of [
     'https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym),
-    'https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym) + '&page=1&limit=20&ts=' + Date.now(),
-    // Render IP'si engellenirse aynı BorsaCaddesi API yanıtını salt-okunur köprüden al.
-    'https://r.jina.ai/http://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym)
+    'https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym) + '&page=1&limit=20&ts=' + Date.now()
   ]) {
     const search = await httpsGetText(searchUrl, {
       'User-Agent': BUA,
@@ -1303,16 +1311,14 @@ async function borsaCaddesiAkd(hisse, opts) {
       'Referer': 'https://borsacaddesi.com/'
     });
     searchStatus = search.status || 0;
-    let searchJson = null;
-    const rawBody=String(search.body||'');
-    try { searchJson = JSON.parse(rawBody || '{}'); } catch (_e) {
-      // Jina Reader JSON'u "Markdown Content:" başlığının ardından olduğu gibi taşır.
-      const marker=rawBody.indexOf('Markdown Content:');
-      const jsonStart=rawBody.indexOf('{',marker>=0?marker:0);
-      try { searchJson=jsonStart>=0?JSON.parse(rawBody.slice(jsonStart).trim()):{}; } catch (_e2) { searchJson={}; }
-    }
-    searchArts = Array.isArray(searchJson.articles) ? searchJson.articles : [];
+    searchArts=parseSearchArticles(search.body);
     if (searchArts.length) break;
+  }
+  if(!searchArts.length){
+    // Render IP'si engellenirse aynı BorsaCaddesi API yanıtını mevcut salt-okunur köprüyle al.
+    const bridged=await privateReaderGet('https://r.jina.ai/http://borsacaddesi.com/api/search?q='+encodeURIComponent(sym));
+    searchStatus=bridged.status||searchStatus;
+    searchArts=parseSearchArticles(bridged.body);
   }
   if (!searchArts.length) {
     return {
