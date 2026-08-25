@@ -1284,16 +1284,35 @@ async function borsaCaddesiAkd(hisse, opts) {
   const hit = BC_AKD_CACHE.get(cacheKey);
   if (hit && (Date.now() - hit.at) < 10 * 60 * 1000) return hit.data;
 
-  const search = await httpsGetText('https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym), {
-    'User-Agent': BUA, 'Accept': 'application/json', 'Referer': 'https://borsacaddesi.com/'
-  });
-  let searchJson = null;
-  try { searchJson = JSON.parse(search.body || '{}'); } catch (_e) { searchJson = {}; }
-  const searchArts = Array.isArray(searchJson.articles) ? searchJson.articles : [];
+  // Sağlayıcı zaman zaman Render çıkış IP'lerine boş/HTML yanıt verebiliyor.
+  // İlk boş yanıtta farklı sorgu biçimiyle bir kez daha dene; geçici boşluğu cache'leme.
+  let searchArts = [];
+  let searchStatus = 0;
+  for (const searchUrl of [
+    'https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym),
+    'https://borsacaddesi.com/api/search?q=' + encodeURIComponent(sym) + '&page=1&limit=20&ts=' + Date.now()
+  ]) {
+    const search = await httpsGetText(searchUrl, {
+      'User-Agent': BUA,
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.7',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+      'Referer': 'https://borsacaddesi.com/'
+    });
+    searchStatus = search.status || 0;
+    let searchJson = null;
+    try { searchJson = JSON.parse(search.body || '{}'); } catch (_e) { searchJson = {}; }
+    searchArts = Array.isArray(searchJson.articles) ? searchJson.articles : [];
+    if (searchArts.length) break;
+  }
   if (!searchArts.length) {
-    const miss = { ok: false, symbol: sym, error: 'not_found', source: 'borsacaddesi' };
-    BC_AKD_CACHE.set(cacheKey, { at: Date.now(), data: miss });
-    return miss;
+    return {
+      ok: false,
+      symbol: sym,
+      error: searchStatus >= 400 ? 'source_unavailable' : 'not_found',
+      source: 'borsacaddesi'
+    };
   }
 
   const resolved = await bcResolveCategoryFromArts(sym, searchArts);
