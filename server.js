@@ -2266,7 +2266,7 @@ async function lunaAnalyzeHandler(req, res){
       summary:{type:'string'},strengths:{type:'array',items:{type:'string'},maxItems:4},risks:{type:'array',items:{type:'string'},maxItems:4},
       profitability:{type:'string'},cashFlow:{type:'string'},watchNext:{type:'array',items:{type:'string'},maxItems:3},disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','cashFlow','watchNext','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1500,instructions,prompt_cache_key:'bilanco-luna-analysis-'+lang,
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1800,instructions,prompt_cache_key:'bilanco-luna-analysis-'+lang,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
       text:{format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
@@ -2420,7 +2420,7 @@ async function lunaBrokerAnalyzeHandler(req,res){
     const instructions=lang==='tr'
       ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı profesyonel finans asistanısın. Yalnızca verilen aracı kurum dağılımı verisini yorumla. Önde gelen alıcıları, satıcıları, yoğunlaşmayı, net lotu, ilk beş dengesini ve veri tarihini açıkla. Eksik OCR satırlarını uydurma. Kurum hareketlerinden kesin fiyat yönü veya kişisel yatırım tavsiyesi çıkarma. Kurumsal, sade Türkçe kullan; Markdown, tablo, emoji ve süslü biçimlendirme kullanma. Yanıtı kısa tut.'
       : 'You are Luna, the professional financial assistant inside the Balance Sheet Analysis app. Interpret only the supplied broker-distribution data. Explain leading buyers, sellers, concentration, net lots, top-five balance, and the data date. Never invent missing OCR rows or infer a guaranteed price direction. Do not give personalized investment advice. Use concise professional English without Markdown, tables, emoji, or decorative formatting.';
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1000,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+lang});
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1600,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+lang});
     const answer=lunaProfessionalText(responseOutputText(out));
     if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     const item=safeSnapshot.selectedTable||{}, url=/^https:\/\//i.test(String(item.url||''))?String(item.url):'';
