@@ -1176,11 +1176,17 @@
     <div class="toolbar" style="margin-top:12px;gap:8px;flex-wrap:wrap;align-items:center">
       <input id="takasTicker" class="cell" style="width:160px;text-align:left;text-transform:uppercase;font-weight:700" data-i18n-placeholder="ph_takas" placeholder="örn. THYAO" onkeydown="if(event.key==='Enter')loadTakasAkd()">
       <button type="button" class="primary" onclick="loadTakasAkd()" data-i18n="btn_search_short">Ara</button>
+      <button type="button" class="primary luna-button" id="takasLunaBtn" onclick="analyzeTakasWithLuna()" data-i18n="takas_luna_btn" disabled>✦ Luna ile Yorumla</button>
       <span class="hint" id="takasStatus"></span>
     </div>
   </div>
 
   <div id="takasBody"><div class="hint" data-i18n="takas_empty">BIST hisse kodu yaz (THYAO, ASELS, GARAN…) — güncel aracı kurum dağılımı tabloları gelir.</div></div>
+  <div class="card hidden" id="takasLunaCard" style="margin-top:16px">
+    <h2 data-i18n="takas_luna_title">Luna AKD Yorumu</h2>
+    <div id="takasLunaStatus" class="hint"></div>
+    <div id="takasLunaBody" class="luna-result"></div>
+  </div>
 
 </div>
 

@@ -7778,6 +7778,10 @@ async function loadTakasAkd(){
   initTakasPage();
   TAKAS_OVERRIDE={};
   TAKAS_ACTIVE_SLUG=null;
+  const lunaBtn=document.getElementById('takasLunaBtn');
+  const lunaCard=document.getElementById('takasLunaCard');
+  if(lunaBtn) lunaBtn.disabled=true;
+  if(lunaCard) lunaCard.classList.add('hidden');
   if(st) st.textContent='Yükleniyor…';
   box.innerHTML='<div class="hint">AKD tabloları çekiliyor…</div>';
   try{
@@ -7794,11 +7798,40 @@ async function loadTakasAkd(){
     const latest=j.latest||{};
     TAKAS_ACTIVE_SLUG=(latest.gun_sonu_akd && latest.gun_sonu_akd.slug) || null;
     renderTakasView();
+    if(lunaBtn) lunaBtn.disabled=false;
     if(st) st.textContent='Güncel';
   }catch(e){
     box.innerHTML='<div class="hint">Alınamadı: '+safeHTML(e.message)+'</div>';
     if(st) st.textContent='Hata';
   }
+}
+async function analyzeTakasWithLuna(){
+  const inp=document.getElementById('takasTicker');
+  const btn=document.getElementById('takasLunaBtn');
+  const card=document.getElementById('takasLunaCard');
+  const status=document.getElementById('takasLunaStatus');
+  const body=document.getElementById('takasLunaBody');
+  const sym=String(inp&&inp.value||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!sym||!TAKAS_LIST||!btn||!card||!status||!body) return;
+  btn.disabled=true; card.classList.remove('hidden'); body.textContent=''; status.textContent=t('takas_luna_loading');
+  try{
+    const question=getLang()==='en'
+      ? `Interpret ${sym}'s latest broker distribution (AKD) table in the Bilanço Analiz app. Use the app broker-distribution tool. Explain leading buyers and sellers, concentration, net lots and top-five balance; state the data date and avoid definitive investment advice.`
+      : `${sym} hissesinin Bilanço Analiz uygulamasındaki en güncel aracı kurum dağılımı (AKD) tablosunu yorumla. Uygulamanın aracı kurum dağılımı aracını kullan. Önde gelen alıcı ve satıcıları, yoğunlaşmayı, net lotu ve ilk beş dengesini açıkla; veri tarihini belirt ve kesin yatırım tavsiyesi verme.`;
+    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:[{role:'user',content:question}]})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok) throw new Error(j.error||'unavailable');
+    status.textContent='';
+    const text=document.createElement('p'); text.textContent=String(j.answer||''); body.appendChild(text);
+    if(Array.isArray(j.sources)&&j.sources.length){
+      const sources=document.createElement('div'); sources.className='ai-sources';
+      const label=document.createElement('strong'); label.textContent=t('ai_sources'); sources.appendChild(label);
+      j.sources.forEach(s=>{ const a=document.createElement('a'); a.href=s.url; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=s.title||s.url; sources.appendChild(a); });
+      body.appendChild(sources);
+    }
+  }catch(e){
+    status.textContent=e.message==='luna_not_configured'?t('luna_not_configured'):(e.message==='rate_limit'?t('luna_rate'):t('luna_error'));
+  }finally{ btn.disabled=false; }
 }
 async function loadTakasAkdItem(slug){
   const inp=document.getElementById('takasTicker');

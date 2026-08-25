@@ -2253,15 +2253,49 @@ async function lunaFinancialSnapshot(symbol,period){
   }
   return {ok:true,source:'Yahoo Finance via Bilanço Analiz',fetchedAt:new Date().toISOString(),symbol:sym,period:pfx,series};
 }
+async function lunaBrokerDistributionSnapshot(symbol){
+  const sym=String(symbol||'').trim().toUpperCase().replace(/\.IS$/,'');
+  if(!/^[A-Z0-9]{1,12}$/.test(sym)) return {ok:false,error:'invalid_symbol'};
+  const data=await borsaCaddesiAkd(sym,null);
+  if(!data||!data.ok) return {ok:false,error:(data&&data.error)||'broker_distribution_unavailable',symbol:sym};
+  const latest=data.latest||{};
+  const preferred=latest.gun_sonu_akd||latest.araci_kurum||latest.takas||null;
+  let table={buyers:[],sellers:[],ok:false};
+  if(preferred&&preferred.image){
+    table=await bcOcrAkdTables(preferred.image);
+  }
+  const compactItem=(item)=>item?{
+    kind:item.kind||null,title:item.title||null,publishedAt:item.publishedAt||null,
+    stats:item.stats||null,summary:item.summary||null
+  }:null;
+  return {
+    ok:true,
+    source:'BorsaCaddesi via Bilanço Analiz',
+    fetchedAt:new Date().toISOString(),
+    symbol:sym,
+    selectedTable:compactItem(preferred),
+    buyers:Array.isArray(table.buyers)?table.buyers:[],
+    sellers:Array.isArray(table.sellers)?table.sellers:[],
+    ocrAvailable:!!table.ok,
+    latest:{
+      endOfDay:compactItem(latest.gun_sonu_akd),
+      intradayBrokerDistribution:compactItem(latest.araci_kurum),
+      custodyDistribution:compactItem(latest.takas)
+    },
+    note:'Aracı kurum dağılımı geçmiş işlemleri gösterir; tek başına gelecekteki fiyat yönünü garanti etmez.'
+  };
+}
 const LUNA_APP_TOOLS=[
   {type:'web_search'},
   {type:'function',name:'get_market_snapshot',description:'Get current or latest available stock/ETF/index price, returns, volume, RSI, MACD, moving averages and 52-week range from the Bilanço Analiz market data service. Use whenever a user asks about a current price, performance or technical analysis.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible ticker, for example NVDA, THYAO.IS, BTC-USD or ^GSPC'}},required:['symbol']}},
-  {type:'function',name:'get_financial_snapshot',description:'Get recent income statement, balance sheet and cash-flow series from the Bilanço Analiz financial data service. Use for company financial, profitability, debt, cash flow or balance sheet questions.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible company ticker'},period:{type:'string',enum:['quarterly','annual']}},required:['symbol','period']}}
+  {type:'function',name:'get_financial_snapshot',description:'Get recent income statement, balance sheet and cash-flow series from the Bilanço Analiz financial data service. Use for company financial, profitability, debt, cash flow or balance sheet questions.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Yahoo-compatible company ticker'},period:{type:'string',enum:['quarterly','annual']}},required:['symbol','period']}},
+  {type:'function',name:'get_broker_distribution',description:'Get the latest Borsa Istanbul broker distribution (AKD), including net lots, total lots, top-five balance and OCR-extracted leading buyers and sellers. Use whenever the user asks Luna to interpret an aracı kurum dağılımı, AKD, takas, who bought or who sold table.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{symbol:{type:'string',description:'Borsa Istanbul ticker such as THYAO, ASELS or GARAN; .IS suffix is optional'}},required:['symbol']}}
 ];
 async function lunaRunTool(call){
   let args={}; try{ args=JSON.parse(call.arguments||'{}'); }catch(_e){ return {ok:false,error:'bad_tool_arguments'}; }
   if(call.name==='get_market_snapshot') return lunaMarketSnapshot(args.symbol);
   if(call.name==='get_financial_snapshot') return lunaFinancialSnapshot(args.symbol,args.period);
+  if(call.name==='get_broker_distribution') return lunaBrokerDistributionSnapshot(args.symbol);
   return {ok:false,error:'unknown_tool'};
 }
 async function lunaChatHandler(req, res){
@@ -2277,8 +2311,8 @@ async function lunaChatHandler(req, res){
       ? 'Uygulama bölümleri: Bilanço Analizi; Ekonomik Takvim; İlk 100 Şirket; Hisse Tarayıcı; Sektör Devleri; Aracı Kurum Dağılımı; ETF; Özel Şirketler ve tahmini halka arz tarihleri; Dünya Haberleri; hisseX; Luna AI. Bilanço ekranında fiyat grafiği, değerleme oranları, kârlılık, gelir tablosu, nakit akışı, ortaklık, analist hedefleri, haberler ve karşılaştırma bulunur. Kullanıcı uygulama hakkında soru sorarsa bu haritayı kullan ve doğru sekmeye yönlendir.'
       : 'App sections: Balance Sheet Analysis; Economic Calendar; Top 100 Companies; Stock Screener; Sector Leaders; Broker Distribution; ETF; Private Companies and estimated IPO dates; World News; hisseX; Luna AI. The balance-sheet screen includes price charts, valuation ratios, profitability, income statement, cash flow, ownership, analyst targets, news, and comparison. Use this map for app questions and direct users to the appropriate section.';
     const instructions=(lang==='tr'
-      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı profesyonel finans ve araştırma asistanısın. Her kullanıcı mesajında önce zorunlu web araştırmasından gelen güncel kanıtı değerlendir. Güncel fiyat, teknik analiz veya finansal tablo sorularında web araştırmasına ek olarak mutlaka uygulamanın uygun yapılandırılmış veri aracını çağır; fiyat ve göstergelerde yapılandırılmış uygulama verisini esas al, web kaynaklarını bağlam ve çapraz kontrol için kullan. Araç verisinin kaynağını ve çekilme zamanını belirt, piyasa kapalıysa son mevcut fiyat olduğunu söyle. Araç sonuç vermiyorsa bunu açıkça belirt. Kullanıcının finans, ekonomi, şirketler, uygulama ve genel konulardaki sorularına ölçülü, tarafsız, kurumsal ve akıcı Türkçe ile yanıt ver. Markdown kullanma; yıldız, kare işareti, tablo, kod bloğu veya süslü biçimlendirme üretme. Gerekirse kısa düz başlıklar ve en fazla birkaç sade madde kullan. Gereksiz tekrar, ünlem, emoji ve samimi hitap kullanma. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı kısa ve anlaşılır tut.'
-      : 'You are Luna, the professional financial and research assistant inside the Balance Sheet Analysis app. Evaluate current evidence from the mandatory web research for every user message. For current price, technical analysis, or financial statement questions, also call the appropriate structured app data tool; treat structured app data as authoritative for prices and indicators, using web sources for context and cross-checking. State the data source and retrieval time, and identify the last available price when the market is closed. Clearly report unavailable data. Answer finance, economics, company, app, and general questions in a measured, neutral, professional style. Do not use Markdown, hash headings, asterisks, tables, code blocks, emoji, exclamation marks, or decorative formatting. Use short plain headings and only a few simple bullets when necessary. Avoid repetition and casual forms of address. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep the answer concise.')+' '+appMap;
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı profesyonel finans ve araştırma asistanısın. Her kullanıcı mesajında önce zorunlu web araştırmasından gelen güncel kanıtı değerlendir. Güncel fiyat, teknik analiz veya finansal tablo sorularında web araştırmasına ek olarak mutlaka uygulamanın uygun yapılandırılmış veri aracını çağır; fiyat ve göstergelerde yapılandırılmış uygulama verisini esas al, web kaynaklarını bağlam ve çapraz kontrol için kullan. Kullanıcı aracı kurum dağılımı, AKD, takas, kim aldı veya kim sattı tablosunu sorarsa mutlaka get_broker_distribution aracını çağır. Alıcı ve satıcı yoğunlaşmasını, net lotu, ilk beş dengesini ve verinin tarihini sade biçimde yorumla; kurum hareketlerinden kesin fiyat yönü veya yatırım tavsiyesi çıkarma. Araç verisinin kaynağını ve çekilme zamanını belirt, piyasa kapalıysa son mevcut fiyat olduğunu söyle. Araç sonuç vermiyorsa bunu açıkça belirt. Kullanıcının finans, ekonomi, şirketler, uygulama ve genel konulardaki sorularına ölçülü, tarafsız, kurumsal ve akıcı Türkçe ile yanıt ver. Markdown kullanma; yıldız, kare işareti, tablo, kod bloğu veya süslü biçimlendirme üretme. Gerekirse kısa düz başlıklar ve en fazla birkaç sade madde kullan. Gereksiz tekrar, ünlem, emoji ve samimi hitap kullanma. Kişiye özel kesin al/sat talimatı, garanti veya uydurma rakam verme. Yanıtı kısa ve anlaşılır tut.'
+      : 'You are Luna, the professional financial and research assistant inside the Balance Sheet Analysis app. Evaluate current evidence from the mandatory web research for every user message. For current price, technical analysis, or financial statement questions, also call the appropriate structured app data tool; treat structured app data as authoritative for prices and indicators, using web sources for context and cross-checking. For broker distribution, AKD, custody distribution, who-bought or who-sold questions, always call get_broker_distribution. Interpret buyer/seller concentration, net lots, top-five balance and data date without inferring a guaranteed price direction or giving investment advice. State the data source and retrieval time, and identify the last available price when the market is closed. Clearly report unavailable data. Answer finance, economics, company, app, and general questions in a measured, neutral, professional style. Do not use Markdown, hash headings, asterisks, tables, code blocks, emoji, exclamation marks, or decorative formatting. Use short plain headings and only a few simple bullets when necessary. Avoid repetition and casual forms of address. Do not give personalized definitive buy/sell instructions, guarantees, or invented figures. Keep the answer concise.')+' '+appMap;
     const researchInstructions=lang==='tr'
       ? 'Kullanıcının son sorusu için doğrudan web araması yap. Güncel ve güvenilir kaynakları topla. Bu araştırma, Bilanço Analiz içindeki Luna asistanının nihai yanıtına kanıt sağlayacak.'
       : 'Run a direct web search for the user’s latest question. Gather current, reliable sources. This research will provide evidence for Luna’s final answer inside the Balance Sheet Analysis app.';
