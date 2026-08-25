@@ -2186,7 +2186,7 @@ async function lunaAnalyzeHandler(req, res){
       summary:{type:'string'},strengths:{type:'array',items:{type:'string'},maxItems:4},risks:{type:'array',items:{type:'string'},maxItems:4},
       profitability:{type:'string'},cashFlow:{type:'string'},watchNext:{type:'array',items:{type:'string'},maxItems:3},disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','cashFlow','watchNext','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'none'},max_output_tokens:1800,instructions,
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1800,instructions,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
       text:{format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
@@ -2356,8 +2356,8 @@ async function lunaChatHandler(req, res){
     const researchInstructions=lang==='tr'
       ? 'Kullanıcının son sorusu için doğrudan web araması yap. Güncel ve güvenilir kaynakları topla. Bu araştırma, Bilanço Analiz içindeki Luna asistanının nihai yanıtına kanıt sağlayacak.'
       : 'Run a direct web search for the user’s latest question. Gather current, reliable sources. This research will provide evidence for Luna’s final answer inside the Balance Sheet Analysis app.';
-    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'low'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources']});
-    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'low'},max_output_tokens:1400,instructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
+    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources']});
+    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1400,instructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
     let conversationInput=[...messages,...(research.output||[])];
     let out=await openAiResponse({...base,input:conversationInput});
     for(let round=0;round<2;round++){
