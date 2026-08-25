@@ -2243,7 +2243,7 @@ async function lunaAnalyzeHandler(req, res){
       summary:{type:'string'},strengths:{type:'array',items:{type:'string'},maxItems:4},risks:{type:'array',items:{type:'string'},maxItems:4},
       profitability:{type:'string'},cashFlow:{type:'string'},watchNext:{type:'array',items:{type:'string'},maxItems:3},disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','cashFlow','watchNext','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1800,instructions,
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1800,instructions,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
       text:{format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
