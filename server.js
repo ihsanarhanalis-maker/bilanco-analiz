@@ -2424,12 +2424,12 @@ async function lunaChatHandler(req, res){
       if(typeof res.flushHeaders==='function') res.flushHeaders();
       lunaSse(res,'ready',{ok:true});
     }
-    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources']});
+    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources']});
     if(wantsStream){
       const plannerInstructions=(lang==='tr'
         ? 'Sen Luna için yalnızca araç seçen bir planlayıcısın. Kullanıcının sorusunu ve web araştırmasını değerlendir. Güncel fiyat veya teknik analiz için get_market_snapshot, finansal tablolar için get_financial_snapshot, aracı kurum dağılımı için get_broker_distribution, kesin tarih ve saat için get_current_datetime aracını çağır. Gerekli tüm bağımsız araçları aynı turda çağır. Nihai kullanıcı yanıtı, açıklama veya analiz yazma.'
         : 'You are a tool-only planner for Luna. Evaluate the user question and web research. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for financial statements, get_broker_distribution for broker distribution, and get_current_datetime for exact date or time. Call all independent tools in the same round. Do not write a final answer, explanation, or analysis.')+' '+timeContext;
-      const plannerBase={model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:350,instructions:plannerInstructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
+      const plannerBase={model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:350,instructions:plannerInstructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
       let finalInput=[...messages,...(research.output||[])];
       let plan=await openAiResponse({...plannerBase,input:finalInput});
       for(let round=0;round<2;round++){
@@ -2439,7 +2439,7 @@ async function lunaChatHandler(req, res){
         finalInput=[...finalInput,...(plan.output||[]),...results];
         if(round===0) plan=await openAiResponse({...plannerBase,input:finalInput});
       }
-      const streamed=await openAiResponseStream({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1400,instructions,input:finalInput},delta=>lunaSse(res,'delta',{delta}));
+      const streamed=await openAiResponseStream({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1400,instructions,input:finalInput},delta=>lunaSse(res,'delta',{delta}));
       const answer=lunaProfessionalText(streamed.text);
       if(!answer) throw new Error('invalid_model_response');
       const uniqueSources=responseWebSources(research).slice(0,6);
@@ -2447,7 +2447,7 @@ async function lunaChatHandler(req, res){
       res.end();
       return;
     }
-    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1400,instructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
+    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1400,instructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
     let conversationInput=[...messages,...(research.output||[])];
     let out=await openAiResponse({...base,input:conversationInput});
     for(let round=0;round<2;round++){
