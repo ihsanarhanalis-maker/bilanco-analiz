@@ -2085,8 +2085,10 @@ function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
    ortam değişkeninden okunur; tarayıcıya hiçbir zaman gönderilmez. */
 const LUNA_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
 const LUNA_CACHE = new Map();
+const LUNA_CHAT_CACHE = new Map();
 const LUNA_RATE = new Map();
 const LUNA_CACHE_MS = 15 * 60 * 1000;
+const LUNA_CHAT_CACHE_MS = 60 * 1000;
 const LUNA_RATE_MS = 60 * 60 * 1000;
 const LUNA_RATE_MAX = 20;
 
@@ -2193,6 +2195,17 @@ function openAiResponseStream(payload, onDelta){
 function lunaSse(res, event, data){
   if(res.writableEnded) return;
   res.write('event: '+event+'\n'+'data: '+JSON.stringify(data)+'\n\n');
+}
+function lunaBeginSse(res){
+  res.writeHead(200,{
+    'Content-Type':'text/event-stream; charset=utf-8',
+    'Cache-Control':'no-cache, no-transform',
+    'Connection':'keep-alive',
+    'X-Accel-Buffering':'no',
+    'X-Content-Type-Options':'nosniff'
+  });
+  if(typeof res.flushHeaders==='function') res.flushHeaders();
+  lunaSse(res,'ready',{ok:true});
 }
 function responseOutputText(j){
   for(const item of (j.output||[])) for(const part of (item.content||[])) if(part.type==='output_text' && part.text) return part.text;
@@ -2400,6 +2413,17 @@ async function lunaChatHandler(req, res){
     const raw=Array.isArray(body&&body.messages)?body.messages.slice(-12):[];
     const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
     if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
+    const chatCacheKey=crypto.createHash('sha256').update(lang+'\n'+JSON.stringify(messages)).digest('hex');
+    const cachedChat=LUNA_CHAT_CACHE.get(chatCacheKey);
+    if(cachedChat && Date.now()-cachedChat.at<LUNA_CHAT_CACHE_MS){
+      if(wantsStream){
+        lunaBeginSse(res);
+        lunaSse(res,'delta',{delta:cachedChat.answer});
+        lunaSse(res,'done',{ok:true,cached:true,answer:cachedChat.answer,sources:cachedChat.sources});
+        res.end();
+      }else lunaJson(res,200,{ok:true,cached:true,answer:cachedChat.answer,sources:cachedChat.sources});
+      return;
+    }
     const appMap=lang==='tr'
       ? 'Uygulama bölümleri: Bilanço Analizi; Ekonomik Takvim; İlk 100 Şirket; Hisse Tarayıcı; Sektör Devleri; Aracı Kurum Dağılımı; ETF; Özel Şirketler ve tahmini halka arz tarihleri; Dünya Haberleri; hisseX; Luna AI. Bilanço ekranında fiyat grafiği, değerleme oranları, kârlılık, gelir tablosu, nakit akışı, ortaklık, analist hedefleri, haberler ve karşılaştırma bulunur. Kullanıcı uygulama hakkında soru sorarsa bu haritayı kullan ve doğru sekmeye yönlendir.'
       : 'App sections: Balance Sheet Analysis; Economic Calendar; Top 100 Companies; Stock Screener; Sector Leaders; Broker Distribution; ETF; Private Companies and estimated IPO dates; World News; hisseX; Luna AI. The balance-sheet screen includes price charts, valuation ratios, profitability, income statement, cash flow, ownership, analyst targets, news, and comparison. Use this map for app questions and direct users to the appropriate section.';
@@ -2413,55 +2437,36 @@ async function lunaChatHandler(req, res){
     const researchInstructions=lang==='tr'
       ? 'Kullanıcının son sorusu için doğrudan web araması yap. Güncel ve güvenilir kaynakları topla. Bu araştırma, Bilanço Analiz içindeki Luna asistanının nihai yanıtına kanıt sağlayacak.'
       : 'Run a direct web search for the user’s latest question. Gather current, reliable sources. This research will provide evidence for Luna’s final answer inside the Balance Sheet Analysis app.';
-    if(wantsStream){
-      res.writeHead(200,{
-        'Content-Type':'text/event-stream; charset=utf-8',
-        'Cache-Control':'no-cache, no-transform',
-        'Connection':'keep-alive',
-        'X-Accel-Buffering':'no',
-        'X-Content-Type-Options':'nosniff'
-      });
-      if(typeof res.flushHeaders==='function') res.flushHeaders();
-      lunaSse(res,'ready',{ok:true});
-    }
-    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources']});
-    if(wantsStream){
-      const plannerInstructions=(lang==='tr'
-        ? 'Sen Luna için yalnızca araç seçen bir planlayıcısın. Kullanıcının sorusunu ve web araştırmasını değerlendir. Güncel fiyat veya teknik analiz için get_market_snapshot, finansal tablolar için get_financial_snapshot, aracı kurum dağılımı için get_broker_distribution, kesin tarih ve saat için get_current_datetime aracını çağır. Gerekli tüm bağımsız araçları aynı turda çağır. Nihai kullanıcı yanıtı, açıklama veya analiz yazma.'
-        : 'You are a tool-only planner for Luna. Evaluate the user question and web research. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for financial statements, get_broker_distribution for broker distribution, and get_current_datetime for exact date or time. Call all independent tools in the same round. Do not write a final answer, explanation, or analysis.')+' '+timeContext;
-      const plannerBase={model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:350,instructions:plannerInstructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
-      let finalInput=[...messages,...(research.output||[])];
-      let plan=await openAiResponse({...plannerBase,input:finalInput});
-      for(let round=0;round<2;round++){
-        const calls=(plan.output||[]).filter(x=>x.type==='function_call').slice(0,4);
-        if(!calls.length) break;
-        const results=await Promise.all(calls.map(async call=>({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(await lunaRunTool(call))})));
-        finalInput=[...finalInput,...(plan.output||[]),...results];
-        if(round===0) plan=await openAiResponse({...plannerBase,input:finalInput});
-      }
-      const streamed=await openAiResponseStream({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1400,instructions,input:finalInput},delta=>lunaSse(res,'delta',{delta}));
-      const answer=lunaProfessionalText(streamed.text);
-      if(!answer) throw new Error('invalid_model_response');
-      const uniqueSources=responseWebSources(research).slice(0,6);
-      lunaSse(res,'done',{ok:true,answer,sources:uniqueSources});
-      res.end();
-      return;
-    }
-    const base={model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1400,instructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
-    let conversationInput=[...messages,...(research.output||[])];
-    let out=await openAiResponse({...base,input:conversationInput});
-    for(let round=0;round<2;round++){
-      const calls=(out.output||[]).filter(x=>x.type==='function_call').slice(0,4);
-      if(!calls.length) break;
+    const plannerInstructions=(lang==='tr'
+      ? 'Sen Luna için yalnızca araç seçen bir planlayıcısın. Kullanıcının sorusunu değerlendir. Güncel fiyat veya teknik analiz için get_market_snapshot, finansal tablolar için get_financial_snapshot, aracı kurum dağılımı için get_broker_distribution, kesin tarih ve saat için get_current_datetime aracını çağır. Gerekli tüm bağımsız araçları aynı turda çağır. Nihai kullanıcı yanıtı, açıklama veya analiz yazma.'
+      : 'You are a tool-only planner for Luna. Evaluate the user question. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for financial statements, get_broker_distribution for broker distribution, and get_current_datetime for exact date or time. Call all independent tools in the same round. Do not write a final answer, explanation, or analysis.')+' '+timeContext;
+    if(wantsStream) lunaBeginSse(res);
+    const researchPromise=openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],prompt_cache_key:'bilanco-luna-research-'+lang});
+    const plannerPromise=openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:350,instructions:plannerInstructions,input:messages,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true,prompt_cache_key:'bilanco-luna-planner-'+lang});
+    const [research,plan]=await Promise.all([researchPromise,plannerPromise]);
+    let finalInput=[...messages,...(research.output||[])];
+    const calls=(plan.output||[]).filter(x=>x.type==='function_call').slice(0,4);
+    if(calls.length){
       const results=await Promise.all(calls.map(async call=>({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(await lunaRunTool(call))})));
-      conversationInput=[...conversationInput,...(out.output||[]),...results];
-      out=await openAiResponse({...base,input:conversationInput});
+      finalInput=[...finalInput,...(plan.output||[]),...results];
     }
-    const answer=lunaProfessionalText(responseOutputText(out));
-    if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
-    const sources=[...responseWebSources(research),...responseWebSources(out)];
+    const finalBase={model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1400,instructions,input:finalInput,prompt_cache_key:'bilanco-luna-final-'+lang};
+    let answer='', finalResponse={};
+    if(wantsStream){
+      const streamed=await openAiResponseStream(finalBase,delta=>lunaSse(res,'delta',{delta}));
+      answer=lunaProfessionalText(streamed.text); finalResponse=streamed.response||{};
+    }else{
+      finalResponse=await openAiResponse(finalBase);
+      answer=lunaProfessionalText(responseOutputText(finalResponse));
+    }
+    if(!answer) throw new Error('invalid_model_response');
+    const sources=[...responseWebSources(research),...responseWebSources(finalResponse)];
     const seenSources=new Set(), uniqueSources=sources.filter(s=>!seenSources.has(s.url)&&(seenSources.add(s.url),true)).slice(0,6);
-    lunaJson(res,200,{ok:true,answer,sources:uniqueSources});
+    LUNA_CHAT_CACHE.set(chatCacheKey,{at:Date.now(),answer,sources:uniqueSources});
+    if(LUNA_CHAT_CACHE.size>200) [...LUNA_CHAT_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,50).forEach(([k])=>LUNA_CHAT_CACHE.delete(k));
+    if(wantsStream){
+      lunaSse(res,'done',{ok:true,answer,sources:uniqueSources}); res.end();
+    }else lunaJson(res,200,{ok:true,answer,sources:uniqueSources});
   }catch(e){
     const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
     console.error('[Luna Chat]',e.message||e);
