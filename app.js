@@ -5582,6 +5582,7 @@ function updateMarketSpecificLabels(){
 /* ---------- Luna AI serbest sohbet ---------- */
 const LUNA_CHAT_MESSAGES=[];
 let LUNA_CHAT_BUSY=false;
+let LUNA_CHAT_STREAMING=false;
 function renderLunaChat(){
   const box=document.getElementById('aiChatMessages'); if(!box) return;
   const empty=document.getElementById('aiChatEmpty');
@@ -5599,7 +5600,7 @@ function renderLunaChat(){
     }
     row.appendChild(bubble); box.appendChild(row);
   });
-  if(LUNA_CHAT_BUSY){
+  if(LUNA_CHAT_BUSY&&!LUNA_CHAT_STREAMING){
     const row=document.createElement('div'); row.className='ai-message assistant ai-thinking';
     const bubble=document.createElement('div'); bubble.className='ai-bubble'; bubble.textContent=t('ai_thinking');
     row.appendChild(bubble); box.appendChild(row);
@@ -5627,19 +5628,55 @@ async function sendLunaChat(e){
   if(input) input.value=''; LUNA_CHAT_BUSY=true; if(btn) btn.disabled=true; renderLunaChat();
   try{
     const history=LUNA_CHAT_MESSAGES.slice(-12);
-    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:history})});
-    const j=await r.json().catch(()=>({}));
-    if(!r.ok){
+    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:history,stream:true})});
+    const contentType=String(r.headers.get('content-type')||'');
+    if(!contentType.includes('text/event-stream')){
+      const j=await r.json().catch(()=>({}));
       if(j.error==='luna_not_configured') throw new Error('not_configured');
       if(j.error==='rate_limit') throw new Error('rate_limit');
       throw new Error('unavailable');
     }
-    LUNA_CHAT_MESSAGES.push({role:'assistant',content:String(j.answer||t('ai_error')),sources:Array.isArray(j.sources)?j.sources:[]});
+    if(!r.ok||!r.body) throw new Error('unavailable');
+    const reader=r.body.getReader(), decoder=new TextDecoder();
+    let buffer='', assistant=null, streamError='';
+    const consume=()=>{
+      buffer=buffer.replace(/\r\n/g,'\n');
+      let boundary;
+      while((boundary=buffer.indexOf('\n\n'))!==-1){
+        const block=buffer.slice(0,boundary); buffer=buffer.slice(boundary+2);
+        let event='message', dataText='';
+        block.split('\n').forEach(line=>{
+          if(line.startsWith('event:')) event=line.slice(6).trim();
+          else if(line.startsWith('data:')) dataText+=(dataText?'\n':'')+line.slice(5).trim();
+        });
+        if(!dataText) continue;
+        let data={}; try{ data=JSON.parse(dataText); }catch(_e){ continue; }
+        if(event==='delta'&&data.delta){
+          if(!assistant){
+            assistant={role:'assistant',content:'',sources:[]};
+            LUNA_CHAT_MESSAGES.push(assistant); LUNA_CHAT_STREAMING=true;
+          }
+          assistant.content+=String(data.delta); renderLunaChat();
+        }else if(event==='done'){
+          if(!assistant){ assistant={role:'assistant',content:'',sources:[]}; LUNA_CHAT_MESSAGES.push(assistant); }
+          assistant.content=String(data.answer||assistant.content||t('ai_error'));
+          assistant.sources=Array.isArray(data.sources)?data.sources:[];
+          renderLunaChat();
+        }else if(event==='error') streamError=String(data.error||'unavailable');
+      }
+    };
+    while(true){
+      const part=await reader.read();
+      if(part.value){ buffer+=decoder.decode(part.value,{stream:!part.done}); consume(); }
+      if(part.done) break;
+    }
+    if(streamError) throw new Error(streamError==='rate_limit'?'rate_limit':'unavailable');
+    if(!assistant) throw new Error('unavailable');
   }catch(err){
     const key=err.message==='not_configured'?'luna_not_configured':(err.message==='rate_limit'?'luna_rate':'ai_error');
     LUNA_CHAT_MESSAGES.push({role:'assistant',content:t(key)});
   }finally{
-    LUNA_CHAT_BUSY=false; if(btn) btn.disabled=false; renderLunaChat(); if(input) input.focus();
+    LUNA_CHAT_BUSY=false; LUNA_CHAT_STREAMING=false; if(btn) btn.disabled=false; renderLunaChat(); if(input) input.focus();
   }
 }
 

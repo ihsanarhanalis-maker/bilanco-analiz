@@ -2137,6 +2137,63 @@ function openAiResponse(payload){
     rq.on('error', reject); rq.end(raw);
   });
 }
+function openAiResponseStream(payload, onDelta){
+  return new Promise((resolve, reject) => {
+    const raw=JSON.stringify({...payload,stream:true});
+    let settled=false;
+    const fail=(error)=>{ if(!settled){ settled=true; reject(error); } };
+    const rq=https.request({hostname:'api.openai.com',path:'/v1/responses',method:'POST',headers:{
+      'Authorization':'Bearer '+process.env.OPENAI_API_KEY,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)
+    },timeout:60000}, pr => {
+      if(pr.statusCode<200 || pr.statusCode>=300){
+        let body='';
+        pr.on('data',c=>{ if(body.length<2000000) body+=c; });
+        pr.on('end',()=>{
+          let parsed=null; try{ parsed=JSON.parse(body); }catch(_e){}
+          const error=new Error((parsed&&parsed.error&&parsed.error.message)||('openai_'+pr.statusCode));
+          error.status=pr.statusCode; fail(error);
+        });
+        return;
+      }
+      pr.setEncoding('utf8');
+      let buffer='', text='', completed=null;
+      const consume=(flush)=>{
+        buffer=buffer.replace(/\r\n/g,'\n');
+        let boundary;
+        while((boundary=buffer.indexOf('\n\n'))!==-1){
+          const block=buffer.slice(0,boundary); buffer=buffer.slice(boundary+2);
+          const data=block.split('\n').filter(line=>line.startsWith('data:')).map(line=>line.slice(5).trim()).join('\n');
+          if(!data || data==='[DONE]') continue;
+          let event=null; try{ event=JSON.parse(data); }catch(_e){ continue; }
+          if(event.type==='response.output_text.delta' && event.delta){
+            text+=event.delta;
+            if(typeof onDelta==='function') onDelta(event.delta);
+          }else if(event.type==='response.completed'){
+            completed=event.response||null;
+          }else if(event.type==='response.failed' || event.type==='error'){
+            const detail=event.error||(event.response&&event.response.error)||{};
+            fail(new Error(detail.message||'openai_stream_failed'));
+          }
+        }
+        if(flush && buffer.trim()){
+          buffer+='\n\n'; consume(false);
+        }
+      };
+      pr.on('data',chunk=>{ buffer+=chunk; consume(false); });
+      pr.on('end',()=>{
+        consume(true);
+        if(!settled){ settled=true; resolve({text,response:completed}); }
+      });
+      pr.on('error',fail);
+    });
+    rq.on('timeout',()=>rq.destroy(new Error('openai_timeout')));
+    rq.on('error',fail); rq.end(raw);
+  });
+}
+function lunaSse(res, event, data){
+  if(res.writableEnded) return;
+  res.write('event: '+event+'\n'+'data: '+JSON.stringify(data)+'\n\n');
+}
 function responseOutputText(j){
   for(const item of (j.output||[])) for(const part of (item.content||[])) if(part.type==='output_text' && part.text) return part.text;
   return '';
@@ -2339,7 +2396,7 @@ async function lunaChatHandler(req, res){
   if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
   if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
   try{
-    const body=await readJsonBody(req,64*1024), lang=body&&body.lang==='en'?'en':'tr';
+    const body=await readJsonBody(req,64*1024), lang=body&&body.lang==='en'?'en':'tr', wantsStream=body&&body.stream===true;
     const raw=Array.isArray(body&&body.messages)?body.messages.slice(-12):[];
     const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
     if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
@@ -2356,7 +2413,40 @@ async function lunaChatHandler(req, res){
     const researchInstructions=lang==='tr'
       ? 'Kullanıcının son sorusu için doğrudan web araması yap. Güncel ve güvenilir kaynakları topla. Bu araştırma, Bilanço Analiz içindeki Luna asistanının nihai yanıtına kanıt sağlayacak.'
       : 'Run a direct web search for the user’s latest question. Gather current, reliable sources. This research will provide evidence for Luna’s final answer inside the Balance Sheet Analysis app.';
+    if(wantsStream){
+      res.writeHead(200,{
+        'Content-Type':'text/event-stream; charset=utf-8',
+        'Cache-Control':'no-cache, no-transform',
+        'Connection':'keep-alive',
+        'X-Accel-Buffering':'no',
+        'X-Content-Type-Options':'nosniff'
+      });
+      if(typeof res.flushHeaders==='function') res.flushHeaders();
+      lunaSse(res,'ready',{ok:true});
+    }
     const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:650,instructions:researchInstructions+' '+timeContext,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources']});
+    if(wantsStream){
+      const plannerInstructions=(lang==='tr'
+        ? 'Sen Luna için yalnızca araç seçen bir planlayıcısın. Kullanıcının sorusunu ve web araştırmasını değerlendir. Güncel fiyat veya teknik analiz için get_market_snapshot, finansal tablolar için get_financial_snapshot, aracı kurum dağılımı için get_broker_distribution, kesin tarih ve saat için get_current_datetime aracını çağır. Gerekli tüm bağımsız araçları aynı turda çağır. Nihai kullanıcı yanıtı, açıklama veya analiz yazma.'
+        : 'You are a tool-only planner for Luna. Evaluate the user question and web research. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for financial statements, get_broker_distribution for broker distribution, and get_current_datetime for exact date or time. Call all independent tools in the same round. Do not write a final answer, explanation, or analysis.')+' '+timeContext;
+      const plannerBase={model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:350,instructions:plannerInstructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
+      let finalInput=[...messages,...(research.output||[])];
+      let plan=await openAiResponse({...plannerBase,input:finalInput});
+      for(let round=0;round<2;round++){
+        const calls=(plan.output||[]).filter(x=>x.type==='function_call').slice(0,4);
+        if(!calls.length) break;
+        const results=await Promise.all(calls.map(async call=>({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(await lunaRunTool(call))})));
+        finalInput=[...finalInput,...(plan.output||[]),...results];
+        if(round===0) plan=await openAiResponse({...plannerBase,input:finalInput});
+      }
+      const streamed=await openAiResponseStream({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1400,instructions,input:finalInput},delta=>lunaSse(res,'delta',{delta}));
+      const answer=lunaProfessionalText(streamed.text);
+      if(!answer) throw new Error('invalid_model_response');
+      const uniqueSources=responseWebSources(research).slice(0,6);
+      lunaSse(res,'done',{ok:true,answer,sources:uniqueSources});
+      res.end();
+      return;
+    }
     const base={model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1400,instructions,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true};
     let conversationInput=[...messages,...(research.output||[])];
     let out=await openAiResponse({...base,input:conversationInput});
@@ -2375,7 +2465,10 @@ async function lunaChatHandler(req, res){
   }catch(e){
     const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
     console.error('[Luna Chat]',e.message||e);
-    lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
+    if(res.headersSent){
+      lunaSse(res,'error',{ok:false,error:status===502?'luna_unavailable':e.message});
+      res.end();
+    }else lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
   }
 }
 
