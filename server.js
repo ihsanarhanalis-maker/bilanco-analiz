@@ -2209,8 +2209,9 @@ function lunaBeginSse(res){
   lunaSse(res,'ready',{ok:true});
 }
 function responseOutputText(j){
-  for(const item of (j.output||[])) for(const part of (item.content||[])) if(part.type==='output_text' && part.text) return part.text;
-  return '';
+  const parts=[];
+  for(const item of (j.output||[])) for(const part of (item.content||[])) if(part.type==='output_text' && part.text) parts.push(part.text);
+  return parts.join('');
 }
 function responseWebSources(j){
   const found=[];
