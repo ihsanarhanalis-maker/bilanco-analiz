@@ -2086,6 +2086,7 @@ function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
 const LUNA_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
 const LUNA_CACHE = new Map();
 const LUNA_CHAT_CACHE = new Map();
+const LUNA_BROKER_CACHE = new Map();
 const LUNA_RATE = new Map();
 const LUNA_CACHE_MS = 15 * 60 * 1000;
 const LUNA_CHAT_CACHE_MS = 60 * 1000;
@@ -2245,7 +2246,16 @@ async function lunaAnalyzeHandler(req, res){
     const body=await readJsonBody(req,100*1024), snapshot=body&&body.snapshot;
     const lang=body&&body.lang==='en'?'en':'tr';
     if(!snapshot || !/^[A-Z0-9.\-]{1,24}$/.test(String(snapshot.ticker||''))){ lunaJson(res,400,{ok:false,error:'bad_snapshot'}); return; }
-    const input=JSON.stringify(snapshot);
+    const compactSnapshot={
+      ticker:snapshot.ticker,market:snapshot.market,currency:snapshot.currency,periodType:snapshot.periodType,
+      balanceDates:snapshot.balanceDates,filedDates:snapshot.filedDates,marketCap:snapshot.marketCap,
+      balanceRows:(Array.isArray(snapshot.balanceRows)?snapshot.balanceRows:[])
+        .filter(r=>r&&((Number.isFinite(Number(r.current))&&Number(r.current)!==0)||(Number.isFinite(Number(r.previous))&&Number(r.previous)!==0)))
+        .slice(0,60)
+        .map(r=>({name:r.name,category:r.category,current:r.current,previous:r.previous})),
+      income:snapshot.income||{},cashFlow:snapshot.cashFlow||{},derived:snapshot.derived||{}
+    };
+    const input=JSON.stringify(compactSnapshot);
     const cacheKey=crypto.createHash('sha256').update(lang+'\n'+input).digest('hex');
     const cached=LUNA_CACHE.get(cacheKey);
     if(cached && Date.now()-cached.at<LUNA_CACHE_MS){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis}); return; }
@@ -2256,7 +2266,7 @@ async function lunaAnalyzeHandler(req, res){
       summary:{type:'string'},strengths:{type:'array',items:{type:'string'},maxItems:4},risks:{type:'array',items:{type:'string'},maxItems:4},
       profitability:{type:'string'},cashFlow:{type:'string'},watchNext:{type:'array',items:{type:'string'},maxItems:3},disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','cashFlow','watchNext','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1800,instructions,
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1500,instructions,prompt_cache_key:'bilanco-luna-analysis-'+lang,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
       text:{format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
@@ -2370,7 +2380,7 @@ async function lunaBrokerDistributionSnapshot(symbol){
   }
   const compactItem=(item)=>item?{
     kind:item.kind||null,title:item.title||null,publishedAt:item.publishedAt||null,
-    stats:item.stats||null,summary:item.summary||null
+    stats:item.stats||null,summary:item.summary||null,url:item.url||null
   }:null;
   return {
     ok:true,
@@ -2388,6 +2398,41 @@ async function lunaBrokerDistributionSnapshot(symbol){
     },
     note:'Aracı kurum dağılımı geçmiş işlemleri gösterir; tek başına gelecekteki fiyat yönünü garanti etmez.'
   };
+}
+async function lunaBrokerAnalyzeHandler(req,res){
+  if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
+  if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
+  if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
+  try{
+    const body=await readJsonBody(req,64*1024), lang=body&&body.lang==='en'?'en':'tr', snapshot=body&&body.snapshot;
+    const symbol=String(snapshot&&snapshot.symbol||'').trim().toUpperCase();
+    if(!snapshot||!/^[A-Z0-9]{1,12}$/.test(symbol)){ lunaJson(res,400,{ok:false,error:'bad_snapshot'}); return; }
+    const safeSnapshot={
+      symbol,source:String(snapshot.source||'BorsaCaddesi via Bilanço Analiz').slice(0,120),
+      fetchedAt:snapshot.fetchedAt||null,selectedTable:snapshot.selectedTable||null,
+      buyers:(Array.isArray(snapshot.buyers)?snapshot.buyers:[]).slice(0,8),
+      sellers:(Array.isArray(snapshot.sellers)?snapshot.sellers:[]).slice(0,8),
+      ocrAvailable:!!snapshot.ocrAvailable,note:String(snapshot.note||'').slice(0,300)
+    };
+    const input=JSON.stringify(safeSnapshot), cacheKey=crypto.createHash('sha256').update(lang+'\n'+input).digest('hex');
+    const cached=LUNA_BROKER_CACHE.get(cacheKey);
+    if(cached&&Date.now()-cached.at<10*60*1000){ lunaJson(res,200,{ok:true,cached:true,answer:cached.answer,sources:cached.sources}); return; }
+    const instructions=lang==='tr'
+      ? 'Sen Bilanço Analiz uygulamasındaki Luna adlı profesyonel finans asistanısın. Yalnızca verilen aracı kurum dağılımı verisini yorumla. Önde gelen alıcıları, satıcıları, yoğunlaşmayı, net lotu, ilk beş dengesini ve veri tarihini açıkla. Eksik OCR satırlarını uydurma. Kurum hareketlerinden kesin fiyat yönü veya kişisel yatırım tavsiyesi çıkarma. Kurumsal, sade Türkçe kullan; Markdown, tablo, emoji ve süslü biçimlendirme kullanma. Yanıtı kısa tut.'
+      : 'You are Luna, the professional financial assistant inside the Balance Sheet Analysis app. Interpret only the supplied broker-distribution data. Explain leading buyers, sellers, concentration, net lots, top-five balance, and the data date. Never invent missing OCR rows or infer a guaranteed price direction. Do not give personalized investment advice. Use concise professional English without Markdown, tables, emoji, or decorative formatting.';
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1000,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+lang});
+    const answer=lunaProfessionalText(responseOutputText(out));
+    if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
+    const item=safeSnapshot.selectedTable||{}, url=/^https:\/\//i.test(String(item.url||''))?String(item.url):'';
+    const sources=url?[{title:String(item.title||'BorsaCaddesi'),url}]:[];
+    LUNA_BROKER_CACHE.set(cacheKey,{at:Date.now(),answer,sources});
+    if(LUNA_BROKER_CACHE.size>150) [...LUNA_BROKER_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>LUNA_BROKER_CACHE.delete(k));
+    lunaJson(res,200,{ok:true,answer,sources});
+  }catch(e){
+    const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
+    console.error('[Luna Broker]',e.message||e);
+    lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
+  }
 }
 const LUNA_APP_TOOLS=[
   {type:'web_search'},
@@ -2481,6 +2526,7 @@ http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
 
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
+  if (urlPath === '/ai/broker') { lunaBrokerAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/chat') { lunaChatHandler(req,res); return; }
 
   // --- TipRanks özel şirket profili (güncel değerleme, finansman, ekip ve momentum) ---
@@ -3004,6 +3050,18 @@ http.createServer((req, res) => {
     if (!/^[A-Z0-9]{1,12}$/.test(h)) { send({ ok: false, symbol: h, error: 'bad_symbol' }); return; }
     if (slug && !/^[a-z0-9][a-z0-9\-/_]{2,160}$/i.test(slug)) { send({ ok: false, symbol: h, error: 'bad_slug' }); return; }
     borsaCaddesiAkd(h, slug ? { slug } : null).then(send).catch(e => send({ ok: false, symbol: h, error: e.message || 'fetch' }));
+    return;
+  }
+
+  // AKD tablosunu Luna düğmesinden önce arka planda OCR ile hazırla.
+  if (urlPath === '/bistakdocr') {
+    const h = (new URLSearchParams(req.url.split('?')[1] || '').get('hisse') || '').trim().toUpperCase();
+    const send = (obj) => {
+      res.writeHead(200, { 'Content-Type':'application/json; charset=utf-8', 'Access-Control-Allow-Origin':'*', 'Cache-Control':'no-store' });
+      res.end(JSON.stringify(obj));
+    };
+    if (!/^[A-Z0-9]{1,12}$/.test(h)) { send({ ok:false,symbol:h,error:'bad_symbol' }); return; }
+    lunaBrokerDistributionSnapshot(h).then(send).catch(e=>send({ok:false,symbol:h,error:e.message||'fetch'}));
     return;
   }
 

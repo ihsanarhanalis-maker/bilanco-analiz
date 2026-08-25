@@ -7672,6 +7672,23 @@ let TAKAS_INIT=false;
 let TAKAS_LIST=null; // son liste (latest + recent)
 let TAKAS_OVERRIDE={}; // kind -> item (geçmiş gün seçimi)
 let TAKAS_ACTIVE_SLUG=null;
+let TAKAS_LUNA_SNAPSHOT=null;
+let TAKAS_LUNA_SYMBOL='';
+let TAKAS_LUNA_PROMISE=null;
+function prefetchTakasLuna(sym){
+  const symbol=String(sym||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(!symbol) return Promise.resolve(null);
+  if(TAKAS_LUNA_SNAPSHOT&&TAKAS_LUNA_SYMBOL===symbol) return Promise.resolve(TAKAS_LUNA_SNAPSHOT);
+  if(TAKAS_LUNA_PROMISE&&TAKAS_LUNA_SYMBOL===symbol) return TAKAS_LUNA_PROMISE;
+  TAKAS_LUNA_SYMBOL=symbol;
+  const request=fetch('/bistakdocr?hisse='+encodeURIComponent(symbol))
+    .then(r=>r.json()).then(j=>{
+      if(j&&j.ok&&TAKAS_LUNA_SYMBOL===symbol) TAKAS_LUNA_SNAPSHOT=j;
+      return j&&j.ok?j:null;
+    }).catch(()=>null).finally(()=>{ if(TAKAS_LUNA_PROMISE===request) TAKAS_LUNA_PROMISE=null; });
+  TAKAS_LUNA_PROMISE=request;
+  return TAKAS_LUNA_PROMISE;
+}
 function initTakasPage(){
   if(TAKAS_INIT) return;
   TAKAS_INIT=true;
@@ -7815,6 +7832,9 @@ async function loadTakasAkd(){
   initTakasPage();
   TAKAS_OVERRIDE={};
   TAKAS_ACTIVE_SLUG=null;
+  TAKAS_LUNA_SNAPSHOT=null;
+  TAKAS_LUNA_SYMBOL=sym;
+  TAKAS_LUNA_PROMISE=null;
   const lunaBtn=document.getElementById('takasLunaBtn');
   const lunaCard=document.getElementById('takasLunaCard');
   if(lunaBtn) lunaBtn.disabled=true;
@@ -7835,6 +7855,7 @@ async function loadTakasAkd(){
     const latest=j.latest||{};
     TAKAS_ACTIVE_SLUG=(latest.gun_sonu_akd && latest.gun_sonu_akd.slug) || null;
     renderTakasView();
+    prefetchTakasLuna(sym);
     if(lunaBtn) lunaBtn.disabled=false;
     if(st) st.textContent='Güncel';
   }catch(e){
@@ -7852,10 +7873,9 @@ async function analyzeTakasWithLuna(){
   if(!sym||!TAKAS_LIST||!btn||!card||!status||!body) return;
   btn.disabled=true; card.classList.remove('hidden'); body.textContent=''; status.textContent=t('takas_luna_loading');
   try{
-    const question=getLang()==='en'
-      ? `Interpret ${sym}'s latest broker distribution (AKD) table in the Bilanço Analiz app. Use the app broker-distribution tool. Explain leading buyers and sellers, concentration, net lots and top-five balance; state the data date and avoid definitive investment advice.`
-      : `${sym} hissesinin Bilanço Analiz uygulamasındaki en güncel aracı kurum dağılımı (AKD) tablosunu yorumla. Uygulamanın aracı kurum dağılımı aracını kullan. Önde gelen alıcı ve satıcıları, yoğunlaşmayı, net lotu ve ilk beş dengesini açıkla; veri tarihini belirt ve kesin yatırım tavsiyesi verme.`;
-    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:[{role:'user',content:question}]})});
+    const snapshot=TAKAS_LUNA_SNAPSHOT||await prefetchTakasLuna(sym);
+    if(!snapshot) throw new Error('unavailable');
+    const r=await fetch('/ai/broker',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),snapshot})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok) throw new Error(j.error||'unavailable');
     status.textContent='';
