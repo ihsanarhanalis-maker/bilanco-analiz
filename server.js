@@ -2130,12 +2130,12 @@ function lunaRateAllowed(req){
   item.count++;
   return true;
 }
-function openAiResponse(payload){
+function openAiResponse(payload, timeoutMs){
   return new Promise((resolve, reject) => {
     const raw=JSON.stringify(payload);
     const rq=https.request({hostname:'api.openai.com',path:'/v1/responses',method:'POST',headers:{
       'Authorization':'Bearer '+process.env.OPENAI_API_KEY,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)
-    },timeout:45000}, pr => {
+    },timeout:timeoutMs||45000}, pr => {
       let body='';
       pr.on('data', c => { if(body.length < 2000000) body += c; });
       pr.on('end', () => {
@@ -2501,7 +2501,7 @@ async function lunaEconomicCalendarHandler(req,res){
     const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2600,
       instructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
       prompt_cache_key:'bilanco-luna-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
-      text:{verbosity:'medium',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}});
+      text:{verbosity:'medium',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}},90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     const sources=[];
