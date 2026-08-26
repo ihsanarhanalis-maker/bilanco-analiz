@@ -2490,31 +2490,21 @@ async function lunaEconomicCalendarHandler(req,res){
     const cached=LUNA_ECON_CACHE.get(cacheKey);
     if(cached&&Date.now()-cached.at<10*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,sources:cached.sources}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
-      ? 'Bu görevde seçili ekonomik takvim görünümünü kıdemli makro stratejist gibi yorumla. Takvimdeki açıklanan, beklenti ve önceki değerleri temel kanıt kabul et; web aramasını yalnızca güncel makro bağlamı ve aktarım kanallarını doğrulamak için kullan. Açıklanan değeri olmayan olayları gerçekleşmiş gibi yazma. Sürpriz yönünü göstergenin ekonomik anlamına göre değerlendir; renk alanını tek başına yorumlama. Faiz, kur, tahvil, hisse ve emtia etkilerini yalnızca koşullu aktarım kanalları olarak açıkla; kesin piyasa yönü tahmini verme. Yayın tarihi ile olay tarihini ayır ve çelişen güncel kaynakları veri kalitesi bölümünde belirt. Her önemli görüşü takvimdeki bir olay/değer veya güvenilir güncel bağlamla destekle.'
-      : 'For this task, interpret the selected economic-calendar view as a senior macro strategist. Treat the calendar actual, forecast, and previous values as the primary evidence; use web search only to verify current macro context and transmission channels. Never describe an event without an actual value as already released. Determine surprise direction from the economics of the indicator, not from the color field alone. Describe rates, FX, bonds, equities, and commodities only through conditional transmission channels; do not predict a guaranteed market direction. Distinguish publication date from event date and disclose conflicting current sources under data quality. Ground each material view in a calendar event/value or reliable current context.');
+      ? 'Bu görevde seçili ekonomik takvim görünümünü kıdemli makro stratejist gibi yorumla. Yalnızca gönderilen takvimdeki açıklanan, beklenti ve önceki değerleri kanıt kabul et; mevcut olmayan güncel bağlamı varsayma. Açıklanan değeri olmayan olayları gerçekleşmiş gibi yazma. Sürpriz yönünü göstergenin ekonomik anlamına göre değerlendir; renk alanını tek başına yorumlama. Faiz, kur, tahvil, hisse ve emtia etkilerini yalnızca koşullu aktarım kanalları olarak açıkla; kesin piyasa yönü tahmini verme. Yayın tarihi ile olay tarihini ayır. Her önemli görüşü takvimdeki bir olay veya değerle destekle ve eksik veriyi veri kalitesi bölümünde açıkça belirt.'
+      : 'For this task, interpret the selected economic-calendar view as a senior macro strategist. Treat only the supplied calendar actual, forecast, and previous values as evidence; do not invent missing current context. Never describe an event without an actual value as already released. Determine surprise direction from the economics of the indicator, not from the color field alone. Describe rates, FX, bonds, equities, and commodities only through conditional transmission channels; do not predict a guaranteed market direction. Distinguish publication date from event date. Ground each material view in a calendar event or value and disclose missing evidence under data quality.');
     const schema={type:'object',additionalProperties:false,properties:{
       summary:{type:'string'},keyEvents:{type:'array',items:{type:'string'},maxItems:5},
       realizedSurprises:{type:'array',items:{type:'string'},maxItems:4},marketTransmission:{type:'string'},
       riskScenarios:{type:'array',items:{type:'string'},maxItems:3},watchNext:{type:'array',items:{type:'string'},maxItems:4},
       dataQuality:{type:'string'},disclaimer:{type:'string'}
     },required:['summary','keyEvents','realizedSurprises','marketTransmission','riskScenarios','watchNext','dataQuality','disclaimer']};
-    const researchInstructions=lang==='tr'
-      ? 'Seçili ekonomik takvim için güncel makro bağlamı webde araştır. Merkez bankaları, resmi istatistik kurumları ve kamu kurumları gibi birincil kaynaklara öncelik ver. Yalnızca takvim olaylarını yorumlamaya yarayan kısa, tarihli ve doğrulanabilir kanıtları getir; yatırım tavsiyesi verme.'
-      : 'Research the current macro context for the selected economic calendar. Prioritize primary sources such as central banks, official statistics agencies, and public institutions. Return only concise, dated, verifiable evidence useful for interpreting the calendar events; do not provide investment advice.';
-    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:750,
-      instructions:researchInstructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
-      tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],
-      prompt_cache_key:'bilanco-luna-economic-research-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
-      text:{verbosity:'low'}});
-    const finalInput=[{role:'user',content:'Seçili ekonomik takvim / Selected economic calendar:\n'+input},...(Array.isArray(research.output)?research.output:[])];
     const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2600,
-      instructions,input:finalInput,
+      instructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
       prompt_cache_key:'bilanco-luna-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       text:{verbosity:'medium',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
-    const sources=[...responseWebSources(research),...responseWebSources(out)]
-      .filter((source,index,all)=>source&&source.url&&all.findIndex(item=>item&&item.url===source.url)===index).slice(0,6);
+    const sources=[];
     LUNA_ECON_CACHE.set(cacheKey,{at:Date.now(),analysis,sources});
     if(LUNA_ECON_CACHE.size>150) [...LUNA_ECON_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>LUNA_ECON_CACHE.delete(k));
     lunaJson(res,200,{ok:true,analysis,sources});
