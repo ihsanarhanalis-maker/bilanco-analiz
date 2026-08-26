@@ -3431,61 +3431,53 @@ function econTimeLabel(time){
 
 /* ---------- Grafik AI: TradingView gelişmiş grafik + Luna teknik yorum ---------- */
 let GRAPH_AI_INIT=false;
-let GRAPH_AI_AUTORUN_TIMER=null;
-let GRAPH_AI_LOAD_SEQ=0;
-let GRAPH_AI_FALLBACK_SEQ=0;
-let GRAPH_AI_RANGE='1y';
-let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA'};
+let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA',originalName:'',synced:false,blockedOriginal:''};
 const GRAPH_AI_TV_SUFFIX={L:'LSE',DE:'XETR',PA:'EURONEXT',AS:'EURONEXT',BR:'EURONEXT',LS:'EURONEXT',MI:'MIL',MC:'BME',SW:'SIX',ST:'OMXSTO',CO:'OMXCOP',OL:'OSL',HE:'OMXHEX',VI:'VIE',WA:'GPW',T:'TSE',HK:'HKEX',TW:'TWSE',TWO:'TPEX',TO:'TSX',V:'TSXV',AX:'ASX',SI:'SGX'};
 function graphAiYahooSymbol(tvSymbol){
-  const parts=String(tvSymbol||'').split(':'), ex=(parts.shift()||'').toUpperCase(), code=parts.join(':');
+  const raw=String(tvSymbol||'').trim().toUpperCase();
+  if(!raw.includes(':')) return raw;
+  const parts=raw.split(':'), ex=(parts.shift()||'').toUpperCase(), code=parts.join(':');
   if(ex==='BIST') return code+'.IS';
   const suffix=Object.entries(GRAPH_AI_TV_SUFFIX).find(([,value])=>value===ex)?.[0];
   return suffix ? code+'.'+suffix : code;
 }
-async function graphAiTvFromCandidate(candidate,raw){
-  if(!candidate) return raw;
-  if(candidate.market==='BIST') return 'BIST:'+raw;
-  if(candidate.market==='US'){
-    try{
-      const tickers=['NASDAQ:'+raw,'NYSE:'+raw,'AMEX:'+raw];
-      const response=await fetch('https://scanner.tradingview.com/america/scan',{
-        method:'POST',body:JSON.stringify({symbols:{tickers},columns:['name','is_primary','close']})
-      });
-      if(response.ok){
-        const result=await response.json();
-        const rows=(result.data||[]).filter(row=>row.d&&row.d[2]!=null);
-        const exact=rows.find(row=>row.d[1]===true)||rows[0];
-        if(exact&&exact.s) return exact.s;
-      }
-    }catch(_e){}
-  }
-  if(candidate.market==='EU'){
-    const suffix=(String(candidate.code||'').split('.').pop()||'').toUpperCase();
-    return (EU_EXCHANGES[suffix]&&EU_EXCHANGES[suffix].tv ? EU_EXCHANGES[suffix].tv+':' : '')+raw;
-  }
-  return raw;
+function graphAiQuoteSymbol(data){
+  const original=String(data&&data.original_name||'').trim().toUpperCase();
+  const shortName=String(data&&data.short_name||'').trim().toUpperCase();
+  if(!/^[A-Z0-9._:\/\-^=!]{1,80}$/.test(original)||!/^[A-Z0-9._\-^=]{1,40}$/.test(shortName)) return null;
+  const prefix=original.split(':')[0];
+  const tvSymbol=['BATS','BATS_DLY'].includes(prefix)?shortName:original;
+  return {original,tvSymbol,yahooSymbol:graphAiYahooSymbol(tvSymbol)};
 }
-async function graphAiSymbols(){
-  const input=document.getElementById('graphAiTicker');
-  let raw=String(input&&input.value||'NVDA').trim().toUpperCase().replace(/\s+/g,'');
-  if(!/^[A-Z0-9._:\/\-^=!]{1,80}$/.test(raw)) return null;
-  let tvSymbol=raw;
-  if(!raw.includes(':')){
-    if(/\.IS$/.test(raw)) tvSymbol='BIST:'+raw.replace(/\.IS$/,'');
-    else if(window.FIN && String(FIN.ticker||'').toUpperCase()===raw){
-      if(FIN.market==='BIST') tvSymbol='BIST:'+raw;
-      else if(FIN.market==='EU' && FIN.euInfo&&FIN.euInfo.tv) tvSymbol=FIN.euInfo.tv+':'+raw;
-    }else{
-      try{
-        const detected=await detectBareMarkets(raw);
-        const preferred=(detected.cands||[]).find(c=>c.market==='BIST')||(detected.cands||[])[0];
-        tvSymbol=await graphAiTvFromCandidate(preferred,raw);
-      }catch(_e){}
-    }
+function syncGraphAiSymbolFromWidget(event){
+  if(event.origin!=='https://www.tradingview-widget.com') return;
+  const frame=document.querySelector('#graphAiWidget iframe');
+  if(!frame||event.source!==frame.contentWindow) return;
+  let message=event.data;
+  if(typeof message==='string'){ try{ message=JSON.parse(message); }catch(_e){ return; } }
+  if(!message||typeof message!=='object') return;
+  if(message.name==='tv-widget-no-data'){
+    GRAPH_AI_STATE.synced=false;
+    GRAPH_AI_STATE.blockedOriginal=GRAPH_AI_STATE.originalName;
+    const status=document.getElementById('graphAiStatus');
+    if(status){ status.textContent=t('graph_ai_symbol_unavailable'); status.className='hint down'; }
+    return;
   }
-  return {tvSymbol,yahooSymbol:graphAiYahooSymbol(tvSymbol)};
+  if(message.name!=='quoteUpdate'||message.provider!=='TradingView') return;
+  const next=graphAiQuoteSymbol(message.data); if(!next) return;
+  if(GRAPH_AI_STATE.blockedOriginal&&next.original===GRAPH_AI_STATE.blockedOriginal) return;
+  const changed=next.original!==GRAPH_AI_STATE.originalName;
+  GRAPH_AI_STATE={...GRAPH_AI_STATE,...next,synced:true,blockedOriginal:''};
+  const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=next.tvSymbol;
+  updateGraphAiTradingViewLink();
+  const status=document.getElementById('graphAiStatus');
+  if(status&&!status.classList.contains('graph-ai-busy')){ status.textContent=''; status.className='hint'; }
+  if(changed){
+    const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
+    if(card) card.classList.add('hidden'); if(body) body.innerHTML='';
+  }
 }
+window.addEventListener('message',syncGraphAiSymbolFromWidget);
 function graphAiTradingViewUrl(){
   return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(GRAPH_AI_STATE.tvSymbol);
 }
@@ -3503,112 +3495,26 @@ async function toggleGraphAiFullscreen(){
     else if(chart.requestFullscreen) await chart.requestFullscreen();
   }catch(_e){}
 }
-function graphAiFmtPrice(value){
-  if(value==null||!isFinite(value)) return '—';
-  return Number(value).toLocaleString(getLang()==='en'?'en-US':'tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2});
-}
-function setGraphAiRange(range){
-  if(!['1mo','3mo','6mo','1y','5y'].includes(range)) return;
-  GRAPH_AI_RANGE=range;
-  renderGraphAiFallbackChart();
-}
-async function renderGraphAiFallbackChart(){
-  const host=document.getElementById('graphAiWidget'); if(!host) return;
-  const state=GRAPH_AI_STATE, requestSeq=++GRAPH_AI_FALLBACK_SEQ;
-  const rangeLabels={tr:{'1mo':'1 Ay','3mo':'3 Ay','6mo':'6 Ay','1y':'1 Yıl','5y':'5 Yıl'},en:{'1mo':'1M','3mo':'3M','6mo':'6M','1y':'1Y','5y':'5Y'}};
-  const labels=rangeLabels[getLang()==='en'?'en':'tr'];
-  host.innerHTML=`<div class="graph-ai-fallback"><div class="graph-ai-fallback-head"><div><strong>${safeHTML(state.tvSymbol)}</strong><span>${safeHTML(t('graph_ai_fallback_title'))}</span></div><div class="graph-ai-range-buttons">${Object.entries(labels).map(([range,label])=>`<button type="button" class="${range===GRAPH_AI_RANGE?'active':''}" onclick="setGraphAiRange('${range}')">${label}</button>`).join('')}</div></div><div class="graph-ai-fallback-body"><div class="hint">${safeHTML(t('chart_loading'))}</div></div><div class="graph-ai-fallback-note">${safeHTML(t('graph_ai_fallback_note'))}</div></div>`;
-  try{
-    const response=await fetch('/price?s='+encodeURIComponent(state.yahooSymbol)+'&range='+GRAPH_AI_RANGE);
-    const data=await response.json();
-    if(requestSeq!==GRAPH_AI_FALLBACK_SEQ) return;
-    const result=data&&data.chart&&data.chart.result&&data.chart.result[0];
-    const timestamps=(result&&result.timestamp)||[];
-    const closes=(result&&result.indicators&&result.indicators.quote&&result.indicators.quote[0].close)||[];
-    const points=timestamps.map((time,index)=>[time*1000,closes[index]]).filter(point=>point[1]!=null);
-    const body=host.querySelector('.graph-ai-fallback-body');
-    if(!body||points.length<2){ if(body) body.innerHTML='<div class="hint">'+safeHTML(t('graph_ai_no_price'))+'</div>'; return; }
-    const W=940,H=500,padL=68,padR=28,padT=28,padB=42;
-    const xs=points.map(point=>point[0]),ys=points.map(point=>point[1]);
-    const minX=xs[0],maxX=xs[xs.length-1],minY=Math.min(...ys),maxY=Math.max(...ys),spanY=(maxY-minY)||1;
-    const X=time=>padL+(time-minX)/((maxX-minX)||1)*(W-padL-padR);
-    const Y=value=>padT+(maxY-value)/spanY*(H-padT-padB);
-    const path=points.map((point,index)=>(index?'L':'M')+X(point[0]).toFixed(1)+' '+Y(point[1]).toFixed(1)).join('');
-    const area=path+` L${X(maxX).toFixed(1)} ${H-padB} L${X(minX).toFixed(1)} ${H-padB} Z`;
-    const first=ys[0],last=ys[ys.length-1],change=(last-first)/first*100,color=change>=0?'#30d59b':'#ff5c75';
-    let grid='';
-    for(let index=0;index<=4;index++){
-      const value=minY+spanY*index/4,y=Y(value);
-      grid+=`<line x1="${padL}" x2="${W-padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="rgba(132,154,190,.16)"/><text x="8" y="${(y+4).toFixed(1)}" fill="#91a2bf" font-size="12">${safeHTML(graphAiFmtPrice(value))}</text>`;
-    }
-    const dateFormat=new Intl.DateTimeFormat(getLang()==='en'?'en-US':'tr-TR',GRAPH_AI_RANGE==='5y'?{month:'short',year:'2-digit'}:{day:'2-digit',month:'short'});
-    const dateIndexes=[0,Math.floor(points.length/3),Math.floor(points.length*2/3),points.length-1];
-    const dates=dateIndexes.map((pointIndex,index)=>`<text x="${X(points[pointIndex][0]).toFixed(1)}" y="${H-12}" fill="#91a2bf" font-size="12" text-anchor="${index===0?'start':index===dateIndexes.length-1?'end':'middle'}">${safeHTML(dateFormat.format(new Date(points[pointIndex][0])))}</text>`).join('');
-    const currency=(result&&result.meta&&result.meta.currency)||'';
-    body.innerHTML=`<div class="graph-ai-price-line"><strong>${safeHTML(graphAiFmtPrice(last))} ${safeHTML(currency)}</strong><span class="${change>=0?'up':'down'}">${change>=0?'▲':'▼'} ${Math.abs(change).toFixed(2)}%</span></div><svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${safeHTML(state.tvSymbol)}"><defs><linearGradient id="graphAiArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".28"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${area}" fill="url(#graphAiArea)"/><path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>${dates}</svg>`;
-  }catch(_e){
-    if(requestSeq!==GRAPH_AI_FALLBACK_SEQ) return;
-    const body=host.querySelector('.graph-ai-fallback-body');
-    if(body) body.innerHTML='<div class="hint down">'+safeHTML(t('graph_ai_price_error'))+'</div>';
-  }
-}
 function renderGraphAiWidget(){
   const host=document.getElementById('graphAiWidget'); if(!host) return;
   const state=GRAPH_AI_STATE, locale=getLang()==='en'?'en':'tr';
   updateGraphAiTradingViewLink();
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=state.tvSymbol;
-  if(state.tvSymbol.startsWith('BIST:')){ renderGraphAiFallbackChart(); return; }
   host.innerHTML='<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget" style="height:calc(100% - 28px);width:100%"></div><div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank"><span class="blue-text">TradingView</span></a></div></div>';
   const container=host.firstElementChild, script=document.createElement('script');
   script.type='text/javascript'; script.async=true; script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
   script.text=JSON.stringify({autosize:true,symbol:state.tvSymbol,interval:'D',timezone:'exchange',theme:'dark',backgroundColor:'#07101f',gridColor:'rgba(132,154,190,0.10)',style:'1',locale,withdateranges:true,hide_side_toolbar:false,hide_top_toolbar:false,hide_legend:false,hide_volume:false,allow_symbol_change:true,save_image:true,calendar:true,details:true,hotlist:true,show_popup_button:true,popup_width:'1600',popup_height:'950',studies:['RSI@tv-basicstudies','MACD@tv-basicstudies','MASimple@tv-basicstudies'],support_host:'https://www.tradingview.com'});
   container.appendChild(script);
 }
-function bindGraphAiAutoOpen(){
-  const input=document.getElementById('graphAiTicker');
-  if(!input||input._graphAiAutoBound) return;
-  input._graphAiAutoBound=true;
-  input.addEventListener('input',()=>{
-    clearTimeout(GRAPH_AI_AUTORUN_TIMER);
-    const raw=String(input.value||'').trim().toUpperCase().replace(/\s+/g,'');
-    const status=document.getElementById('graphAiStatus');
-    if(!/^[A-Z0-9._:\/\-^=!]{2,80}$/.test(raw)){
-      GRAPH_AI_LOAD_SEQ++;
-      if(status){ status.textContent=''; status.className='hint'; }
-      return;
-    }
-    if(status){ status.textContent=t('graph_ai_searching'); status.className='hint'; }
-    GRAPH_AI_AUTORUN_TIMER=setTimeout(()=>{
-      const current=String(input.value||'').trim().toUpperCase().replace(/\s+/g,'');
-      if(current===raw) loadGraphAi();
-    },650);
-  });
-  input.addEventListener('keydown',event=>{
-    if(event.key==='Enter') clearTimeout(GRAPH_AI_AUTORUN_TIMER);
-  });
-}
 function initGraphAiPage(){
   if(!GRAPH_AI_INIT){ GRAPH_AI_INIT=true; renderGraphAiWidget(); }
-  bindGraphAiAutoOpen();
-}
-async function loadGraphAi(event){
-  if(event) event.preventDefault();
-  clearTimeout(GRAPH_AI_AUTORUN_TIMER);
-  const requestSeq=++GRAPH_AI_LOAD_SEQ;
-  const status=document.getElementById('graphAiStatus'), card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
-  if(status){ status.textContent=t('graph_ai_searching'); status.className='hint'; }
-  const next=await graphAiSymbols();
-  if(requestSeq!==GRAPH_AI_LOAD_SEQ) return;
-  if(!next){ if(status){ status.textContent=t('graph_ai_bad_symbol'); status.className='hint down'; } return; }
-  GRAPH_AI_STATE=next; renderGraphAiWidget();
-  if(status){ status.textContent=''; status.className='hint'; }
-  if(card) card.classList.add('hidden'); if(body) body.innerHTML='';
 }
 async function analyzeGraphAi(){
   const btn=document.getElementById('graphAiLunaBtn'), status=document.getElementById('graphAiStatus');
   const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
   if(!btn||!status||!card||!body) return;
-  btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.className='hint'; status.textContent=t('graph_ai_loading');
+  if(!GRAPH_AI_STATE.synced){ status.textContent=t('graph_ai_wait_symbol'); status.className='hint down'; return; }
+  btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.className='hint graph-ai-busy'; status.textContent=t('graph_ai_loading');
   try{
     const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol})});
     const j=await r.json().catch(()=>({}));
@@ -3622,7 +3528,7 @@ async function analyzeGraphAi(){
       ${lunaList(t('graph_ai_scenarios'),a.scenarios)}
       ${lunaList(t('luna_risks'),a.risks,true)}
     </div><div class="luna-note">${safeHTML(a.disclaimer||t('luna_note'))}</div>`;
-    status.textContent='';
+    status.textContent=''; status.className='hint';
   }catch(e){ status.textContent=e.message==='rate_limit'?t('luna_rate'):t('graph_ai_error'); status.className='hint down'; }
   finally{ btn.disabled=false; }
 }

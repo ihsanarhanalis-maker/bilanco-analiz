@@ -621,7 +621,7 @@
     a{color:#1763b8 !important;text-decoration:none}
   }
 </style>
-<link rel="stylesheet" href="/apple-design.css?v=189">
+<link rel="stylesheet" href="/apple-design.css?v=190">
 </head>
 <body>
 <a class="skip-link" href="#mainContent" data-i18n="skip_main">Ana içeriğe geç</a>
@@ -1033,12 +1033,8 @@
       <div>
         <div class="ai-kicker" data-i18n="graph_ai_kicker">TradingView + Luna teknik analiz</div>
         <h2 id="graphAiTitle" data-i18n="graph_ai_h2">Grafik AI</h2>
-        <p data-i18n="graph_ai_sub">TradingView grafiğini incele; seçili sembolü Luna’ya High düşünme düzeyinde yorumlat.</p>
+        <p data-i18n="graph_ai_sub">Hisse kodunu doğrudan TradingView grafiğinin sembol aramasından seç; Luna seçili grafiği High düzeyinde yorumlasın.</p>
       </div>
-      <form class="graph-ai-search" onsubmit="loadGraphAi(event)">
-        <input id="graphAiTicker" type="search" value="" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Hisse kodu" data-i18n-placeholder="graph_ai_ph" placeholder="Sadece kod yaz: ASELS, NVDA, THYAO…">
-        <button type="submit" class="primary" data-i18n="graph_ai_show">Grafiği Aç</button>
-      </form>
     </header>
     <div class="graph-ai-chart-card">
       <div id="graphAiWidget" class="graph-ai-widget" aria-live="polite"></div>
@@ -1046,7 +1042,7 @@
     <div class="graph-ai-actions">
       <div>
         <strong id="graphAiSymbolLabel">NASDAQ:NVDA</strong>
-        <span class="hint" data-i18n="graph_ai_hint">Kodu yazmayı bırakınca grafik otomatik açılır. TradingView araç çubuğundan sembol, zaman aralığı ve gösterge değiştirebilirsin.</span>
+        <span class="hint" data-i18n="graph_ai_hint">TradingView’in üst araç çubuğundaki sembole tıkla; kodu yazıp sonucu seçtiğinde grafik ve Luna sembolü birlikte güncellenir.</span>
         <span class="graph-ai-account-note" data-i18n="graph_ai_tv_note">TradingView girişi resmi sayfada açılır; e-posta ve şifren bu uygulamaya gelmez.</span>
       </div>
       <div class="graph-ai-action-buttons">
@@ -1311,8 +1307,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=189"></script>
-<script src="app.js?v=189"></script>
+<script src="i18n.js?v=190"></script>
+<script src="app.js?v=190"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">
