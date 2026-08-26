@@ -3450,7 +3450,7 @@ function renderGraphAiWidget(){
   host.innerHTML='<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget" style="height:calc(100% - 28px);width:100%"></div><div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank"><span class="blue-text">TradingView</span></a></div></div>';
   const container=host.firstElementChild, script=document.createElement('script');
   script.type='text/javascript'; script.async=true; script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.text=JSON.stringify({autosize:true,symbol:state.tvSymbol,interval:'D',timezone:'exchange',theme:'dark',backgroundColor:'#07101f',gridColor:'rgba(132,154,190,0.10)',style:'1',locale,withdateranges:true,hide_side_toolbar:false,hide_top_toolbar:false,hide_legend:false,hide_volume:false,allow_symbol_change:false,save_image:true,calendar:false,studies:['RSI@tv-basicstudies','MACD@tv-basicstudies','MASimple@tv-basicstudies'],support_host:'https://www.tradingview.com'});
+  script.text=JSON.stringify({autosize:true,symbol:state.tvSymbol,interval:'D',timezone:'Europe/Istanbul',theme:'dark',backgroundColor:'#07101f',gridColor:'rgba(132,154,190,0.10)',style:'1',locale,withdateranges:true,hide_side_toolbar:false,hide_top_toolbar:false,hide_legend:false,hide_volume:false,allow_symbol_change:false,save_image:true,calendar:false,studies:['RSI@tv-basicstudies','MACD@tv-basicstudies','MASimple@tv-basicstudies'],support_host:'https://www.tradingview.com'});
   container.appendChild(script);
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=state.tvSymbol;
 }
