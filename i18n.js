@@ -27,14 +27,19 @@ tr:{
   tab_ai:'✦ Luna AI',
   graph_ai_kicker:'TradingView + Luna teknik analiz',
   graph_ai_h2:'Grafik AI',
-  graph_ai_sub:'TradingView grafiğini incele; seçili sembolü Luna’ya High düşünme düzeyinde yorumlat.',
-  graph_ai_ph:'NVDA veya THYAO',
+  graph_ai_sub:'TradingView sembolünü yaz veya araç çubuğundan ara; widget içinden tüm desteklenen piyasalara geçebilirsin.'
+  graph_ai_ph:'ASELS, BIST:ASELS, NASDAQ:NVDA…'
   graph_ai_show:'Grafiği Aç',
-  graph_ai_hint:'Grafikteki zaman aralığını ve göstergeleri TradingView araç çubuğundan değiştirebilirsin.',
+  graph_ai_hint:'TradingView araç çubuğundan sembol, zaman aralığı ve gösterge değiştirebilirsin.'
   graph_ai_luna:'✦ Luna ile Yorumla',
   graph_ai_luna_title:'Luna Teknik Grafik Yorumu',
   graph_ai_loading:'Luna trendi, momentumu ve riskleri High düzeyinde inceliyor…',
   graph_ai_error:'Luna grafik yorumuna şu anda ulaşılamadı. Lütfen tekrar deneyin.',
+  graph_ai_fullscreen:'Tam ekran',
+  graph_ai_open_tv:'↗ TradingView’de aç',
+  graph_ai_tv_note:'Kendi TradingView hesabınla tüm kişisel araçlara erişmek için grafiği TradingView’de aç.',
+  graph_ai_searching:'Sembol aranıyor…',
+  graph_ai_bad_symbol:'Geçerli bir TradingView sembolü yazın.'
   graph_ai_summary:'Teknik Sonuç',
   graph_ai_trend:'Trend Yapısı',
   graph_ai_momentum:'Momentum',
@@ -888,14 +893,19 @@ en:{
   tab_ai:'✦ Luna AI',
   graph_ai_kicker:'TradingView + Luna technical analysis',
   graph_ai_h2:'Chart AI',
-  graph_ai_sub:'Inspect the TradingView chart and ask Luna to analyze the selected symbol with High reasoning.',
-  graph_ai_ph:'NVDA or THYAO',
+  graph_ai_sub:'Enter a TradingView symbol or search from the toolbar; switch to any supported market inside the widget.'
+  graph_ai_ph:'ASELS, BIST:ASELS, NASDAQ:NVDA…'
   graph_ai_show:'Open Chart',
-  graph_ai_hint:'Use the TradingView toolbar to change the range and indicators.',
+  graph_ai_hint:'Use the TradingView toolbar to change the symbol, range, and indicators.'
   graph_ai_luna:'✦ Analyze with Luna',
   graph_ai_luna_title:'Luna Technical Chart Commentary',
   graph_ai_loading:'Luna is reviewing trend, momentum, and risk with High reasoning…',
   graph_ai_error:'Luna chart commentary is currently unavailable. Please try again.',
+  graph_ai_fullscreen:'Fullscreen',
+  graph_ai_open_tv:'↗ Open in TradingView',
+  graph_ai_tv_note:'Open the chart in TradingView to use your own account and personal tools.',
+  graph_ai_searching:'Searching symbol…',
+  graph_ai_bad_symbol:'Enter a valid TradingView symbol.'
   graph_ai_summary:'Technical Conclusion',
   graph_ai_trend:'Trend Structure',
   graph_ai_momentum:'Momentum',
