@@ -1036,7 +1036,7 @@
         <p data-i18n="graph_ai_sub">TradingView grafiğini incele; seçili sembolü Luna’ya High düşünme düzeyinde yorumlat.</p>
       </div>
       <form class="graph-ai-search" onsubmit="loadGraphAi(event)">
-        <input id="graphAiTicker" type="search" value="NASDAQ:NVDA" maxlength="80" autocomplete="off" spellcheck="false" data-i18n-placeholder="graph_ai_ph" placeholder="ASELS, BIST:ASELS, NASDAQ:NVDA…">
+        <input id="graphAiTicker" type="search" value="" maxlength="80" autocomplete="off" spellcheck="false" aria-label="Hisse kodu" data-i18n-placeholder="graph_ai_ph" placeholder="Sadece kod yaz: ASELS, NVDA, THYAO…">
         <button type="submit" class="primary" data-i18n="graph_ai_show">Grafiği Aç</button>
       </form>
     </header>
@@ -1046,12 +1046,12 @@
     <div class="graph-ai-actions">
       <div>
         <strong id="graphAiSymbolLabel">NASDAQ:NVDA</strong>
-        <span class="hint" data-i18n="graph_ai_hint">Grafikteki zaman aralığını ve göstergeleri TradingView araç çubuğundan değiştirebilirsin.</span>
-        <span class="graph-ai-account-note" data-i18n="graph_ai_tv_note">Kendi TradingView hesabınla tüm kişisel araçlara erişmek için grafiği TradingView’de aç.</span>
+        <span class="hint" data-i18n="graph_ai_hint">Kodu yazmayı bırakınca grafik otomatik açılır. TradingView araç çubuğundan sembol, zaman aralığı ve gösterge değiştirebilirsin.</span>
+        <span class="graph-ai-account-note" data-i18n="graph_ai_tv_note">TradingView girişi resmi sayfada açılır; e-posta ve şifren bu uygulamaya gelmez.</span>
       </div>
       <div class="graph-ai-action-buttons">
         <button type="button" class="scan-chip" onclick="toggleGraphAiFullscreen()" data-i18n="graph_ai_fullscreen">Tam ekran</button>
-        <button type="button" class="scan-chip" onclick="openGraphAiTradingView()" data-i18n="graph_ai_open_tv">↗ TradingView’de aç</button>
+        <button type="button" class="scan-chip" onclick="openGraphAiTradingView()" data-i18n="graph_ai_open_tv">Kendi TradingView hesabımla aç</button>
         <button type="button" id="graphAiLunaBtn" class="primary luna-button" onclick="analyzeGraphAi()" data-i18n="graph_ai_luna">✦ Luna ile Yorumla</button>
       </div>
     </div>
@@ -1311,8 +1311,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=187"></script>
-<script src="app.js?v=186"></script>
+<script src="i18n.js?v=188"></script>
+<script src="app.js?v=188"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

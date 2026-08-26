@@ -3431,6 +3431,8 @@ function econTimeLabel(time){
 
 /* ---------- Grafik AI: TradingView gelişmiş grafik + Luna teknik yorum ---------- */
 let GRAPH_AI_INIT=false;
+let GRAPH_AI_AUTORUN_TIMER=null;
+let GRAPH_AI_LOAD_SEQ=0;
 let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA'};
 const GRAPH_AI_TV_SUFFIX={L:'LSE',DE:'XETR',PA:'EURONEXT',AS:'EURONEXT',BR:'EURONEXT',LS:'EURONEXT',MI:'MIL',MC:'BME',SW:'SIX',ST:'OMXSTO',CO:'OMXCOP',OL:'OSL',HE:'OMXHEX',VI:'VIE',WA:'GPW',T:'TSE',HK:'HKEX',TW:'TWSE',TWO:'TPEX',TO:'TSX',V:'TSXV',AX:'ASX',SI:'SGX'};
 function graphAiYahooSymbol(tvSymbol){
@@ -3439,9 +3441,23 @@ function graphAiYahooSymbol(tvSymbol){
   const suffix=Object.entries(GRAPH_AI_TV_SUFFIX).find(([,value])=>value===ex)?.[0];
   return suffix ? code+'.'+suffix : code;
 }
-function graphAiTvFromCandidate(candidate,raw){
+async function graphAiTvFromCandidate(candidate,raw){
   if(!candidate) return raw;
   if(candidate.market==='BIST') return 'BIST:'+raw;
+  if(candidate.market==='US'){
+    try{
+      const tickers=['NASDAQ:'+raw,'NYSE:'+raw,'AMEX:'+raw];
+      const response=await fetch('https://scanner.tradingview.com/america/scan',{
+        method:'POST',body:JSON.stringify({symbols:{tickers},columns:['name','is_primary','close']})
+      });
+      if(response.ok){
+        const result=await response.json();
+        const rows=(result.data||[]).filter(row=>row.d&&row.d[2]!=null);
+        const exact=rows.find(row=>row.d[1]===true)||rows[0];
+        if(exact&&exact.s) return exact.s;
+      }
+    }catch(_e){}
+  }
   if(candidate.market==='EU'){
     const suffix=(String(candidate.code||'').split('.').pop()||'').toUpperCase();
     return (EU_EXCHANGES[suffix]&&EU_EXCHANGES[suffix].tv ? EU_EXCHANGES[suffix].tv+':' : '')+raw;
@@ -3462,17 +3478,19 @@ async function graphAiSymbols(){
       try{
         const detected=await detectBareMarkets(raw);
         const preferred=(detected.cands||[]).find(c=>c.market==='BIST')||(detected.cands||[])[0];
-        tvSymbol=graphAiTvFromCandidate(preferred,raw);
+        tvSymbol=await graphAiTvFromCandidate(preferred,raw);
       }catch(_e){}
     }
   }
-  if(input) input.value=tvSymbol;
   return {tvSymbol,yahooSymbol:graphAiYahooSymbol(tvSymbol)};
 }
 function graphAiTradingViewUrl(){
   return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(GRAPH_AI_STATE.tvSymbol);
 }
-function openGraphAiTradingView(){ window.open(graphAiTradingViewUrl(),'_blank','noopener'); }
+function openGraphAiTradingView(){
+  const popup=window.open(graphAiTradingViewUrl(),'bilancoTradingView','popup=yes,width=1600,height=950,resizable=yes,scrollbars=yes');
+  if(popup){ try{ popup.focus(); }catch(_e){} }
+}
 async function toggleGraphAiFullscreen(){
   const chart=document.querySelector('.graph-ai-chart-card'); if(!chart) return;
   try{
@@ -3490,14 +3508,41 @@ function renderGraphAiWidget(){
   container.appendChild(script);
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=state.tvSymbol;
 }
+function bindGraphAiAutoOpen(){
+  const input=document.getElementById('graphAiTicker');
+  if(!input||input._graphAiAutoBound) return;
+  input._graphAiAutoBound=true;
+  input.addEventListener('input',()=>{
+    clearTimeout(GRAPH_AI_AUTORUN_TIMER);
+    const raw=String(input.value||'').trim().toUpperCase().replace(/\s+/g,'');
+    const status=document.getElementById('graphAiStatus');
+    if(!/^[A-Z0-9._:\/\-^=!]{2,80}$/.test(raw)){
+      GRAPH_AI_LOAD_SEQ++;
+      if(status){ status.textContent=''; status.className='hint'; }
+      return;
+    }
+    if(status){ status.textContent=t('graph_ai_searching'); status.className='hint'; }
+    GRAPH_AI_AUTORUN_TIMER=setTimeout(()=>{
+      const current=String(input.value||'').trim().toUpperCase().replace(/\s+/g,'');
+      if(current===raw) loadGraphAi();
+    },650);
+  });
+  input.addEventListener('keydown',event=>{
+    if(event.key==='Enter') clearTimeout(GRAPH_AI_AUTORUN_TIMER);
+  });
+}
 function initGraphAiPage(){
-  if(GRAPH_AI_INIT) return; GRAPH_AI_INIT=true; renderGraphAiWidget();
+  if(!GRAPH_AI_INIT){ GRAPH_AI_INIT=true; renderGraphAiWidget(); }
+  bindGraphAiAutoOpen();
 }
 async function loadGraphAi(event){
   if(event) event.preventDefault();
+  clearTimeout(GRAPH_AI_AUTORUN_TIMER);
+  const requestSeq=++GRAPH_AI_LOAD_SEQ;
   const status=document.getElementById('graphAiStatus'), card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
   if(status){ status.textContent=t('graph_ai_searching'); status.className='hint'; }
   const next=await graphAiSymbols();
+  if(requestSeq!==GRAPH_AI_LOAD_SEQ) return;
   if(!next){ if(status){ status.textContent=t('graph_ai_bad_symbol'); status.className='hint down'; } return; }
   GRAPH_AI_STATE=next; renderGraphAiWidget();
   if(status){ status.textContent=''; status.className='hint'; }
