@@ -2498,14 +2498,23 @@ async function lunaEconomicCalendarHandler(req,res){
       riskScenarios:{type:'array',items:{type:'string'},maxItems:3},watchNext:{type:'array',items:{type:'string'},maxItems:4},
       dataQuality:{type:'string'},disclaimer:{type:'string'}
     },required:['summary','keyEvents','realizedSurprises','marketTransmission','riskScenarios','watchNext','dataQuality','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2800,
-      instructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
+    const researchInstructions=lang==='tr'
+      ? 'Seçili ekonomik takvim için güncel makro bağlamı webde araştır. Merkez bankaları, resmi istatistik kurumları ve kamu kurumları gibi birincil kaynaklara öncelik ver. Yalnızca takvim olaylarını yorumlamaya yarayan kısa, tarihli ve doğrulanabilir kanıtları getir; yatırım tavsiyesi verme.'
+      : 'Research the current macro context for the selected economic calendar. Prioritize primary sources such as central banks, official statistics agencies, and public institutions. Return only concise, dated, verifiable evidence useful for interpreting the calendar events; do not provide investment advice.';
+    const research=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:750,
+      instructions:researchInstructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
       tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],
-      prompt_cache_key:'bilanco-luna-economic-calendar-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+      prompt_cache_key:'bilanco-luna-economic-research-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+      text:{verbosity:'low'}});
+    const finalInput=[{role:'user',content:'Seçili ekonomik takvim / Selected economic calendar:\n'+input},...(Array.isArray(research.output)?research.output:[])];
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2600,
+      instructions,input:finalInput,
+      prompt_cache_key:'bilanco-luna-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       text:{verbosity:'medium',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}});
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
-    const sources=responseWebSources(out);
+    const sources=[...responseWebSources(research),...responseWebSources(out)]
+      .filter((source,index,all)=>source&&source.url&&all.findIndex(item=>item&&item.url===source.url)===index).slice(0,6);
     LUNA_ECON_CACHE.set(cacheKey,{at:Date.now(),analysis,sources});
     if(LUNA_ECON_CACHE.size>150) [...LUNA_ECON_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>LUNA_ECON_CACHE.delete(k));
     lunaJson(res,200,{ok:true,analysis,sources});
