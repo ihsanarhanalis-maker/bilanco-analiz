@@ -2291,7 +2291,7 @@ async function lunaAnalyzeHandler(req, res){
     },required:['summary','strengths','risks','profitability','financialPosition','cashFlow','earningsQuality','watchNext','dataQuality','disclaimer']};
     const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2600,instructions,prompt_cache_key:'bilanco-luna-analysis-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
-      text:{verbosity:'medium',format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}});
+      text:{verbosity:'medium',format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}},90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     LUNA_CACHE.set(cacheKey,{at:Date.now(),analysis});
