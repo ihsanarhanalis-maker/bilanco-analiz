@@ -168,7 +168,7 @@ header h1 {
 @media (min-width: 900px) {
   .tabs-in {
     display: grid;
-    grid-template-columns: repeat(11, minmax(0, 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     overflow: visible;
   }
   .tabs-in .tab-btn {
@@ -462,3 +462,14 @@ a { color: var(--accent-2); text-underline-offset: 3px; }
 .ai-sources{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:11px}.ai-sources strong{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.06em}.ai-sources a{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @keyframes aiPulse{50%{opacity:.55}}
 @media(max-width:720px){.ai-chat-shell{height:calc(100vh - 165px);min-height:520px;border-radius:20px}.ai-chat-head{padding:15px}.ai-orb{width:44px;height:44px;border-radius:14px}.ai-chat-head h2{font-size:19px}.ai-chat-head p,.ai-kicker{display:none}.ai-clear{padding-inline:11px}.ai-chat-messages{padding:16px}.ai-suggestions{grid-template-columns:1fr}.ai-bubble{max-width:88%}.ai-composer{margin:0 10px}.ai-composer button{min-width:auto;padding-inline:14px}.ai-chat-note{padding-bottom:10px}}
+
+/* Grafik AI — TradingView gelişmiş grafik ve Luna teknik yorumu */
+.graph-ai-shell{max-width:1240px;margin:0 auto}
+.graph-ai-head{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:16px;padding:20px 22px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(135deg,rgba(10,132,255,.10),rgba(7,14,30,.28) 55%)}
+.graph-ai-head h2{margin:2px 0 5px;font-size:27px;letter-spacing:-.035em}.graph-ai-head p{margin:0;color:var(--muted);font-size:13px}
+.graph-ai-search{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.graph-ai-search select,.graph-ai-search input{height:44px;border:1px solid var(--line-2);border-radius:12px;color:var(--ink);background:var(--surface-2);font:inherit;font-weight:700}.graph-ai-search select{padding:0 11px}.graph-ai-search input{width:190px;padding:0 14px;text-transform:uppercase}.graph-ai-search input:focus,.graph-ai-search select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(10,132,255,.14)}
+.graph-ai-chart-card{height:650px;overflow:hidden;border:1px solid var(--line);border-radius:22px;background:#07101f;box-shadow:var(--shadow)}.graph-ai-widget{width:100%;height:100%}.graph-ai-widget .tradingview-widget-container{width:100%;height:100%}
+.graph-ai-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:15px 17px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}.graph-ai-actions>div{display:flex;flex-direction:column;gap:3px}.graph-ai-actions strong{font-size:15px;color:var(--accent-2)}
+#graphAiStatus{margin:9px 3px 0}.graph-ai-shell .econ-luna-card{margin-bottom:22px}
+.graph-ai-market-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 2px}.graph-ai-market-line>*{padding:6px 9px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:12px}.graph-ai-market-line b{color:var(--accent-2)}
+@media(max-width:760px){.graph-ai-head{align-items:stretch;flex-direction:column;padding:17px}.graph-ai-search{display:grid;grid-template-columns:110px 1fr}.graph-ai-search button{grid-column:1/-1}.graph-ai-search input{width:100%}.graph-ai-chart-card{height:560px;border-radius:17px}.graph-ai-actions{align-items:stretch;flex-direction:column}.graph-ai-actions .luna-button{width:100%}}

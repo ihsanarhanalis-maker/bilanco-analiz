@@ -2095,6 +2095,7 @@ const LUNA_CACHE = new Map();
 const LUNA_CHAT_CACHE = new Map();
 const LUNA_BROKER_CACHE = new Map();
 const LUNA_ECON_CACHE = new Map();
+const LUNA_CHART_CACHE = new Map();
 const LUNA_RATE = new Map();
 const LUNA_CACHE_MS = 15 * 60 * 1000;
 const LUNA_CHAT_CACHE_MS = 60 * 1000;
@@ -2514,6 +2515,42 @@ async function lunaEconomicCalendarHandler(req,res){
     lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
   }
 }
+async function lunaChartAnalyzeHandler(req,res){
+  if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
+  if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'luna_not_configured'}); return; }
+  if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
+  try{
+    const body=await readJsonBody(req,16*1024), lang=body&&body.lang==='en'?'en':'tr';
+    const symbol=String(body&&body.symbol||'').trim().toUpperCase();
+    if(!/^[A-Z0-9.^=\-]{1,24}$/.test(symbol)){ lunaJson(res,400,{ok:false,error:'invalid_symbol'}); return; }
+    const cacheKey=LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+symbol;
+    const cached=LUNA_CHART_CACHE.get(cacheKey);
+    if(cached&&Date.now()-cached.at<5*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,market:cached.market}); return; }
+    const market=await lunaMarketSnapshot(symbol);
+    if(!market||!market.ok){ lunaJson(res,404,{ok:false,error:(market&&market.error)||'market_data_unavailable'}); return; }
+    const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
+      ? 'Bu görevde yalnızca verilen güncel piyasa ve teknik gösterge paketini üst düzey teknik analist gibi yorumla. Fiyatın SMA20, SMA50 ve SMA200 konumunu; RSI14, MACD ve sinyal ilişkisini; bir aylık, üç aylık ve bir yıllık getirileri; hacmi ve 52 hafta aralığını birlikte değerlendir. Destek ve direnç diye verdiğin seviyeleri kesin çizgiler değil, izlenebilir teknik bölgeler olarak sun ve yalnızca pakette bulunan fiyatlardan türet. Olgu, analitik çıkarım ve koşullu senaryoyu ayır. Formasyon, kırılım veya al-sat sinyali uydurma. Her alanı kısa, sayısal ve tekrarsız yaz.'
+      : 'For this task, interpret only the supplied current market and technical-indicator package as a senior technical analyst. Assess price versus SMA20, SMA50, and SMA200; RSI14, MACD versus signal; one-month, three-month, and one-year returns; volume; and the 52-week range together. Present support and resistance as monitored technical zones, not exact guaranteed lines, and derive them only from prices in the package. Separate facts, analytical inferences, and conditional scenarios. Do not invent chart patterns, breakouts, or buy/sell signals. Keep every field concise, numerical, and non-repetitive.');
+    const schema={type:'object',additionalProperties:false,properties:{
+      summary:{type:'string'},trend:{type:'string'},momentum:{type:'string'},
+      levels:{type:'array',items:{type:'string'},maxItems:4},scenarios:{type:'array',items:{type:'string'},maxItems:3},
+      risks:{type:'array',items:{type:'string'},maxItems:4},disclaimer:{type:'string'}
+    },required:['summary','trend','momentum','levels','scenarios','risks','disclaimer']};
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2400,
+      instructions,input:'Güncel teknik veri paketi / Current technical data package:\n'+JSON.stringify(market),
+      prompt_cache_key:'bilanco-luna-chart-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+      text:{verbosity:'low',format:{type:'json_schema',name:'technical_chart_analysis',strict:true,schema}}},90000);
+    let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
+    if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
+    LUNA_CHART_CACHE.set(cacheKey,{at:Date.now(),analysis,market});
+    if(LUNA_CHART_CACHE.size>150) [...LUNA_CHART_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>LUNA_CHART_CACHE.delete(k));
+    lunaJson(res,200,{ok:true,analysis,market});
+  }catch(e){
+    const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
+    console.error('[Luna Chart]',e.message||e);
+    lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
+  }
+}
 const LUNA_APP_TOOLS=[
   {type:'web_search'},
   {type:'function',name:'get_current_datetime',description:'Get the exact current date and time from the Bilanço Analiz server in the Europe/Istanbul timezone. Always use for questions about today, the current date, current time, weekday, relative dates such as yesterday/tomorrow, or whether information is current.',strict:true,parameters:{type:'object',additionalProperties:false,properties:{},required:[]}},
@@ -2619,6 +2656,7 @@ http.createServer((req, res) => {
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/broker') { lunaBrokerAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/economic-calendar') { lunaEconomicCalendarHandler(req,res); return; }
+  if (urlPath === '/ai/chart') { lunaChartAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/chat') { lunaChatHandler(req,res); return; }
 
   // --- TipRanks özel şirket profili (güncel değerleme, finansman, ekip ve momentum) ---

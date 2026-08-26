@@ -1,6 +1,6 @@
 /* ---------- Sayfa sekmeleri (Ana Sayfa · Bilanço Analizi · Ekonomik Takvim) ---------- */
 function switchPage(p){
-  ['home','stock','takas','econ','top100','scan','sect','etf','private','wnews','st','ai'].forEach(x=>{
+  ['home','stock','takas','econ','top100','scan','sect','etf','private','wnews','st','graphai','ai'].forEach(x=>{
     document.getElementById('page-'+x)?.classList.toggle('active', x===p);
     document.getElementById('tabbtn-'+x)?.classList.toggle('active', x===p);
   });
@@ -29,6 +29,7 @@ function switchPage(p){
   if(p==='private') initPrivateCompaniesPage();
   if(p==='takas') initTakasPage();
   if(p==='st') initStPage();
+  if(p==='graphai') initGraphAiPage();
   if(p==='home'){
     if(DISC_REVEALED) loadDiscovery();
     if(EQCAL_REVEALED) loadEqCalendar();
@@ -3426,6 +3427,64 @@ function setEconTime(cc,t){ const st=ECON_PANELS[cc]; if(!st) return; st.time=t;
 function setEconImp(cc,i){ const st=ECON_PANELS[cc]; if(!st) return; st.imp=i; renderEconPanel(cc); }
 function econTimeLabel(time){
   return {dun:t('econ_yesterday'),bugun:t('econ_today'),yarin:t('econ_tomorrow'),buhafta:t('econ_this_week'),gelecekhafta:t('econ_next_week')}[time]||'';
+}
+
+/* ---------- Grafik AI: TradingView gelişmiş grafik + Luna teknik yorum ---------- */
+let GRAPH_AI_INIT=false;
+let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA'};
+function graphAiSymbols(){
+  const input=document.getElementById('graphAiTicker');
+  const exchange=document.getElementById('graphAiExchange');
+  let raw=String(input&&input.value||'NVDA').trim().toUpperCase().replace(/\s+/g,'');
+  if(!/^[A-Z0-9._:\-=^]{1,30}$/.test(raw)) raw='NVDA';
+  let ex=String(exchange&&exchange.value||'NASDAQ').toUpperCase(), code=raw;
+  if(raw.includes(':')){ const parts=raw.split(':'); ex=parts[0]||ex; code=parts.slice(1).join(':'); }
+  if(/\.IS$/.test(code)){ ex='BIST'; code=code.replace(/\.IS$/,''); }
+  if(exchange&&['NASDAQ','NYSE','AMEX','BIST'].includes(ex)) exchange.value=ex;
+  if(input) input.value=code;
+  return {tvSymbol:ex+':'+code,yahooSymbol:ex==='BIST'?code+'.IS':code};
+}
+function renderGraphAiWidget(){
+  const host=document.getElementById('graphAiWidget'); if(!host) return;
+  const state=GRAPH_AI_STATE, locale=getLang()==='en'?'en':'tr';
+  host.innerHTML='<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget" style="height:calc(100% - 28px);width:100%"></div><div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank"><span class="blue-text">TradingView</span></a></div></div>';
+  const container=host.firstElementChild, script=document.createElement('script');
+  script.type='text/javascript'; script.async=true; script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+  script.text=JSON.stringify({autosize:true,symbol:state.tvSymbol,interval:'D',timezone:'exchange',theme:'dark',backgroundColor:'#07101f',gridColor:'rgba(132,154,190,0.10)',style:'1',locale,withdateranges:true,hide_side_toolbar:false,hide_top_toolbar:false,hide_legend:false,hide_volume:false,allow_symbol_change:false,save_image:true,calendar:false,studies:['RSI@tv-basicstudies','MACD@tv-basicstudies','MASimple@tv-basicstudies'],support_host:'https://www.tradingview.com'});
+  container.appendChild(script);
+  const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=state.tvSymbol;
+}
+function initGraphAiPage(){
+  if(GRAPH_AI_INIT) return; GRAPH_AI_INIT=true; renderGraphAiWidget();
+}
+function loadGraphAi(event){
+  if(event) event.preventDefault();
+  GRAPH_AI_STATE=graphAiSymbols(); renderGraphAiWidget();
+  const status=document.getElementById('graphAiStatus'), card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
+  if(status){ status.textContent=''; status.className='hint'; }
+  if(card) card.classList.add('hidden'); if(body) body.innerHTML='';
+}
+async function analyzeGraphAi(){
+  const btn=document.getElementById('graphAiLunaBtn'), status=document.getElementById('graphAiStatus');
+  const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
+  if(!btn||!status||!card||!body) return;
+  btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.className='hint'; status.textContent=t('graph_ai_loading');
+  try{
+    const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok){ if(j.error==='rate_limit') throw new Error('rate_limit'); throw new Error('unavailable'); }
+    const a=j.analysis||{}, m=j.market||{};
+    body.innerHTML=`<div class="graph-ai-market-line"><b>${safeHTML(m.symbol||GRAPH_AI_STATE.yahooSymbol)}</b><span>${safeHTML(m.price==null?'—':String(m.price))} ${safeHTML(m.currency||'')}</span><span>RSI ${safeHTML(m.technical&&m.technical.rsi14!=null?String(m.technical.rsi14):'—')}</span></div><div class="luna-result">
+      <section class="luna-section wide"><h3>${safeHTML(t('graph_ai_summary'))}</h3><p>${safeHTML(a.summary||'—')}</p></section>
+      <section class="luna-section"><h3>${safeHTML(t('graph_ai_trend'))}</h3><p>${safeHTML(a.trend||'—')}</p></section>
+      <section class="luna-section"><h3>${safeHTML(t('graph_ai_momentum'))}</h3><p>${safeHTML(a.momentum||'—')}</p></section>
+      ${lunaList(t('graph_ai_levels'),a.levels)}
+      ${lunaList(t('graph_ai_scenarios'),a.scenarios)}
+      ${lunaList(t('luna_risks'),a.risks,true)}
+    </div><div class="luna-note">${safeHTML(a.disclaimer||t('luna_note'))}</div>`;
+    status.textContent='';
+  }catch(e){ status.textContent=e.message==='rate_limit'?t('luna_rate'):t('graph_ai_error'); status.className='hint down'; }
+  finally{ btn.disabled=false; }
 }
 function econImportanceLabel(importance){
   return {'-1':t('econ_imp_lo'),'0':t('econ_imp_mid'),'1':t('econ_imp_hi')}[String(importance)]||'';
