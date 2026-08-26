@@ -2475,7 +2475,7 @@ async function lunaEconomicCalendarHandler(req,res){
       lunaJson(res,400,{ok:false,error:'bad_snapshot'}); return;
     }
     const clean=(v,n)=>String(v==null?'':v).trim().slice(0,n);
-    const rows=(Array.isArray(snapshot.rows)?snapshot.rows:[]).slice(0,60).map(r=>({
+    const rows=(Array.isArray(snapshot.rows)?snapshot.rows:[]).slice(0,8).map(r=>({
       date:clean(r&&r.date,40),time:clean(r&&r.time,20),event:clean(r&&r.event,180),
       actual:clean(r&&r.actual,60),forecast:clean(r&&r.forecast,60),previous:clean(r&&r.previous,60)
     })).filter(r=>r.event);
@@ -2490,8 +2490,8 @@ async function lunaEconomicCalendarHandler(req,res){
     const cached=LUNA_ECON_CACHE.get(cacheKey);
     if(cached&&Date.now()-cached.at<10*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,sources:cached.sources}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
-      ? 'Bu görevde seçili ekonomik takvim görünümünü kıdemli makro stratejist gibi yorumla. Yalnızca gönderilen takvimdeki açıklanan, beklenti ve önceki değerleri kanıt kabul et; mevcut olmayan güncel bağlamı varsayma. Açıklanan değeri olmayan olayları gerçekleşmiş gibi yazma. Sürpriz yönünü göstergenin ekonomik anlamına göre değerlendir; renk alanını tek başına yorumlama. Faiz, kur, tahvil, hisse ve emtia etkilerini yalnızca koşullu aktarım kanalları olarak açıkla; kesin piyasa yönü tahmini verme. Yayın tarihi ile olay tarihini ayır. Her önemli görüşü takvimdeki bir olay veya değerle destekle ve eksik veriyi veri kalitesi bölümünde açıkça belirt.'
-      : 'For this task, interpret the selected economic-calendar view as a senior macro strategist. Treat only the supplied calendar actual, forecast, and previous values as evidence; do not invent missing current context. Never describe an event without an actual value as already released. Determine surprise direction from the economics of the indicator, not from the color field alone. Describe rates, FX, bonds, equities, and commodities only through conditional transmission channels; do not predict a guaranteed market direction. Distinguish publication date from event date. Ground each material view in a calendar event or value and disclose missing evidence under data quality.');
+      ? 'Bu görevde seçili ekonomik takvim görünümünü kıdemli makro stratejist gibi yorumla. Yalnızca gönderilen takvimdeki açıklanan, beklenti ve önceki değerleri kanıt kabul et; mevcut olmayan güncel bağlamı varsayma. Açıklanan değeri olmayan olayları gerçekleşmiş gibi yazma. Sürpriz yönünü göstergenin ekonomik anlamına göre değerlendir; renk alanını tek başına yorumlama. Faiz, kur, tahvil, hisse ve emtia etkilerini yalnızca koşullu aktarım kanalları olarak açıkla; kesin piyasa yönü tahmini verme. Yayın tarihi ile olay tarihini ayır. Her önemli görüşü takvimdeki bir olay veya değerle destekle, eksik veriyi veri kalitesi bölümünde açıkça belirt ve her alanı kısa, yoğun, tekrarsız yaz.'
+      : 'For this task, interpret the selected economic-calendar view as a senior macro strategist. Treat only the supplied calendar actual, forecast, and previous values as evidence; do not invent missing current context. Never describe an event without an actual value as already released. Determine surprise direction from the economics of the indicator, not from the color field alone. Describe rates, FX, bonds, equities, and commodities only through conditional transmission channels; do not predict a guaranteed market direction. Distinguish publication date from event date. Ground each material view in a calendar event or value, disclose missing evidence under data quality, and keep every field concise, dense, and non-repetitive.');
     const schema={type:'object',additionalProperties:false,properties:{
       summary:{type:'string'},keyEvents:{type:'array',items:{type:'string'},maxItems:5},
       realizedSurprises:{type:'array',items:{type:'string'},maxItems:4},marketTransmission:{type:'string'},
@@ -2501,7 +2501,7 @@ async function lunaEconomicCalendarHandler(req,res){
     const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2600,
       instructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
       prompt_cache_key:'bilanco-luna-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
-      text:{verbosity:'medium',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}},90000);
+      text:{verbosity:'low',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}},90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     const sources=[];
