@@ -49,6 +49,14 @@
 .luna-note{position:relative;margin-top:13px;padding-top:11px;border-top:1px solid rgba(121,157,219,.17);font-size:11px;line-height:1.5;color:var(--muted)}
 @media(max-width:680px){.luna-head{flex-direction:column}.luna-button{width:100%}.luna-result{grid-template-columns:1fr}.luna-section.wide{grid-column:auto}}
 
+/* Ekonomik takvim ülke panelindeki bağlamsal Luna yorumu */
+.econ-luna-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
+.econ-luna-card{position:relative;overflow:hidden;margin-top:14px;padding:17px;border:1px solid rgba(83,146,255,.34);border-radius:15px;background:linear-gradient(145deg,rgba(16,28,58,.78),rgba(9,16,34,.88))}
+.econ-luna-card>h3{position:relative;margin:0;color:var(--ink);font-size:15px}
+.econ-luna-card>h3::before{content:"✦";margin-right:8px;color:#78a9ff;text-shadow:0 0 18px rgba(82,145,255,.7)}
+.econ-luna-sources{margin-top:14px}
+@media(max-width:680px){.econ-luna-actions .luna-button{width:100%}.econ-luna-card{padding:14px}}
+
 html {
   min-height: 100%;
   background: var(--bg);

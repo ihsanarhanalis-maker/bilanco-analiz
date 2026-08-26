@@ -3424,6 +3424,12 @@ function toggleEconCountry(cc){
 }
 function setEconTime(cc,t){ const st=ECON_PANELS[cc]; if(!st) return; st.time=t; syncEconBtns(cc); loadEconPanel(cc); }
 function setEconImp(cc,i){ const st=ECON_PANELS[cc]; if(!st) return; st.imp=i; renderEconPanel(cc); }
+function econTimeLabel(time){
+  return {dun:t('econ_yesterday'),bugun:t('econ_today'),yarin:t('econ_tomorrow'),buhafta:t('econ_this_week'),gelecekhafta:t('econ_next_week')}[time]||'';
+}
+function econImportanceLabel(importance){
+  return {'-1':t('econ_imp_lo'),'0':t('econ_imp_mid'),'1':t('econ_imp_hi')}[String(importance)]||'';
+}
 function syncEconBtns(cc){
   const st=ECON_PANELS[cc]; if(!st) return;
   document.querySelectorAll('#econTime-'+cc+' button').forEach(b=>b.classList.toggle('primary', b.dataset.t===st.time));
@@ -3468,8 +3474,8 @@ function renderEconPanel(cc){
   if(!c){ box.innerHTML='<div class="hint">—</div>'; return; }
   const list=c.rows.filter(e=>e.imp===st.imp);
   if(!list.length){
-    const timeAd={dun:t('econ_yesterday'),bugun:t('econ_today'),yarin:t('econ_tomorrow'),buhafta:t('econ_this_week'),gelecekhafta:t('econ_next_week')}[st.time]||'';
-    const impAd={'-1':t('econ_imp_lo'),'0':t('econ_imp_mid'),'1':t('econ_imp_hi')}[String(st.imp)];
+    const timeAd=econTimeLabel(st.time);
+    const impAd=econImportanceLabel(st.imp);
     box.innerHTML='<div class="hint">'+tf('econ_no_rows',{time:timeAd,imp:impAd})+'</div>';
     return;
   }
@@ -3482,7 +3488,59 @@ function renderEconPanel(cc){
   </tr>`).join('');
   const kaynak = c.src==='Investing.com' ? t('econ_src_inv') : t('econ_src_tv');
   box.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>${t('econ_th_date')}</th><th>${t('econ_th_data')}</th><th>${t('econ_th_act')}</th><th>${t('econ_th_exp')}</th><th>${t('econ_th_prev')}</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="hint" style="margin-top:8px">${t('econ_foot')} ${kaynak}</div>`;
+    <div class="hint" style="margin-top:8px">${t('econ_foot')} ${kaynak}</div>
+    <div class="econ-luna-actions no-print">
+      <button type="button" class="primary luna-button" id="econLunaBtn-${cc}" onclick="analyzeEconWithLuna('${cc}')">${safeHTML(t('econ_luna_btn'))}</button>
+      <span class="hint" id="econLunaStatus-${cc}"></span>
+    </div>
+    <div class="econ-luna-card hidden" id="econLunaCard-${cc}">
+      <h3>${safeHTML(t('econ_luna_title'))}</h3>
+      <div id="econLunaBody-${cc}"></div>
+    </div>`;
+}
+async function analyzeEconWithLuna(cc){
+  const st=ECON_PANELS[cc], c=st&&ECON_CACHE[cc+':'+(ECON_TAB[st.time]||'thisWeek')];
+  const btn=document.getElementById('econLunaBtn-'+cc), status=document.getElementById('econLunaStatus-'+cc);
+  const card=document.getElementById('econLunaCard-'+cc), body=document.getElementById('econLunaBody-'+cc);
+  if(!st||!c||!btn||!status||!card||!body) return;
+  const list=c.rows.filter(e=>e.imp===st.imp);
+  if(!list.length) return;
+  const snapshot={
+    countryCode:cc,countryName:ccName(cc),timeFilter:st.time,timeLabel:econTimeLabel(st.time),
+    importance:st.imp,importanceLabel:econImportanceLabel(st.imp),source:c.src,
+    fetchedAt:new Date(c.ts).toISOString(),timezone:'Europe/Istanbul',
+    rows:list.slice(0,60).map(e=>({date:e.dateLbl,time:e.timeLbl,event:e.name,actual:e.aStr||'',forecast:e.fStr||'',previous:e.pStr||''}))
+  };
+  btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.textContent=t('econ_luna_loading');
+  try{
+    const r=await fetch('/ai/economic-calendar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),snapshot})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok){
+      if(j.error==='luna_not_configured') throw new Error('not_configured');
+      if(j.error==='rate_limit') throw new Error('rate_limit');
+      throw new Error('unavailable');
+    }
+    const a=j.analysis||{};
+    body.innerHTML=`<div class="luna-result">
+      <section class="luna-section wide"><h3>${safeHTML(t('econ_luna_summary'))}</h3><p>${safeHTML(a.summary||'—')}</p></section>
+      ${lunaList(t('econ_luna_key_events'),a.keyEvents)}
+      ${lunaList(t('econ_luna_surprises'),a.realizedSurprises)}
+      <section class="luna-section wide"><h3>${safeHTML(t('econ_luna_transmission'))}</h3><p>${safeHTML(a.marketTransmission||'—')}</p></section>
+      ${lunaList(t('econ_luna_scenarios'),a.riskScenarios)}
+      ${lunaList(t('luna_watch'),a.watchNext)}
+      <section class="luna-section wide"><h3>${safeHTML(t('luna_data_quality'))}</h3><p>${safeHTML(a.dataQuality||'—')}</p></section>
+    </div><div class="luna-note">${safeHTML(a.disclaimer||t('luna_note'))}</div>`;
+    if(Array.isArray(j.sources)&&j.sources.length){
+      const sources=document.createElement('div'); sources.className='ai-sources econ-luna-sources';
+      const label=document.createElement('strong'); label.textContent=t('ai_sources'); sources.appendChild(label);
+      j.sources.forEach(s=>{ if(!s||!/^https:\/\//i.test(String(s.url||''))) return; const a=document.createElement('a'); a.href=s.url; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent=s.title||s.url; sources.appendChild(a); });
+      body.appendChild(sources);
+    }
+    status.textContent='';
+  }catch(e){
+    status.textContent=e.message==='not_configured'?t('luna_not_configured'):(e.message==='rate_limit'?t('luna_rate'):t('econ_luna_error'));
+    status.className='hint down';
+  }finally{ btn.disabled=false; }
 }
 
 /* ---------- İlk 100 Şirket sayfası (companiesmarketcap.com karşılığı) ----------
@@ -5628,7 +5686,12 @@ async function sendLunaChat(e){
   if(input) input.value=''; LUNA_CHAT_BUSY=true; if(btn) btn.disabled=true; renderLunaChat();
   try{
     const history=LUNA_CHAT_MESSAGES.slice(-12);
-    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:history,stream:true})});
+    const context=FIN?{
+      activeTicker:String(FIN.ticker||'').toUpperCase(),market:FIN.market||'',currency:FIN.cur||CUR||'',
+      periodType:FIN.mode||'',balanceDates:[FIN.D0||null,FIN.D1||null],filedDates:[FIN.filedD0||null,FIN.filedD1||null],
+      entityType:FIN.bankGroup==='UFRS'?'financial_institution':'corporate',lastBrokerSymbol:TAKAS_LUNA_SYMBOL||null
+    }:{lastBrokerSymbol:TAKAS_LUNA_SYMBOL||null};
+    const r=await fetch('/ai/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),messages:history,context,stream:true})});
     const contentType=String(r.headers.get('content-type')||'');
     if(!contentType.includes('text/event-stream')){
       const j=await r.json().catch(()=>({}));
@@ -5690,23 +5753,56 @@ function lunaPair(series){
 function buildLunaSnapshot(){
   if(!FIN) return null;
   const rows=readData().map(r=>({name:r.name,category:r.cat,current:Number.isFinite(r.cur)?r.cur:null,previous:Number.isFinite(r.prev)?r.prev:null}));
-  const total=(period,group)=>rows.filter(r=>CAT_GROUP[r.category]===group).reduce((s,r)=>s+(Number(r[period])||0),0);
+  const categoryTotal=(period,category)=>rows.filter(r=>r.category===category).reduce((s,r)=>s+(Number(r[period])||0),0);
+  const namedTotal=(period,category,rx)=>rows.filter(r=>r.category===category&&rx.test(String(r.name||''))).reduce((s,r)=>s+(Number(r[period])||0),0);
   const inc=FIN.income||{}, cash=inc._cash||{};
   const income={};
   ['revenue','costRev','grossProfit','opIncome','rnd','netIncome'].forEach(k=>income[k]=lunaPair(inc[k]));
   const cashFlow={};
   ['opCF','invCF','finCF','capex','fcf'].forEach(k=>cashFlow[k]=lunaPair(cash[k]));
-  const assets=total('current','asset'), liabilities=total('current','liab'), equity=total('current','equity');
-  const prevAssets=total('previous','asset'), prevLiabilities=total('previous','liab'), prevEquity=total('previous','equity');
-  const rev=income.revenue.current, ni=income.netIncome.current;
-  const revPrev=income.revenue.previous, niPrev=income.netIncome.previous;
   const ratio=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b!==0?a/b:null;
+  const change=(a,b)=>Number.isFinite(a)&&Number.isFinite(b)&&b!==0?(a/b)-1:null;
+  const balanceFor=period=>{
+    const currentAssets=categoryTotal(period,'asset_current');
+    const nonCurrentAssets=categoryTotal(period,'asset_noncur');
+    const currentLiabilities=categoryTotal(period,'liab_current');
+    const nonCurrentLiabilities=categoryTotal(period,'liab_noncur');
+    const equity=categoryTotal(period,'equity');
+    const assets=currentAssets+nonCurrentAssets, liabilities=currentLiabilities+nonCurrentLiabilities;
+    const inventory=namedTotal(period,'asset_current',/stok|inventory/i);
+    const cash=namedTotal(period,'asset_current',/nakit|cash|cash equivalent/i);
+    return {assets,currentAssets,nonCurrentAssets,liabilities,currentLiabilities,nonCurrentLiabilities,equity,
+      workingCapital:currentAssets-currentLiabilities,inventory,cash,
+      currentRatio:ratio(currentAssets,currentLiabilities),quickRatio:ratio(currentAssets-inventory,currentLiabilities),
+      cashRatio:ratio(cash,currentLiabilities),liabilitiesToEquity:ratio(liabilities,equity),equityToAssets:ratio(equity,assets)};
+  };
+  const cashComparable=!(FIN.market==='US'&&FIN.mode==='quarter')&&FIN.market!=='EU';
+  const performanceFor=period=>{
+    const revenue=income.revenue[period], grossProfit=income.grossProfit[period], operatingIncome=income.opIncome[period], netIncome=income.netIncome[period];
+    const operatingCashFlow=cashFlow.opCF[period], freeCashFlow=cashFlow.fcf[period];
+    return {revenue,grossProfit,operatingIncome,netIncome,operatingCashFlow,freeCashFlow,
+      grossMargin:ratio(grossProfit,revenue),operatingMargin:ratio(operatingIncome,revenue),netMargin:ratio(netIncome,revenue),
+      freeCashFlowMargin:cashComparable?ratio(freeCashFlow,revenue):null,cashConversion:cashComparable?ratio(operatingCashFlow,netIncome):null};
+  };
+  const currentBalance=balanceFor('current'), previousBalance=balanceFor('previous');
+  const currentPerformance=performanceFor('current'), previousPerformance=performanceFor('previous');
+  const balanceChange={}, performanceChange={};
+  ['assets','currentAssets','liabilities','currentLiabilities','equity','workingCapital','cash'].forEach(k=>balanceChange[k]=change(currentBalance[k],previousBalance[k]));
+  ['revenue','grossProfit','operatingIncome','netIncome','operatingCashFlow','freeCashFlow'].forEach(k=>performanceChange[k]=change(currentPerformance[k],previousPerformance[k]));
   return {
     ticker:String(FIN.ticker||'').toUpperCase(),market:FIN.market||'',currency:FIN.cur||CUR||'',periodType:FIN.mode||'',
     balanceDates:[FIN.D0||null,FIN.D1||null],filedDates:[FIN.filedD0||null,FIN.filedD1||null],
+    dataBasis:{source:FIN.market==='US'?'SEC EDGAR':(FIN.market==='BIST'?'İş Yatırım / KAP':'TradingView / IFRS kaynakları'),
+      entityType:FIN.bankGroup==='UFRS'?'financial_institution':'corporate',
+      balancePeriodType:FIN.market==='EU'?'latest_reported_quarter':(FIN.mode||'unknown'),
+      incomePeriodType:FIN.market==='EU'?'fiscal_year':(FIN.mode||'unknown'),
+      cashFlowPeriodType:FIN.market==='US'?'annual':(FIN.market==='EU'?'trailing_twelve_months':(FIN.mode||'unknown')),
+      comparabilityWarning:FIN.market==='US'&&FIN.mode==='quarter'
+        ? 'Income statement is quarterly while cash-flow series is annual; do not calculate quarterly cash conversion.'
+        :(FIN.market==='EU'?'Balance sheet is latest-quarter, income statement is fiscal-year and cash flow is trailing-twelve-months; compare only compatible fields.':null)},
     balanceRows:rows,income,cashFlow,marketCap:Number.isFinite(LAST_MCAP)?LAST_MCAP:null,
-    derived:{current:{assets,liabilities,equity,debtToEquity:ratio(liabilities,equity),netMargin:ratio(ni,rev),returnOnEquity:ratio(ni,equity)},
-      previous:{assets:prevAssets,liabilities:prevLiabilities,equity:prevEquity,debtToEquity:ratio(prevLiabilities,prevEquity),netMargin:ratio(niPrev,revPrev),returnOnEquity:ratio(niPrev,prevEquity)}}
+    derived:{balance:{current:currentBalance,previous:previousBalance,changePct:balanceChange},
+      performance:{current:currentPerformance,previous:previousPerformance,changePct:performanceChange}}
   };
 }
 function lunaList(title,items,wide){
@@ -5720,8 +5816,11 @@ function renderLunaAnalysis(a){
     <section class="luna-section wide"><h3>${safeHTML(t('luna_summary'))}</h3><p>${safeHTML(a.summary||'—')}</p></section>
     ${lunaList(t('luna_strengths'),a.strengths)}${lunaList(t('luna_risks'),a.risks)}
     <section class="luna-section"><h3>${safeHTML(t('luna_profit'))}</h3><p>${safeHTML(a.profitability||'—')}</p></section>
+    <section class="luna-section"><h3>${safeHTML(t('luna_position'))}</h3><p>${safeHTML(a.financialPosition||'—')}</p></section>
     <section class="luna-section"><h3>${safeHTML(t('luna_cash'))}</h3><p>${safeHTML(a.cashFlow||'—')}</p></section>
+    <section class="luna-section"><h3>${safeHTML(t('luna_earnings_quality'))}</h3><p>${safeHTML(a.earningsQuality||'—')}</p></section>
     ${lunaList(t('luna_watch'),a.watchNext,true)}
+    <section class="luna-section wide"><h3>${safeHTML(t('luna_data_quality'))}</h3><p>${safeHTML(a.dataQuality||'—')}</p></section>
   </div>`;
 }
 async function analyzeWithLuna(){
