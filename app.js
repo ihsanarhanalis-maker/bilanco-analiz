@@ -5791,10 +5791,6 @@ function clearLunaChat(){
   LUNA_CHAT_MESSAGES.length=0; renderLunaChat();
   const input=document.getElementById('aiChatInput'); if(input){ input.value=''; input.focus(); }
 }
-function askLunaSuggestion(btn){
-  const input=document.getElementById('aiChatInput'); if(!input) return;
-  input.value=btn.textContent.trim(); sendLunaChat();
-}
 function lunaChatKeydown(e){
   if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendLunaChat(e); }
 }
