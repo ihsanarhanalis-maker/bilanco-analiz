@@ -3436,6 +3436,7 @@ function econTimeLabel(time){
 /* ---------- Grafik AI: TradingView gelişmiş grafik + Luna teknik yorum ---------- */
 let GRAPH_AI_INIT=false;
 let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA',originalName:'',synced:false,blockedOriginal:''};
+let GRAPH_AI_PENDING_ANALYSIS=false;
 const GRAPH_AI_TV_SUFFIX={L:'LSE',DE:'XETR',PA:'EURONEXT',AS:'EURONEXT',BR:'EURONEXT',LS:'EURONEXT',MI:'MIL',MC:'BME',SW:'SIX',ST:'OMXSTO',CO:'OMXCOP',OL:'OSL',HE:'OMXHEX',VI:'VIE',WA:'GPW',T:'TSE',HK:'HKEX',TW:'TWSE',TWO:'TPEX',TO:'TSX',V:'TSXV',AX:'ASX',SI:'SGX'};
 function graphAiYahooSymbol(tvSymbol){
   const raw=String(tvSymbol||'').trim().toUpperCase();
@@ -3463,6 +3464,8 @@ function syncGraphAiSymbolFromWidget(event){
   if(message.name==='tv-widget-no-data'){
     GRAPH_AI_STATE.synced=false;
     GRAPH_AI_STATE.blockedOriginal=GRAPH_AI_STATE.originalName;
+    GRAPH_AI_PENDING_ANALYSIS=false;
+    const btn=document.getElementById('graphAiLunaBtn'); if(btn) btn.disabled=false;
     const status=document.getElementById('graphAiStatus');
     if(status){ status.textContent=t('graph_ai_symbol_unavailable'); status.className='hint down'; }
     return;
@@ -3471,14 +3474,16 @@ function syncGraphAiSymbolFromWidget(event){
   const next=graphAiQuoteSymbol(message.data); if(!next) return;
   if(GRAPH_AI_STATE.blockedOriginal&&next.original===GRAPH_AI_STATE.blockedOriginal) return;
   const changed=next.original!==GRAPH_AI_STATE.originalName;
+  const runPending=GRAPH_AI_PENDING_ANALYSIS;
   GRAPH_AI_STATE={...GRAPH_AI_STATE,...next,synced:true,blockedOriginal:''};
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=next.tvSymbol;
   const status=document.getElementById('graphAiStatus');
-  if(status&&!status.classList.contains('graph-ai-busy')){ status.textContent=''; status.className='hint'; }
-  if(changed){
+  if(status&&changed&&!status.classList.contains('graph-ai-busy')){ status.textContent=''; status.className='hint'; }
+  if(changed&&!runPending){
     const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
     if(card) card.classList.add('hidden'); if(body) body.innerHTML='';
   }
+  if(runPending){ GRAPH_AI_PENDING_ANALYSIS=false; setTimeout(analyzeGraphAi,0); }
 }
 window.addEventListener('message',syncGraphAiSymbolFromWidget);
 async function toggleGraphAiFullscreen(){
@@ -3505,13 +3510,23 @@ async function analyzeGraphAi(){
   const btn=document.getElementById('graphAiLunaBtn'), status=document.getElementById('graphAiStatus');
   const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
   if(!btn||!status||!card||!body) return;
-  if(!GRAPH_AI_STATE.synced){ status.textContent=t('graph_ai_wait_symbol'); status.className='hint down'; return; }
+  if(!GRAPH_AI_STATE.synced){
+    GRAPH_AI_PENDING_ANALYSIS=true; btn.disabled=true;
+    status.textContent=t('graph_ai_wait_symbol'); status.className='hint graph-ai-busy';
+    setTimeout(()=>{
+      if(!GRAPH_AI_PENDING_ANALYSIS) return;
+      GRAPH_AI_PENDING_ANALYSIS=false; btn.disabled=false;
+      status.textContent=t('graph_ai_wait_symbol'); status.className='hint down';
+    },12000);
+    return;
+  }
   btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.className='hint graph-ai-busy'; status.textContent=t('graph_ai_loading');
   try{
     const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok){ if(j.error==='rate_limit') throw new Error('rate_limit'); throw new Error('unavailable'); }
     const a=j.analysis||{}, m=j.market||{};
+    card.classList.remove('hidden');
     body.innerHTML=`<div class="graph-ai-market-line"><b>${safeHTML(m.symbol||GRAPH_AI_STATE.yahooSymbol)}</b><span>${safeHTML(m.price==null?'—':String(m.price))} ${safeHTML(m.currency||'')}</span><span>RSI ${safeHTML(m.technical&&m.technical.rsi14!=null?String(m.technical.rsi14):'—')}</span></div><div class="luna-result">
       <section class="luna-section wide"><h3>${safeHTML(t('graph_ai_summary'))}</h3><p>${safeHTML(a.summary||'—')}</p></section>
       <section class="luna-section"><h3>${safeHTML(t('graph_ai_trend'))}</h3><p>${safeHTML(a.trend||'—')}</p></section>
