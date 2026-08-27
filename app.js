@@ -1894,7 +1894,7 @@ async function fetchTickerBIST(sym, mode, myGen){
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
     document.getElementById('curNote').textContent=t('cur_tl');
-    setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+    setFinancialPeriodHeaders();
     setMarketOrigin({ country:ccName('TR'), exchange:t('exch_bist'), ccy:'TRY', code:sym+'.IS' });
     setStatus(tf('status_ok_bist',{s:sym, bank:group==='UFRS'?t('status_bank'):'', mode:mode==='annual'?t('data_annual'):t('quarterly'), d:fmtDate(D0)+(D1?'  ↔  '+fmtDate(D1):'')}),'good');
     analyze(myGen);
@@ -2511,10 +2511,10 @@ async function fetchTickerUS(sym, mode, myGen){
     const b=document.getElementById('inputBody'); b.innerHTML='';
     rows.forEach(r=>b.insertAdjacentHTML('beforeend', rowHTML(r[0],r[1],r[2],r[3])));
     document.getElementById('curNote').textContent=t('cur_usd');
-    setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+    setFinancialPeriodHeaders();
     const periodLbl = isIfrs20F ? (getLang()==='en'?'annual (20-F)':'yıllık (20-F)') : (mode==='annual'?t('data_annual'):t('quarterly'));
     setMarketOrigin({ country:getLang()==='en'?'United States':t('mkt_us'), exchange:getLang()==='en'?'US (SEC EDGAR)':'ABD (SEC EDGAR)', ccy:'USD', code:sym+'.US' });
-    setStatus(tf('status_ok_us',{s:sym, mode:periodLbl, d:fmtDate(D0)+(D1?'  ↔  '+fmtDate(D1):'')}),'good');
+    setStatus(tf('status_ok_us',{s:sym, mode:periodLbl, d:fmtDate(financialDisplayDate(0))+(financialDisplayDate(1)?'  ↔  '+fmtDate(financialDisplayDate(1)):'')}),'good');
     analyze(myGen);
     fetchNews(sym, myGen);
     fetchPrice(sym, cik, myGen);
@@ -2720,13 +2720,13 @@ function parseFiscalQY(s){
   return null;
 }
 /* TV scanner: en yeni önce dilüe HBK dizisi + mali yıl/çeyrek sonu → etiketler */
-function buildTvQuarterPoints(epsH, lastFQ, nextEps, lastEst){
+function buildTvQuarterPoints(epsH, lastFQ, nextEps, lastEst, lastActual){
   if(!Array.isArray(epsH)||!epsH.length||!lastFQ) return [];
   const n=Math.min(4, epsH.length);
   const pts=[];
   for(let i=n-1;i>=0;i--){
     const pq=addFiscalQ(lastFQ.q, lastFQ.y, -i);
-    const actual=+epsH[i];
+    const actual=(i===0&&lastActual!=null&&isFinite(lastActual))?+lastActual:+epsH[i];
     pts.push({
       label:chartQLabel(pq.q, pq.y),
       actual:isFinite(actual)?actual:null,
@@ -2886,11 +2886,15 @@ async function fetchNextEarnings(sym, market, myGen, euOpt){
     const fyeMonth=tv.periodEndFy
       ? (new Date(tv.periodEndFy*1000).getUTCMonth()+1)
       : null;
-    const lastFQ=tv.periodEndFq&&fyeMonth
-      ? fiscalFromPeriodEnd(new Date(tv.periodEndFq*1000).toISOString().slice(0,10), fyeMonth)
-      : null;
+    const activePeriodEnd=(FIN&&FIN.ticker===sym&&FIN.D0)
+      ? String(FIN.D0).slice(0,10)
+      :(tv.periodEndFq?new Date(tv.periodEndFq*1000).toISOString().slice(0,10):null);
+    const fiscalQ=activePeriodEnd&&fyeMonth?fiscalFromPeriodEnd(activePeriodEnd,fyeMonth):null;
+    /* Kullanıcıya mali yılın ileri numarası yerine rapor döneminin takvim yılı gösterilir.
+       Örn. NVIDIA FY2027 Q2, 2026'da sona erdiği için ekranda Q2 '26 görünür. */
+    const lastFQ=fiscalQ?{q:fiscalQ.q,y:new Date(activePeriodEnd+'T12:00:00Z').getUTCFullYear()}:null;
 
-    let quarterly=buildTvQuarterPoints(tv.epsFqH, lastFQ, tv.epsEstNext, tv.epsEstFq);
+    let quarterly=buildTvQuarterPoints(tv.epsFqH, lastFQ, tv.epsEstNext, tv.epsEstFq, tv.epsFq);
     /* Dilüe dizi yoksa skaler son HBK + sonraki tahmin */
     if(!quarterly.length && lastFQ && (tv.epsFq!=null||tv.epsEstNext!=null)){
       if(tv.epsFq!=null){
@@ -3469,7 +3473,6 @@ function syncGraphAiSymbolFromWidget(event){
   const changed=next.original!==GRAPH_AI_STATE.originalName;
   GRAPH_AI_STATE={...GRAPH_AI_STATE,...next,synced:true,blockedOriginal:''};
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=next.tvSymbol;
-  updateGraphAiTradingViewLink();
   const status=document.getElementById('graphAiStatus');
   if(status&&!status.classList.contains('graph-ai-busy')){ status.textContent=''; status.className='hint'; }
   if(changed){
@@ -3478,16 +3481,6 @@ function syncGraphAiSymbolFromWidget(event){
   }
 }
 window.addEventListener('message',syncGraphAiSymbolFromWidget);
-function graphAiTradingViewUrl(){
-  return 'https://www.tradingview.com/chart/?symbol='+encodeURIComponent(GRAPH_AI_STATE.tvSymbol);
-}
-function updateGraphAiTradingViewLink(){
-  const link=document.getElementById('graphAiAccountLink');
-  if(link) link.href=graphAiTradingViewUrl();
-}
-function openGraphAiTradingView(){
-  location.href=graphAiTradingViewUrl();
-}
 async function toggleGraphAiFullscreen(){
   const chart=document.querySelector('.graph-ai-chart-card'); if(!chart) return;
   try{
@@ -3498,7 +3491,6 @@ async function toggleGraphAiFullscreen(){
 function renderGraphAiWidget(){
   const host=document.getElementById('graphAiWidget'); if(!host) return;
   const state=GRAPH_AI_STATE, locale=getLang()==='en'?'en':'tr';
-  updateGraphAiTradingViewLink();
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=state.tvSymbol;
   host.innerHTML='<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget" style="height:calc(100% - 28px);width:100%"></div><div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank"><span class="blue-text">TradingView</span></a></div></div>';
   const container=host.firstElementChild, script=document.createElement('script');
@@ -5660,6 +5652,13 @@ function setPeriodHeaders(curDate, prevDate){
   if(th1) th1.innerHTML = t('th_cur') + (curDate?`<br><span class="thd">${curDate}</span>`:'');
   if(th2) th2.innerHTML = t('th_prev') + (prevDate?`<br><span class="thd">${prevDate}</span>`:'');
 }
+function financialDisplayDate(index){
+  if(!FIN) return null;
+  return index===0?(FIN.filedD0||FIN.D0||null):(FIN.filedD1||FIN.D1||null);
+}
+function setFinancialPeriodHeaders(){
+  setPeriodHeaders(financialDisplayDate(0)?fmtDate(financialDisplayDate(0)):null,financialDisplayDate(1)?fmtDate(financialDisplayDate(1)):null);
+}
 function hidePriceUI(){
   stopLivePrice();
   const lp=document.getElementById('livePrice'), pn=document.getElementById('priceNote'), bd=document.getElementById('hdBadge');
@@ -5953,7 +5952,7 @@ function prepareLunaCard(){
   if(!card) return;
   if(!FIN){ card.classList.add('hidden'); return; }
   card.classList.remove('hidden');
-  const key=[FIN.ticker,FIN.mode,FIN.D0,FIN.D1,getLang()].join('|');
+  const key=[FIN.ticker,FIN.mode,FIN.D0,FIN.D1,FIN.filedD0,FIN.filedD1,getLang()].join('|');
   if(card.dataset.snapshotKey!==key){
     card.dataset.snapshotKey=key;
     if(body){ body.classList.add('hidden'); body.innerHTML=''; }
@@ -6016,7 +6015,8 @@ function analyze(myGen){
                 : FIN.market==='EU' && FIN.euInfo ? FIN.euInfo.country
                 : t('mkt_us');
       const curLbl = FIN.market==='BIST' ? 'TL' : (FIN.cur || (FIN.market==='EU'?'—':'USD'));
-      const titleTxt = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?t('period_annual_cap'):t('period_quarter_cap')} · ${fmtDate(FIN.D0)}${FIN.D1?'  ↔  '+fmtDate(FIN.D1):''} · ${curLbl}`;
+      const shownD0=financialDisplayDate(0), shownD1=financialDisplayDate(1);
+      const titleTxt = `${FIN.ticker} · ${mkt} · ${FIN.mode==='annual'?t('period_annual_cap'):t('period_quarter_cap')} · ${fmtDate(shownD0)}${shownD1?'  ↔  '+fmtDate(shownD1):''} · ${curLbl}`;
       rt.setAttribute('data-title', titleTxt);
       const cached=LOGO_CACHE[logoCacheKey(FIN.ticker, FIN.market)]||FIN.logoid||'';
       rt.innerHTML=logoHtml(cached, FIN.ticker, 28, {...logoOptsFromFin(), logoid:cached})+`<span>${safeHTML(titleTxt)}</span>`;
@@ -8167,7 +8167,7 @@ function refillInputFromFin(){
     else if(FIN.market==='US') cur.textContent=t('cur_usd');
     else cur.textContent=(FIN.cur||'')+' · '+t('cur_in');
   }
-  setPeriodHeaders(fmtDate(D0), D1?fmtDate(D1):null);
+  setFinancialPeriodHeaders();
   return true;
 }
 function refreshI18nPanels(){
