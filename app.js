@@ -3473,7 +3473,9 @@ function syncGraphAiSymbolFromWidget(event){
   if(message.name!=='quoteUpdate'||message.provider!=='TradingView') return;
   const next=graphAiQuoteSymbol(message.data); if(!next) return;
   if(GRAPH_AI_STATE.blockedOriginal&&next.original===GRAPH_AI_STATE.blockedOriginal) return;
-  const changed=next.original!==GRAPH_AI_STATE.originalName;
+  /* TradingView aynı hisseyi BATS_DLY:NVDA ve NASDAQ:NVDA gibi farklı
+     sağlayıcı adlarıyla sırayla gönderebilir; gerçek kod değişmedikçe sonucu silme. */
+  const changed=next.yahooSymbol!==GRAPH_AI_STATE.yahooSymbol;
   const runPending=GRAPH_AI_PENDING_ANALYSIS;
   GRAPH_AI_STATE={...GRAPH_AI_STATE,...next,synced:true,blockedOriginal:''};
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=next.tvSymbol;
