@@ -1,6 +1,6 @@
 ﻿/* Bilan├ğo Analiz ÔÇö PWA service worker
    Statik kabu─şu ├Ânbelle─şe al─▒r; API k├Âpr├╝leri (/price, /bist, /secÔÇĞ) her zaman a─şdan gelir. */
-const CACHE = 'bilanco-shell-v185';
+const CACHE = 'bilanco-shell-v186';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
@@ -36,7 +36,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return;
 
   // API / köprü istekleri: her zaman ağ (asla HTML kabuğuna düşmesin)
-  const isApi = /^\/(ai|sec|secw|secfilings|bist|bistown|bistfloat|bistakd|bistakdimg|price|quotes|news|tr|trcal|tefas|targets|tvt|econ|investcal|ifrs|yfin|yfsearch|yscr|yqs|ycal|ynews|stocktwits|tvlive|invforum|invopen|private-company)(\/|\?|$)/.test(url.pathname);
+  const isApi = /^\/(api\/notifications|ai|sec|secw|secfilings|bist|bistown|bistfloat|bistakd|bistakdimg|price|quotes|news|tr|trcal|tefas|targets|tvt|econ|investcal|ifrs|yfin|yfsearch|yscr|yqs|ycal|ynews|stocktwits|tvlive|invforum|invopen|private-company)(\/|\?|$)/.test(url.pathname);
   if (isApi) {
     event.respondWith(fetch(req).catch(() => new Response(JSON.stringify({ error: 'offline' }), {
       status: 503,
@@ -54,5 +54,38 @@ self.addEventListener('fetch', event => {
     }).catch(() => caches.match(req).then(cached =>
       cached || caches.match('/bilanco-analiz.html')
     ))
+  );
+});
+
+self.addEventListener('push', event => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch (_e) {
+    payload = { title: 'Bilanço Analiz', body: event.data ? event.data.text() : '' };
+  }
+  const title = payload.title || 'Bilanço Analiz';
+  const options = {
+    body: payload.body || 'İzleme listenizde yeni bir gelişme var.',
+    icon: payload.icon || '/icons/icon-192.png',
+    badge: payload.badge || '/icons/icon-192.png',
+    tag: payload.tag || 'bilanco-update',
+    renotify: true,
+    data: { url: payload.url || '/', symbol: payload.symbol, market: payload.market, eventType: payload.eventType },
+    actions: [{ action: 'open', title: 'Uygulamada aç' }]
+  };
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin).href;
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows => {
+      for (const client of windows) {
+        if (new URL(client.url).origin === self.location.origin) {
+          return client.navigate(target).then(() => client.focus());
+        }
+      }
+      return clients.openWindow(target);
+    })
   );
 });

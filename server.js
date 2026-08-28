@@ -8,9 +8,11 @@ const zlib  = require('zlib');
 const fs    = require('fs');
 const path  = require('path');
 const crypto = require('crypto');
+const { createNotificationService } = require('./notification-service');
 
 const PORT = process.env.PORT || 8723;  // internette sunucu portu atar; yerelde 8723
 const ROOT = __dirname;
+const notificationService = createNotificationService({ root: ROOT, logger: (...args) => console.log(...args) });
 // SEC, kendini tanıtan bir User-Agent ister:
 const UA = 'Bilanco Analiz Araci (kisisel kullanim; contact@example.com)';
 const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
@@ -2652,6 +2654,11 @@ async function lunaChatHandler(req, res){
 
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  if (urlPath.startsWith('/api/notifications/')) {
+    notificationService.handle(req, res, urlPath);
+    return;
+  }
 
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/broker') { lunaBrokerAnalyzeHandler(req,res); return; }

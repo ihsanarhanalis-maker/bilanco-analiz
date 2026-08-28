@@ -16,3 +16,15 @@ services:
         value: "gpt-5.6-luna"
       - key: OPENAI_API_KEY
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: "https://bilanco-analiz-4sjg.onrender.com/"
+      - key: NOTIFICATION_CRON_SECRET
+        generateValue: true
+      - key: NOTIFICATION_POLL_MINUTES
+        value: "15"

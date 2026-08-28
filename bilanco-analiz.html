@@ -700,6 +700,18 @@
   <div class="card no-print hidden" id="watchCard">
     <h2 data-i18n="watch_h2">İzleme Listem</h2>
     <div class="sub" data-i18n-html="watch_sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
+    <div class="watch-notification-panel" id="watchNotificationPanel">
+      <div class="watch-notification-copy">
+        <strong data-i18n="notify_title">Bilanço ve bildirim alarmı</strong>
+        <span id="notificationStatus" data-i18n="notify_off">Bu cihazda bildirimler kapalı.</span>
+        <small data-i18n="notify_scope">Yeni bilanço, KAP/SEC bildirimi ve analist hedef fiyatı değişiklikleri izlenir.</small>
+      </div>
+      <div class="watch-notification-actions">
+        <button type="button" class="primary" id="notificationEnableBtn" onclick="enableWatchNotifications()" data-i18n="notify_enable">Bildirimleri Aç</button>
+        <button type="button" class="hidden" id="notificationTestBtn" onclick="sendTestNotification()" data-i18n="notify_test">Test Gönder</button>
+        <button type="button" class="hidden" id="notificationPairBtn" onclick="shareNotificationProfile()" data-i18n="notify_pair">Diğer Cihazı Bağla</button>
+      </div>
+    </div>
     <div id="watchBody"><div class="hint">—</div></div>
   </div>
 

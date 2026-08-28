@@ -1,4 +1,6 @@
 node_modules/
+.notification-store.json
+.env.notifications
 .npm-cache/
 *.log
 .DS_Store

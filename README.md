@@ -50,6 +50,20 @@ Not: Canlı veri için sunucunun çalışıyor olması gerekir. İnternetten her
 
 **Ücretsiz katman notu:** Uzun süre kullanılmazsa uyuyabilir; ilk açılış 30–60 sn sürebilir. Bu normaldir.
 
+### İzleme listesi bildirimleri
+
+Uygulama Android, iOS 16.4+ ve masaüstünde Web Push kullanır. İzleme listesindeki BIST ve ABD hisseleri için yeni bilanço, KAP/SEC bildirimi ve analist hedef fiyatı değişiklikleri izlenir.
+
+Üretim ortamında şu değişkenler gereklidir:
+
+- `DATABASE_URL`: Kalıcı PostgreSQL bağlantısı. Render'ın geçici dosya sistemi bildirim abonelikleri için kullanılmamalıdır.
+- `VAPID_PUBLIC_KEY` ve `VAPID_PRIVATE_KEY`: `npm run generate:vapid` çıktısındaki Web Push anahtarları.
+- `VAPID_SUBJECT`: Geçerli bir `mailto:` veya HTTPS iletişim adresi.
+- `NOTIFICATION_CRON_SECRET`: `/api/notifications/poll` çağrısını koruyan rastgele sır.
+- `NOTIFICATION_POLL_MINUTES`: Sürekli çalışan sunucuda kontrol aralığı; varsayılan 15 dakikadır.
+
+Render servisi uykuya giriyorsa düzenli ve zamanında bildirim için sürekli çalışan bir instance veya `POST /api/notifications/poll` adresini `X-Cron-Secret` başlığıyla çağıran bir zamanlayıcı gerekir. iPhone'da kullanıcı uygulamayı Safari'den **Ana Ekrana Ekle** ile yüklemeli ve bildirim iznini uygulama ikonundan açmalıdır.
+
 ## Nasıl çalışır (mimari)
 
 Uygulama tamamen istemci-taraflı bir HTML + küçük bir Node köprü sunucusundan oluşur. **API anahtarı yoktur.** `server.js`, CORS/Origin/crumb kısıtı olan kaynakları sunucu tarafından proxy'ler:

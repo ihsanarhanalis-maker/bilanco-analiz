@@ -6658,7 +6658,10 @@ async function fetchSectorComparison(sym, market, myGen, euOpt){
 /* ---- İzleme Listesi (localStorage) ---- */
 const WATCH_KEY='bilanco_watchlist';
 function getWatchlist(){ try{ return JSON.parse(localStorage.getItem(WATCH_KEY)||'[]'); }catch(e){ return []; } }
-function saveWatchlist(list){ try{ localStorage.setItem(WATCH_KEY, JSON.stringify(list)); }catch(e){} }
+function saveWatchlist(list){
+  try{ localStorage.setItem(WATCH_KEY, JSON.stringify(list)); }catch(e){}
+  if(typeof queueNotificationWatchSync==='function') queueNotificationWatchSync();
+}
 function isWatched(sym, market){ return getWatchlist().some(w=>w.sym===sym && w.market===market); }
 /* Avrupa'da tek başına ticker kodu borsalar arası çakışabilir (ör. "MC") → izleme listesi
    anahtarı olarak kod+eki birlikte kullanılır ("SIE.DE"); diğer pazarlarda salt kod yeterli. */
@@ -6770,6 +6773,208 @@ function removeWatch(sym, market){
   saveWatchlist(getWatchlist().filter(w=>!(w.sym===sym && w.market===market)));
   updateWatchStar();
   renderWatchlist();
+}
+
+/* ---- İzleme listesi bildirimleri (Android · iOS PWA · masaüstü Web Push) ---- */
+const NOTIFY_PROFILE_KEY='bilanco_notification_profile';
+let NOTIFY_CONFIG=null, NOTIFY_SYNC_TIMER=null, NOTIFY_IMPORTING=false;
+
+function notificationProfileId(create){
+  try{
+    let id=localStorage.getItem(NOTIFY_PROFILE_KEY)||'';
+    if(!/^[A-Za-z0-9_-]{32,96}$/.test(id) && create){
+      const bytes=new Uint8Array(24); crypto.getRandomValues(bytes);
+      id=Array.from(bytes,b=>String.fromCharCode(b)).join('');
+      id=btoa(id).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      localStorage.setItem(NOTIFY_PROFILE_KEY,id);
+    }
+    return /^[A-Za-z0-9_-]{32,96}$/.test(id)?id:null;
+  }catch(_e){ return null; }
+}
+
+function notificationWatchlistPayload(){
+  const cikMap=window.CIK_MAP||{};
+  return getWatchlist().map(w=>({
+    sym:w.sym, market:w.market, ysym:w.ysym,
+    cik:w.cik || (w.market==='US'&&cikMap[String(w.sym||'').replace(/\.US$/i,'')] ? String(cikMap[String(w.sym||'').replace(/\.US$/i,'')]) : null),
+    country:w.country
+  }));
+}
+
+function base64UrlBytes(value){
+  const pad='='.repeat((4-value.length%4)%4);
+  const raw=atob((value+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from(raw,c=>c.charCodeAt(0));
+}
+
+async function notificationConfig(){
+  if(NOTIFY_CONFIG) return NOTIFY_CONFIG;
+  const r=await fetch('/api/notifications/config',{cache:'no-store'});
+  NOTIFY_CONFIG=await r.json();
+  return NOTIFY_CONFIG;
+}
+
+function setNotificationStatus(key,kind){
+  const panel=document.getElementById('watchNotificationPanel');
+  const status=document.getElementById('notificationStatus');
+  if(status) status.textContent=t(key);
+  if(panel){
+    panel.classList.toggle('is-active',kind==='active');
+    panel.classList.toggle('is-error',kind==='error');
+  }
+}
+
+function isStandaloneApp(){
+  return window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone===true;
+}
+
+async function currentPushSubscription(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg=await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function refreshNotificationUi(){
+  const enable=document.getElementById('notificationEnableBtn');
+  const test=document.getElementById('notificationTestBtn');
+  const pair=document.getElementById('notificationPairBtn');
+  if(!enable) return;
+  if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)){
+    enable.disabled=true; setNotificationStatus('notify_unavailable','error'); return;
+  }
+  try{
+    const cfg=await notificationConfig();
+    if(!cfg.enabled){ enable.disabled=true; setNotificationStatus('notify_unavailable','error'); return; }
+    const subscription=await currentPushSubscription();
+    const active=Boolean(subscription && Notification.permission==='granted');
+    enable.disabled=false;
+    enable.textContent=t(active?'notify_disable':'notify_enable');
+    enable.classList.toggle('primary',!active);
+    test.classList.toggle('hidden',!active);
+    pair.classList.toggle('hidden',!active);
+    setNotificationStatus(active?'notify_active':(Notification.permission==='denied'?'notify_denied':'notify_off'),active?'active':(Notification.permission==='denied'?'error':''));
+  }catch(_e){ enable.disabled=true; setNotificationStatus('notify_unavailable','error'); }
+}
+
+async function postNotificationApi(path,body){
+  const r=await fetch('/api/notifications/'+path,{
+    method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})
+  });
+  let j={}; try{ j=await r.json(); }catch(_e){}
+  if(!r.ok || !j.ok) throw new Error(j.error||('HTTP '+r.status));
+  return j;
+}
+
+async function enableWatchNotifications(){
+  const enable=document.getElementById('notificationEnableBtn');
+  if(enable) enable.disabled=true;
+  try{
+    const existing=await currentPushSubscription();
+    if(existing && Notification.permission==='granted'){
+      await postNotificationApi('unsubscribe',{endpoint:existing.endpoint});
+      await existing.unsubscribe();
+      setNotificationStatus('notify_off','');
+      await refreshNotificationUi();
+      return;
+    }
+    if(isIosDevice()&&!isStandaloneApp()){
+      setNotificationStatus('notify_ios_install','error');
+      if(enable) enable.disabled=false;
+      return;
+    }
+    const cfg=await notificationConfig();
+    if(!cfg.enabled||!cfg.publicKey){ setNotificationStatus('notify_unavailable','error'); return; }
+    setNotificationStatus('notify_wait','');
+    const permission=await Notification.requestPermission();
+    if(permission!=='granted'){ setNotificationStatus('notify_denied','error'); return; }
+    const reg=await navigator.serviceWorker.ready;
+    const subscription=await reg.pushManager.subscribe({
+      userVisibleOnly:true,applicationServerKey:base64UrlBytes(cfg.publicKey)
+    });
+    await postNotificationApi('subscribe',{
+      profileId:notificationProfileId(true), subscription:subscription.toJSON(),
+      watchlist:notificationWatchlistPayload(), locale:getLang()
+    });
+    setNotificationStatus('notify_active','active');
+    await refreshNotificationUi();
+  }catch(e){
+    console.warn('Notification setup failed',e);
+    setNotificationStatus(e&&e.message==='push_not_configured'?'notify_unavailable':'notify_error','error');
+  }finally{ if(enable) enable.disabled=false; }
+}
+
+function queueNotificationWatchSync(){
+  if(NOTIFY_IMPORTING) return;
+  clearTimeout(NOTIFY_SYNC_TIMER);
+  NOTIFY_SYNC_TIMER=setTimeout(()=>syncNotificationWatchlist().catch(()=>{}),500);
+}
+
+async function syncNotificationWatchlist(){
+  const profileId=notificationProfileId(false);
+  if(!profileId) return;
+  await postNotificationApi('sync',{profileId,watchlist:notificationWatchlistPayload()});
+}
+
+async function sendTestNotification(){
+  try{
+    const result=await postNotificationApi('test',{profileId:notificationProfileId(true)});
+    setNotificationStatus(result.sent>0?'notify_test_sent':'notify_error',result.sent>0?'active':'error');
+  }catch(_e){ setNotificationStatus('notify_error','error'); }
+}
+
+async function shareNotificationProfile(){
+  const profileId=notificationProfileId(true);
+  await syncNotificationWatchlist();
+  const link=location.origin+location.pathname+'?notificationProfile='+encodeURIComponent(profileId);
+  try{
+    if(navigator.share){ await navigator.share({title:'Bilanço Analiz bildirimleri',text:'İzleme listemi bu cihazda da aç',url:link}); }
+    else if(navigator.clipboard){ await navigator.clipboard.writeText(link); }
+    else throw new Error('clipboard');
+    setNotificationStatus('notify_pair_copied','active');
+  }catch(e){
+    if(e&&e.name==='AbortError') return;
+    window.prompt('Bu bağlantıyı telefonda aç:',link);
+  }
+}
+
+async function importNotificationProfile(){
+  const url=new URL(location.href);
+  const incoming=url.searchParams.get('notificationProfile');
+  if(!incoming||!/^[A-Za-z0-9_-]{32,96}$/.test(incoming)) return;
+  localStorage.setItem(NOTIFY_PROFILE_KEY,incoming);
+  try{
+    const remote=await postNotificationApi('profile',{profileId:incoming});
+    if(Array.isArray(remote.watchlist)&&remote.watchlist.length){
+      NOTIFY_IMPORTING=true;
+      saveWatchlist(remote.watchlist.map(w=>({sym:w.sym||w.symbol,market:w.market,ysym:w.ysym,cik:w.cik,country:w.country})));
+      NOTIFY_IMPORTING=false;
+      renderWatchlist();
+      setNotificationStatus('notify_synced','');
+    }
+  }finally{
+    url.searchParams.delete('notificationProfile');
+    history.replaceState(null,'',url.pathname+url.search+url.hash);
+  }
+}
+
+function openNotificationDeepLink(){
+  const url=new URL(location.href);
+  const symbol=String(url.searchParams.get('notifySymbol')||'').trim().toUpperCase();
+  const market=String(url.searchParams.get('notifyMarket')||'').trim().toUpperCase();
+  if(!symbol||!['US','BIST'].includes(market)) return;
+  setTimeout(()=>{
+    const input=document.getElementById('ticker');
+    if(input){ input.value=symbol+(market==='BIST'?'.IS':'.US'); switchPage('stock'); fetchTicker(); }
+    url.searchParams.delete('notifySymbol'); url.searchParams.delete('notifyMarket');
+    history.replaceState(null,'',url.pathname+url.search+url.hash);
+  },250);
+}
+
+async function initWatchNotifications(){
+  try{ await importNotificationProfile(); }catch(e){ console.warn('Notification profile import failed',e); }
+  await refreshNotificationUi();
+  openNotificationDeepLink();
 }
 
 /* ---- Nakit Akışı & FCF ---- */
@@ -8158,6 +8363,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   body.addEventListener('input', colorInputRows);
   body.addEventListener('change', colorInputRows);
   registerPwa();
+  initWatchNotifications();
   initMarketTape();
   initHomeVoice();
   // Bugünün Fırsatları + Hisse Takvimi: arama yapılana kadar gizli
@@ -8196,6 +8402,7 @@ function refreshI18nPanels(){
     }
   }catch(_e){}
   try{ updateWatchStar(); }catch(_e){}
+  try{ refreshNotificationUi(); }catch(_e){}
   try{
     const body2=document.getElementById('inputBody');
     if(body2){

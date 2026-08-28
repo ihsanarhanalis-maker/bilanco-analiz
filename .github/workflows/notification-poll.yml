@@ -1,0 +1,29 @@
+name: İzleme listesi bildirim taraması
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notification-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - name: KAP, SEC ve hedef fiyat değişikliklerini kontrol et
+        env:
+          CRON_SECRET: ${{ secrets.NOTIFICATION_CRON_SECRET }}
+        run: |
+          test -n "$CRON_SECRET"
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-delay 15 --max-time 240 \
+            -X POST \
+            -H "X-Cron-Secret: $CRON_SECRET" \
+            https://bilanco-analiz-4sjg.onrender.com/api/notifications/poll
