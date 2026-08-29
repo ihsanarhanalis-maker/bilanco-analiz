@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Çalıştırılacak bildirim işlemi
+        required: true
+        default: poll
+        type: choice
+        options:
+          - poll
+          - demo
 
 permissions:
   contents: read
@@ -20,10 +29,13 @@ jobs:
       - name: KAP, SEC ve hedef fiyat değişikliklerini kontrol et
         env:
           CRON_SECRET: ${{ secrets.NOTIFICATION_CRON_SECRET }}
+          MODE: ${{ inputs.mode || 'poll' }}
         run: |
           test -n "$CRON_SECRET"
+          endpoint="poll"
+          if [ "$MODE" = "demo" ]; then endpoint="demo"; fi
           curl --fail-with-body --silent --show-error \
             --retry 2 --retry-delay 15 --max-time 240 \
             -X POST \
             -H "X-Cron-Secret: $CRON_SECRET" \
-            https://bilanco-analiz-4sjg.onrender.com/api/notifications/poll
+            "https://bilanco-analiz-4sjg.onrender.com/api/notifications/$endpoint"
