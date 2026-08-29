@@ -625,12 +625,49 @@ function createNotificationService(options = {}) {
       if (urlPath === '/api/notifications/test') {
         if (!serviceEnabled) { json(res, 503, { ok: false, error: 'push_not_configured' }); return true; }
         const subscriptions = await store.subscriptionsForProfile(profileId);
-        const result = await sendSubscriptions(subscriptions, {
-          title: 'Bilanço Analiz bildirimleri açık',
-          body: 'Bilanço, KAP/SEC ve analist hedef fiyatı bildirimleri bu cihazda çalışıyor.',
-          tag: 'bilanco-notification-test', url: '/', icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', eventType: 'test'
-        });
-        json(res, 200, { ok: true, ...result });
+        const watchlist = await store.getProfile(profileId);
+        const focus = watchlist[0] || { symbol: 'THYAO', market: 'BIST' };
+        const symbol = String(focus.symbol || focus.sym || 'THYAO').toUpperCase();
+        const market = focus.market === 'US' ? 'US' : 'BIST';
+        const disclosureSource = market === 'US' ? 'SEC' : 'KAP';
+        const now = Date.now();
+        const common = {
+          url: safeUrlFor({ symbol, market }),
+          icon: '/icons/icon-192.png',
+          badge: '/icons/icon-192.png',
+          symbol,
+          market
+        };
+        const tests = [
+          {
+            ...common,
+            title: 'TEST · Yeni bilanço yayımlandı',
+            body: `${symbol} için yeni finansal tablo yayımlandığında bu bildirimi alacaksın.`,
+            tag: `bilanco-test-balance-${now}`,
+            eventType: 'balance'
+          },
+          {
+            ...common,
+            title: `TEST · Yeni ${disclosureSource} bildirimi`,
+            body: `${symbol} için yeni ${disclosureSource} bildirimi geldiğinde bu bildirimi alacaksın.`,
+            tag: `bilanco-test-filing-${now}`,
+            eventType: 'filing'
+          },
+          {
+            ...common,
+            title: 'TEST · Analist hedef fiyatı güncellendi',
+            body: `${symbol} için yeni analist hedef fiyatı geldiğinde bu bildirimi alacaksın.`,
+            tag: `bilanco-test-target-${now}`,
+            eventType: 'target'
+          }
+        ];
+        const result = { sent: 0, failed: 0 };
+        for (const payload of tests) {
+          const delivery = await sendSubscriptions(subscriptions, payload);
+          result.sent += delivery.sent;
+          result.failed += delivery.failed;
+        }
+        json(res, 200, { ok: true, ...result, types: tests.length, devices: subscriptions.length, symbol, market });
         return true;
       }
       if (urlPath === '/api/notifications/poll') {
