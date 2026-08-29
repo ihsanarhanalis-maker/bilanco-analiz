@@ -6837,7 +6837,6 @@ async function currentPushSubscription(){
 
 async function refreshNotificationUi(){
   const enable=document.getElementById('notificationEnableBtn');
-  const test=document.getElementById('notificationTestBtn');
   const pair=document.getElementById('notificationPairBtn');
   if(!enable) return;
   if(!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)){
@@ -6851,7 +6850,6 @@ async function refreshNotificationUi(){
     enable.disabled=false;
     enable.textContent=t(active?'notify_disable':'notify_enable');
     enable.classList.toggle('primary',!active);
-    test.classList.toggle('hidden',!active);
     pair.classList.toggle('hidden',!active);
     setNotificationStatus(active?'notify_active':(Notification.permission==='denied'?'notify_denied':'notify_off'),active?'active':(Notification.permission==='denied'?'error':''));
   }catch(_e){ enable.disabled=true; setNotificationStatus('notify_unavailable','error'); }
@@ -6914,13 +6912,6 @@ async function syncNotificationWatchlist(){
   const profileId=notificationProfileId(false);
   if(!profileId) return;
   await postNotificationApi('sync',{profileId,watchlist:notificationWatchlistPayload()});
-}
-
-async function sendTestNotification(){
-  try{
-    const result=await postNotificationApi('test',{profileId:notificationProfileId(true)});
-    setNotificationStatus(result.sent>0?'notify_test_sent':'notify_error',result.sent>0?'active':'error');
-  }catch(_e){ setNotificationStatus('notify_error','error'); }
 }
 
 async function shareNotificationProfile(){
