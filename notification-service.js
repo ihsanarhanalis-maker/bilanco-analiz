@@ -509,7 +509,8 @@ function createNotificationService(options = {}) {
       tag: 'bilanco-' + type + '-' + item.market + '-' + item.symbol,
       url: snapshot.url || safeUrlFor(item),
       icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      badge: '/icons/notification-badge-96.png',
+      timestamp: Date.now(),
       symbol: item.symbol,
       market: item.market,
       eventType: type
@@ -522,18 +523,18 @@ function createNotificationService(options = {}) {
     if (item.market === 'US' && item.cik) {
       const sec = await fetchSecSnapshot(item, userAgent);
       if (sec && sec.balance) emitted += await emit(item, 'balance', sec.balance,
-        item.symbol + ' yeni bilançosunu yayımladı', sec.balance.form + ' · ' + sec.balance.date) ? 1 : 0;
+        item.symbol + ' · Yeni bilanço', sec.balance.form + ' • ' + sec.balance.date) ? 1 : 0;
       if (sec && sec.filing) emitted += await emit(item, 'filing', sec.filing,
-        item.symbol + ' yeni SEC bildirimi', [sec.filing.form, sec.filing.description, sec.filing.date].filter(Boolean).join(' · ')) ? 1 : 0;
+        item.symbol + ' · SEC bildirimi', [sec.filing.form, sec.filing.description, sec.filing.date].filter(Boolean).join(' • ')) ? 1 : 0;
     }
     if (item.market === 'BIST') {
       const events = (kapMap && kapMap.get(item.symbol)) || [];
       const balance = events.find(event => /finansal\s+(rapor|tablo)|financial\s+(report|statement)/i.test(event.subject + ' ' + event.summary));
       const filing = events.find(event => !balance || event.key !== balance.key);
       if (balance) emitted += await emit(item, 'balance', balance,
-        item.symbol + ' yeni bilançosunu yayımladı', [balance.subject, balance.date && balance.date.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' · ')) ? 1 : 0;
+        item.symbol + ' · Yeni bilanço', [balance.subject, balance.date && balance.date.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' • ')) ? 1 : 0;
       if (filing) emitted += await emit(item, 'filing', filing,
-        item.symbol + ' yeni KAP bildirimi', [filing.subject || filing.summary, filing.date && filing.date.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' · ')) ? 1 : 0;
+        item.symbol + ' · KAP bildirimi', [filing.subject || filing.summary, filing.date && filing.date.slice(0, 16).replace('T', ' ')].filter(Boolean).join(' • ')) ? 1 : 0;
     }
     const target = targetMaps.get(item.market) && targetMaps.get(item.market).get(item.symbol);
     if (target) {
@@ -541,7 +542,7 @@ function createNotificationService(options = {}) {
       const body = target.target != null
         ? 'Yeni hedef fiyat konsensüsü: ' + Number(target.target).toFixed(2) + currency
         : 'Analist konsensüsü güncellendi';
-      emitted += await emit(item, 'target', target, item.symbol + ' analist hedef fiyatı güncellendi', body) ? 1 : 0;
+      emitted += await emit(item, 'target', target, item.symbol + ' · Hedef fiyat güncellendi', body) ? 1 : 0;
     }
     return emitted;
   }

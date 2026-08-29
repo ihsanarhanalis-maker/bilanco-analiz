@@ -1,6 +1,6 @@
 ﻿/* Bilan├ğo Analiz ÔÇö PWA service worker
    Statik kabu─şu ├Ânbelle─şe al─▒r; API k├Âpr├╝leri (/price, /bist, /secÔÇĞ) her zaman a─şdan gelir. */
-const CACHE = 'bilanco-shell-v186';
+const CACHE = 'bilanco-shell-v187';
 const SHELL = [
   '/',
   '/bilanco-analiz.html',
@@ -12,6 +12,7 @@ const SHELL = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-180.png',
+  '/icons/notification-badge-96.png',
   '/icons/logo.png'
 ];
 
@@ -66,11 +67,14 @@ self.addEventListener('push', event => {
   const options = {
     body: payload.body || 'İzleme listenizde yeni bir gelişme var.',
     icon: payload.icon || '/icons/icon-192.png',
-    badge: payload.badge || '/icons/icon-192.png',
+    badge: payload.badge || '/icons/notification-badge-96.png',
     tag: payload.tag || 'bilanco-update',
     renotify: true,
+    silent: false,
+    timestamp: Number(payload.timestamp) || Date.now(),
+    vibrate: [160, 80, 160],
     data: { url: payload.url || '/', symbol: payload.symbol, market: payload.market, eventType: payload.eventType },
-    actions: [{ action: 'open', title: 'Uygulamada aç' }]
+    actions: [{ action: 'open', title: 'Detayı görüntüle' }]
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
