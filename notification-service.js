@@ -296,16 +296,6 @@ class NotificationStore {
     return Object.values(this.data.subscriptions).filter(s => s.enabled && s.profileId === profileId);
   }
 
-  async allSubscriptions() {
-    await this.ready;
-    if (this.pool) {
-      const { rows } = await this.pool.query(`SELECT endpoint,p256dh,auth,locale FROM push_subscriptions
-        WHERE enabled=TRUE`);
-      return rows.map(r => ({ endpoint: r.endpoint, keys: { p256dh: r.p256dh, auth: r.auth }, locale: r.locale }));
-    }
-    return Object.values(this.data.subscriptions).filter(s => s.enabled);
-  }
-
   async state(symbol, market, eventType) {
     await this.ready;
     const id = market + ':' + symbol + ':' + eventType;
@@ -607,7 +597,7 @@ function createNotificationService(options = {}) {
       if (req.method !== 'POST') { json(res, 405, { ok: false, error: 'method' }); return true; }
       const body = await readJson(req);
       const profileId = validProfileId(body.profileId);
-      if (!profileId && !['/api/notifications/unsubscribe', '/api/notifications/poll', '/api/notifications/demo'].includes(urlPath)) {
+      if (!profileId && !['/api/notifications/unsubscribe', '/api/notifications/poll'].includes(urlPath)) {
         json(res, 400, { ok: false, error: 'profile_id' }); return true;
       }
 
@@ -631,35 +621,6 @@ function createNotificationService(options = {}) {
         const endpoint = String(body.endpoint || '').trim();
         if (endpoint) await store.deleteSubscription(endpoint);
         json(res, 200, { ok: true });
-        return true;
-      }
-      if (urlPath === '/api/notifications/demo') {
-        const secret = String(process.env.NOTIFICATION_CRON_SECRET || '');
-        const supplied = String(req.headers['x-cron-secret'] || body.secret || '');
-        if (!secret || supplied !== secret) { json(res, 403, { ok: false, error: 'forbidden' }); return true; }
-        const subscriptions = await store.allSubscriptions();
-        const watched = await store.watchedSymbols();
-        const focus = watched[0] || { symbol: 'THYAO', market: 'BIST' };
-        const symbol = focus.symbol;
-        const market = focus.market;
-        const source = market === 'US' ? 'SEC' : 'KAP';
-        const now = Date.now();
-        const common = {
-          url: safeUrlFor(focus), icon: '/icons/icon-192.png', badge: '/icons/notification-badge-96.png',
-          timestamp: now, symbol, market
-        };
-        const messages = [
-          { ...common, title: symbol + ' · Yeni bilanço', body: 'Örnek bildirim • Yeni finansal sonuçlar yayımlandı. Detayları incelemek için dokun.', tag: 'bilanco-demo-balance-' + now, eventType: 'balance' },
-          { ...common, title: symbol + ' · ' + source + ' bildirimi', body: 'Örnek bildirim • Şirket için yeni bir ' + source + ' açıklaması geldi.', tag: 'bilanco-demo-filing-' + now, eventType: 'filing' },
-          { ...common, title: symbol + ' · Hedef fiyat güncellendi', body: 'Örnek bildirim • Analist hedef fiyat konsensüsünde yeni bir değişiklik var.', tag: 'bilanco-demo-target-' + now, eventType: 'target' }
-        ];
-        const delivery = { sent: 0, failed: 0 };
-        for (const message of messages) {
-          const result = await sendSubscriptions(subscriptions, message);
-          delivery.sent += result.sent;
-          delivery.failed += result.failed;
-        }
-        json(res, 200, { ok: true, ...delivery, notifications: messages.length, devices: subscriptions.length, symbol, market });
         return true;
       }
       if (urlPath === '/api/notifications/poll') {
