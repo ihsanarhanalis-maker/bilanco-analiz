@@ -2146,7 +2146,7 @@ const LUNA_CACHE_MS = 30 * 60 * 1000;
 const LUNA_CHAT_CACHE_MS = 5 * 60 * 1000;
 const LUNA_RATE_MS = 60 * 60 * 1000;
 const LUNA_RATE_MAX = 20;
-const LUNA_SERVICE_TIER = String(process.env.OPENAI_SERVICE_TIER || '').trim().toLowerCase();
+const LUNA_SERVICE_TIER = String(process.env.OPENAI_SERVICE_TIER || 'fast').trim().toLowerCase();
 
 function lunaJson(res, status, obj){
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
