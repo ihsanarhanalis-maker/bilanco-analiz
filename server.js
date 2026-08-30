@@ -2210,6 +2210,13 @@ function openAiResponse(payload, timeoutMs){
     rq.on('error', reject); rq.end(raw);
   });
 }
+async function openAiResponseResilient(payload, timeoutMs){
+  const first=await openAiResponse(payload,timeoutMs);
+  const reason=first&&first.incomplete_details&&first.incomplete_details.reason;
+  if(responseOutputText(first)||reason!=='max_output_tokens') return first;
+  const current=Math.max(1,Number(payload&&payload.max_output_tokens)||2000);
+  return openAiResponse({...payload,max_output_tokens:Math.min(8000,Math.max(current+1000,Math.ceil(current*1.5)))},timeoutMs);
+}
 function openAiResponseStream(payload, onDelta){
   return new Promise((resolve, reject) => {
     const raw=JSON.stringify({...optimizedLunaPayload(payload,true),stream:true});
@@ -2351,7 +2358,7 @@ async function lunaAnalyzeHandler(req, res){
       dataQuality:{type:'string',description:'Comparability, missing fields, stale dates and confidence limits.'},
       disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','financialPosition','cashFlow','earningsQuality','watchNext','dataQuality','disclaimer']};
-    const out=await lunaShared('analysis:'+cacheKey,()=>openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:4200,instructions,prompt_cache_key:'bilanco-luna-analysis-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+    const out=await lunaShared('analysis:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:5200,instructions,prompt_cache_key:'bilanco-luna-analysis-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
       text:{verbosity:'medium',format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}},90000));
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
@@ -2511,7 +2518,7 @@ async function lunaBrokerAnalyzeHandler(req,res){
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
       ? 'Bu görevde yalnızca verilen aracı kurum dağılımını piyasa mikro-yapısı açısından yorumla. Önce dağılımın dengeli mi yoğunlaşmış mı olduğunu söyle; sonra en büyük alıcı ve satıcıları, net lotları, ilk beş dengesini ve veri tarihini rakamlarla açıkla. OCR ile tahmin edilmiş pctEstimated yüzdelerini kesin veri gibi kullanma; eksik satır veya toplamlar nedeniyle hesaplanamayan yoğunlaşmayı açıkça belirt. AKD geçmiş işlemleri gösterir: tek başına yatırımcı kimliği, pozisyonun devamı veya gelecekteki fiyat yönü hakkında kanıt değildir. Yanıtı Sonuç, Sayısal kanıt, Risk ve sınırlamalar, İzlenecekler sırasıyla kısa düz bölümler halinde yaz.'
       : 'For this task, interpret only the supplied broker distribution from a market-microstructure perspective. First state whether the distribution is balanced or concentrated; then quantify the largest buyers and sellers, net lots, top-five balance, and data date. Do not treat OCR-derived pctEstimated percentages as exact; explicitly report concentration that cannot be calculated because rows or totals are missing. AKD reflects past transactions and alone does not establish investor identity, position persistence, or future price direction. Write short plain sections in this order: Conclusion, Numerical evidence, Risks and limitations, What to watch.');
-    const out=await lunaShared('broker:'+cacheKey,()=>openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1700,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'medium'}}));
+    const out=await lunaShared('broker:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:3000,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'low'}}));
     const answer=lunaProfessionalText(responseOutputText(out));
     if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     const item=safeSnapshot.selectedTable||{}, url=/^https:\/\//i.test(String(item.url||''))?String(item.url):'';
@@ -2564,7 +2571,7 @@ async function lunaEconomicCalendarHandler(req,res){
       riskScenarios:{type:'array',items:{type:'string'},maxItems:3},watchNext:{type:'array',items:{type:'string'},maxItems:4},
       dataQuality:{type:'string'},disclaimer:{type:'string'}
     },required:['summary','keyEvents','realizedSurprises','marketTransmission','riskScenarios','watchNext','dataQuality','disclaimer']};
-    const out=await lunaShared('economic:'+cacheKey,()=>openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:2300,
+    const out=await lunaShared('economic:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:3000,
       instructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
       prompt_cache_key:'bilanco-luna-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       text:{verbosity:'low',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}},90000));
@@ -2601,7 +2608,7 @@ async function lunaChartAnalyzeHandler(req,res){
       levels:{type:'array',items:{type:'string'},maxItems:4},scenarios:{type:'array',items:{type:'string'},maxItems:3},
       risks:{type:'array',items:{type:'string'},maxItems:4},disclaimer:{type:'string'}
     },required:['summary','trend','momentum','levels','scenarios','risks','disclaimer']};
-    const out=await lunaShared('chart:'+cacheKey,()=>openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:3200,
+    const out=await lunaShared('chart:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:4200,
       instructions,input:'Güncel teknik veri paketi / Current technical data package:\n'+JSON.stringify(market),
       prompt_cache_key:'bilanco-luna-chart-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       text:{verbosity:'low',format:{type:'json_schema',name:'technical_chart_analysis',strict:true,schema}}},90000));
