@@ -3502,7 +3502,7 @@ function renderGraphAiWidget(){
   host.innerHTML='<div class="tradingview-widget-container"><div class="tradingview-widget-container__widget" style="height:calc(100% - 28px);width:100%"></div><div class="tradingview-widget-copyright"><a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank"><span class="blue-text">TradingView</span></a></div></div>';
   const container=host.firstElementChild, script=document.createElement('script');
   script.type='text/javascript'; script.async=true; script.src='https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
-  script.text=JSON.stringify({autosize:true,symbol:state.tvSymbol,interval:'D',timezone:'exchange',theme:'dark',backgroundColor:'#07101f',gridColor:'rgba(132,154,190,0.10)',style:'1',locale,withdateranges:true,hide_side_toolbar:false,hide_top_toolbar:false,hide_legend:false,hide_volume:false,allow_symbol_change:true,save_image:true,calendar:true,details:true,hotlist:true,show_popup_button:true,popup_width:'1600',popup_height:'950',studies:['RSI@tv-basicstudies','MACD@tv-basicstudies','MASimple@tv-basicstudies'],support_host:'https://www.tradingview.com'});
+  script.text=JSON.stringify({autosize:true,symbol:state.tvSymbol,interval:'D',timezone:'Europe/Istanbul',theme:'dark',backgroundColor:'#07101f',gridColor:'rgba(132,154,190,0.10)',style:'1',locale,withdateranges:true,hide_side_toolbar:false,hide_top_toolbar:false,hide_legend:false,hide_volume:false,allow_symbol_change:true,save_image:true,calendar:true,details:true,hotlist:true,show_popup_button:true,popup_width:'1600',popup_height:'950',studies:['RSI@tv-basicstudies','MACD@tv-basicstudies','MASimple@tv-basicstudies'],support_host:'https://www.tradingview.com'});
   container.appendChild(script);
 }
 function initGraphAiPage(){
@@ -5762,7 +5762,16 @@ function updateMarketSpecificLabels(){
 const LUNA_CHAT_MESSAGES=[];
 let LUNA_CHAT_BUSY=false;
 let LUNA_CHAT_STREAMING=false;
+let LUNA_CHAT_RENDER_TIMER=null;
+function scheduleLunaChatRender(){
+  if(LUNA_CHAT_RENDER_TIMER!=null) return;
+  LUNA_CHAT_RENDER_TIMER=setTimeout(()=>{
+    LUNA_CHAT_RENDER_TIMER=null;
+    renderLunaChat();
+  },32);
+}
 function renderLunaChat(){
+  if(LUNA_CHAT_RENDER_TIMER!=null){ clearTimeout(LUNA_CHAT_RENDER_TIMER); LUNA_CHAT_RENDER_TIMER=null; }
   const box=document.getElementById('aiChatMessages'); if(!box) return;
   const empty=document.getElementById('aiChatEmpty');
   box.querySelectorAll('.ai-message').forEach(x=>x.remove());
@@ -5836,7 +5845,7 @@ async function sendLunaChat(e){
             assistant={role:'assistant',content:'',sources:[]};
             LUNA_CHAT_MESSAGES.push(assistant); LUNA_CHAT_STREAMING=true;
           }
-          assistant.content+=String(data.delta); renderLunaChat();
+          assistant.content+=String(data.delta); scheduleLunaChatRender();
         }else if(event==='done'){
           if(!assistant){ assistant={role:'assistant',content:'',sources:[]}; LUNA_CHAT_MESSAGES.push(assistant); }
           assistant.content=String(data.answer||assistant.content||t('ai_error'));
