@@ -8,11 +8,9 @@ const zlib  = require('zlib');
 const fs    = require('fs');
 const path  = require('path');
 const crypto = require('crypto');
-const { createNotificationService } = require('./notification-service');
 
 const PORT = process.env.PORT || 8723;  // internette sunucu portu atar; yerelde 8723
 const ROOT = __dirname;
-const notificationService = createNotificationService({ root: ROOT, logger: (...args) => console.log(...args) });
 // SEC, kendini tanıtan bir User-Agent ister:
 const UA = 'Bilanco Analiz Araci (kisisel kullanim; contact@example.com)';
 const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
@@ -25,7 +23,6 @@ const PUBLIC_FILES = new Set([
   'bilanco-analiz.html', 'apple-design.css', 'app.js', 'i18n.js', 'cik-map.js', 'sw.js', 'manifest.webmanifest'
 ]);
 const isPublicStaticFile = rel => PUBLIC_FILES.has(rel) || rel.startsWith('icons/');
-const STATIC_ASSET_CACHE = new Map();
 
 /* Analist hedef fiyatları — Yahoo quoteSummary yerine Finviz'den kazınır.
    Neden: Yahoo'nun crumb doğrulaması bazı bulut sunucu IP'lerinde (Render, AWS vb.)
@@ -132,47 +129,6 @@ function httpsGetText(url, headers) {
       pr.on('end', () => resolve({ status: pr.statusCode, body }));
     }).on('error', reject);
   });
-}
-
-/* Sık kullanılan, herkese açık veri uçları için kısa süreli sunucu önbelleği.
-   Aynı veri aynı anda birden çok istemciden istendiğinde tek upstream çağrısı yapılır.
-   Upstream geçici olarak yavaşlarsa yakın tarihli başarılı yanıt kısa süreli yedek olur. */
-const FAST_DATA_CACHE = new Map();
-const FAST_DATA_INFLIGHT = new Map();
-async function fastDataLoad(key, ttlMs, loader, staleMs) {
-  const now = Date.now();
-  const hit = FAST_DATA_CACHE.get(key);
-  if (hit && now - hit.at < ttlMs) return hit.value;
-  if (FAST_DATA_INFLIGHT.has(key)) return FAST_DATA_INFLIGHT.get(key);
-  const pending = Promise.resolve().then(loader).then(value => {
-    const status = Number(value && value.status);
-    if (status >= 200 && status < 300) {
-      FAST_DATA_CACHE.set(key, { at: Date.now(), value });
-      if (FAST_DATA_CACHE.size > 320) {
-        [...FAST_DATA_CACHE.entries()]
-          .sort((a, b) => a[1].at - b[1].at)
-          .slice(0, 80)
-          .forEach(([oldKey]) => FAST_DATA_CACHE.delete(oldKey));
-      }
-      return value;
-    }
-    if (hit && now - hit.at < (staleMs || ttlMs * 6)) return hit.value;
-    return value;
-  }).catch(error => {
-    if (hit && now - hit.at < (staleMs || ttlMs * 6)) return hit.value;
-    throw error;
-  }).finally(() => FAST_DATA_INFLIGHT.delete(key));
-  FAST_DATA_INFLIGHT.set(key, pending);
-  return pending;
-}
-function sendCachedProxy(res, result, contentType, browserMaxAge) {
-  const status = Number(result && result.status) || 502;
-  res.writeHead(status, {
-    'Content-Type': contentType || 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'public, max-age=' + Math.max(0, Number(browserMaxAge) || 0) + ', stale-while-revalidate=30'
-  });
-  res.end(String(result && result.body != null ? result.body : ''));
 }
 
 /* TipRanks özel şirket profilleri Cloudflare nedeniyle sunucudan doğrudan 403 döndürüyor.
@@ -2134,19 +2090,18 @@ function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
 /* Luna finansal yorum servisi. API anahtarı yalnızca sunucudaki OPENAI_API_KEY
    ortam değişkeninden okunur; tarayıcıya hiçbir zaman gönderilmez. */
 const LUNA_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+const SOL_MODEL = process.env.OPENAI_SOL_MODEL || 'gpt-5.6-sol';
 const LUNA_ANALYST_PROMPT_VERSION = 'senior-finance-v1';
 const LUNA_CACHE = new Map();
 const LUNA_CHAT_CACHE = new Map();
 const LUNA_BROKER_CACHE = new Map();
 const LUNA_ECON_CACHE = new Map();
 const LUNA_CHART_CACHE = new Map();
-const LUNA_INFLIGHT = new Map();
 const LUNA_RATE = new Map();
-const LUNA_CACHE_MS = 30 * 60 * 1000;
-const LUNA_CHAT_CACHE_MS = 5 * 60 * 1000;
+const LUNA_CACHE_MS = 15 * 60 * 1000;
+const LUNA_CHAT_CACHE_MS = 60 * 1000;
 const LUNA_RATE_MS = 60 * 60 * 1000;
 const LUNA_RATE_MAX = 20;
-const LUNA_SERVICE_TIER = String(process.env.OPENAI_SERVICE_TIER || 'fast').trim().toLowerCase();
 
 function lunaJson(res, status, obj){
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
@@ -2177,24 +2132,9 @@ function lunaRateAllowed(req){
   item.count++;
   return true;
 }
-function optimizedLunaPayload(payload, streaming){
-  const out={...payload};
-  if(/^gpt-5\.6/i.test(String(out.model||''))){
-    out.prompt_cache_options={mode:'implicit',ttl:'30m'};
-  }
-  if(['auto','default','priority','fast'].includes(LUNA_SERVICE_TIER)) out.service_tier=LUNA_SERVICE_TIER;
-  if(streaming) out.stream_options={include_obfuscation:false};
-  return out;
-}
-function lunaShared(key, loader){
-  if(LUNA_INFLIGHT.has(key)) return LUNA_INFLIGHT.get(key);
-  const pending=Promise.resolve().then(loader).finally(()=>LUNA_INFLIGHT.delete(key));
-  LUNA_INFLIGHT.set(key,pending);
-  return pending;
-}
 function openAiResponse(payload, timeoutMs){
   return new Promise((resolve, reject) => {
-    const raw=JSON.stringify(optimizedLunaPayload(payload,false));
+    const raw=JSON.stringify(payload);
     const rq=https.request({hostname:'api.openai.com',path:'/v1/responses',method:'POST',headers:{
       'Authorization':'Bearer '+process.env.OPENAI_API_KEY,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)
     },timeout:timeoutMs||45000}, pr => {
@@ -2210,21 +2150,14 @@ function openAiResponse(payload, timeoutMs){
     rq.on('error', reject); rq.end(raw);
   });
 }
-async function openAiResponseResilient(payload, timeoutMs){
-  const first=await openAiResponse(payload,timeoutMs);
-  const reason=first&&first.incomplete_details&&first.incomplete_details.reason;
-  if(responseOutputText(first)||reason!=='max_output_tokens') return first;
-  const current=Math.max(1,Number(payload&&payload.max_output_tokens)||2000);
-  return openAiResponse({...payload,max_output_tokens:Math.min(8000,Math.max(current+1000,Math.ceil(current*1.5)))},timeoutMs);
-}
-function openAiResponseStream(payload, onDelta){
+function openAiResponseStream(payload, onDelta, timeoutMs){
   return new Promise((resolve, reject) => {
-    const raw=JSON.stringify({...optimizedLunaPayload(payload,true),stream:true});
+    const raw=JSON.stringify({...payload,stream:true});
     let settled=false;
     const fail=(error)=>{ if(!settled){ settled=true; reject(error); } };
     const rq=https.request({hostname:'api.openai.com',path:'/v1/responses',method:'POST',headers:{
       'Authorization':'Bearer '+process.env.OPENAI_API_KEY,'Content-Type':'application/json','Content-Length':Buffer.byteLength(raw)
-    },timeout:60000}, pr => {
+    },timeout:timeoutMs||60000}, pr => {
       if(pr.statusCode<200 || pr.statusCode>=300){
         let body='';
         pr.on('data',c=>{ if(body.length<2000000) body+=c; });
@@ -2340,8 +2273,7 @@ async function lunaAnalyzeHandler(req, res){
       income:snapshot.income||{},cashFlow:snapshot.cashFlow||{},derived:snapshot.derived||{}
     };
     const input=JSON.stringify(compactSnapshot);
-    const cacheMaterial=JSON.stringify({...compactSnapshot,marketCap:null});
-    const cacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+cacheMaterial).digest('hex');
+    const cacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+SOL_MODEL+'\n'+lang+'\n'+input).digest('hex');
     const cached=LUNA_CACHE.get(cacheKey);
     if(cached && Date.now()-cached.at<LUNA_CACHE_MS){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
@@ -2358,9 +2290,9 @@ async function lunaAnalyzeHandler(req, res){
       dataQuality:{type:'string',description:'Comparability, missing fields, stale dates and confidence limits.'},
       disclaimer:{type:'string'}
     },required:['summary','strengths','risks','profitability','financialPosition','cashFlow','earningsQuality','watchNext','dataQuality','disclaimer']};
-    const out=await lunaShared('analysis:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:5200,instructions,prompt_cache_key:'bilanco-luna-analysis-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+    const out=await openAiResponse({model:SOL_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:6000,instructions,prompt_cache_key:'bilanco-sol-analysis-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
       input:'Aşağıdaki şirket finansal görünümünü analiz et / Analyze this company financial snapshot:\n'+input,
-      text:{verbosity:'medium',format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}},90000));
+      text:{verbosity:'medium',format:{type:'json_schema',name:'financial_statement_analysis',strict:true,schema}}},90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     LUNA_CACHE.set(cacheKey,{at:Date.now(),analysis});
@@ -2510,15 +2442,13 @@ async function lunaBrokerAnalyzeHandler(req,res){
       sellers:(Array.isArray(snapshot.sellers)?snapshot.sellers:[]).slice(0,8),
       ocrAvailable:!!snapshot.ocrAvailable,note:String(snapshot.note||'').slice(0,300)
     };
-    const input=JSON.stringify(safeSnapshot);
-    const cacheMaterial=JSON.stringify({...safeSnapshot,fetchedAt:null});
-    const cacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+cacheMaterial).digest('hex');
+    const input=JSON.stringify(safeSnapshot), cacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+input).digest('hex');
     const cached=LUNA_BROKER_CACHE.get(cacheKey);
-    if(cached&&Date.now()-cached.at<LUNA_CACHE_MS){ lunaJson(res,200,{ok:true,cached:true,answer:cached.answer,sources:cached.sources}); return; }
+    if(cached&&Date.now()-cached.at<10*60*1000){ lunaJson(res,200,{ok:true,cached:true,answer:cached.answer,sources:cached.sources}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
       ? 'Bu görevde yalnızca verilen aracı kurum dağılımını piyasa mikro-yapısı açısından yorumla. Önce dağılımın dengeli mi yoğunlaşmış mı olduğunu söyle; sonra en büyük alıcı ve satıcıları, net lotları, ilk beş dengesini ve veri tarihini rakamlarla açıkla. OCR ile tahmin edilmiş pctEstimated yüzdelerini kesin veri gibi kullanma; eksik satır veya toplamlar nedeniyle hesaplanamayan yoğunlaşmayı açıkça belirt. AKD geçmiş işlemleri gösterir: tek başına yatırımcı kimliği, pozisyonun devamı veya gelecekteki fiyat yönü hakkında kanıt değildir. Yanıtı Sonuç, Sayısal kanıt, Risk ve sınırlamalar, İzlenecekler sırasıyla kısa düz bölümler halinde yaz.'
       : 'For this task, interpret only the supplied broker distribution from a market-microstructure perspective. First state whether the distribution is balanced or concentrated; then quantify the largest buyers and sellers, net lots, top-five balance, and data date. Do not treat OCR-derived pctEstimated percentages as exact; explicitly report concentration that cannot be calculated because rows or totals are missing. AKD reflects past transactions and alone does not establish investor identity, position persistence, or future price direction. Write short plain sections in this order: Conclusion, Numerical evidence, Risks and limitations, What to watch.');
-    const out=await lunaShared('broker:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:3000,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'low'}}));
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:1900,instructions,input:'Aracı kurum dağılımı / Broker distribution:\n'+input,prompt_cache_key:'bilanco-luna-broker-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'medium'}});
     const answer=lunaProfessionalText(responseOutputText(out));
     if(!answer){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     const item=safeSnapshot.selectedTable||{}, url=/^https:\/\//i.test(String(item.url||''))?String(item.url):'';
@@ -2558,10 +2488,9 @@ async function lunaEconomicCalendarHandler(req,res){
       source:snapshot.source==='TradingView'?'TradingView':'Investing.com',fetchedAt:clean(snapshot.fetchedAt,40),timezone:'Europe/Istanbul',rows
     };
     const input=JSON.stringify(safeSnapshot);
-    const cacheMaterial=JSON.stringify({...safeSnapshot,fetchedAt:''});
-    const cacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+cacheMaterial).digest('hex');
+    const cacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+SOL_MODEL+'\n'+lang+'\n'+input).digest('hex');
     const cached=LUNA_ECON_CACHE.get(cacheKey);
-    if(cached&&Date.now()-cached.at<LUNA_CACHE_MS){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,sources:cached.sources}); return; }
+    if(cached&&Date.now()-cached.at<10*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,sources:cached.sources}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
       ? 'Bu görevde seçili ekonomik takvim görünümünü kıdemli makro stratejist gibi yorumla. Yalnızca gönderilen takvimdeki açıklanan, beklenti ve önceki değerleri kanıt kabul et; mevcut olmayan güncel bağlamı varsayma. Açıklanan değeri olmayan olayları gerçekleşmiş gibi yazma. Sürpriz yönünü göstergenin ekonomik anlamına göre değerlendir; renk alanını tek başına yorumlama. Faiz, kur, tahvil, hisse ve emtia etkilerini yalnızca koşullu aktarım kanalları olarak açıkla; kesin piyasa yönü tahmini verme. Yayın tarihi ile olay tarihini ayır. Her önemli görüşü takvimdeki bir olay veya değerle destekle, eksik veriyi veri kalitesi bölümünde açıkça belirt ve her alanı kısa, yoğun, tekrarsız yaz.'
       : 'For this task, interpret the selected economic-calendar view as a senior macro strategist. Treat only the supplied calendar actual, forecast, and previous values as evidence; do not invent missing current context. Never describe an event without an actual value as already released. Determine surprise direction from the economics of the indicator, not from the color field alone. Describe rates, FX, bonds, equities, and commodities only through conditional transmission channels; do not predict a guaranteed market direction. Distinguish publication date from event date. Ground each material view in a calendar event or value, disclose missing evidence under data quality, and keep every field concise, dense, and non-repetitive.');
@@ -2571,10 +2500,10 @@ async function lunaEconomicCalendarHandler(req,res){
       riskScenarios:{type:'array',items:{type:'string'},maxItems:3},watchNext:{type:'array',items:{type:'string'},maxItems:4},
       dataQuality:{type:'string'},disclaimer:{type:'string'}
     },required:['summary','keyEvents','realizedSurprises','marketTransmission','riskScenarios','watchNext','dataQuality','disclaimer']};
-    const out=await lunaShared('economic:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:3000,
+    const out=await openAiResponse({model:SOL_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:5000,
       instructions,input:'Seçili ekonomik takvim / Selected economic calendar:\n'+input,
-      prompt_cache_key:'bilanco-luna-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
-      text:{verbosity:'low',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}},90000));
+      prompt_cache_key:'bilanco-sol-economic-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+      text:{verbosity:'low',format:{type:'json_schema',name:'economic_calendar_analysis',strict:true,schema}}},90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     const sources=[];
@@ -2597,7 +2526,7 @@ async function lunaChartAnalyzeHandler(req,res){
     if(!/^[A-Z0-9.^=\-]{1,24}$/.test(symbol)){ lunaJson(res,400,{ok:false,error:'invalid_symbol'}); return; }
     const cacheKey=LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+symbol;
     const cached=LUNA_CHART_CACHE.get(cacheKey);
-    if(cached&&Date.now()-cached.at<10*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,market:cached.market}); return; }
+    if(cached&&Date.now()-cached.at<5*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,market:cached.market}); return; }
     const market=await lunaMarketSnapshot(symbol);
     if(!market||!market.ok){ lunaJson(res,404,{ok:false,error:(market&&market.error)||'market_data_unavailable'}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
@@ -2608,10 +2537,10 @@ async function lunaChartAnalyzeHandler(req,res){
       levels:{type:'array',items:{type:'string'},maxItems:4},scenarios:{type:'array',items:{type:'string'},maxItems:3},
       risks:{type:'array',items:{type:'string'},maxItems:4},disclaimer:{type:'string'}
     },required:['summary','trend','momentum','levels','scenarios','risks','disclaimer']};
-    const out=await lunaShared('chart:'+cacheKey,()=>openAiResponseResilient({model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:4200,
+    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:5000,
       instructions,input:'Güncel teknik veri paketi / Current technical data package:\n'+JSON.stringify(market),
       prompt_cache_key:'bilanco-luna-chart-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
-      text:{verbosity:'low',format:{type:'json_schema',name:'technical_chart_analysis',strict:true,schema}}},90000));
+      text:{verbosity:'low',format:{type:'json_schema',name:'technical_chart_analysis',strict:true,schema}}},90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
     LUNA_CHART_CACHE.set(cacheKey,{at:Date.now(),analysis,market});
@@ -2644,6 +2573,7 @@ async function lunaChatHandler(req, res){
   if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
   try{
     const body=await readJsonBody(req,64*1024), lang=body&&body.lang==='en'?'en':'tr', wantsStream=body&&body.stream===true;
+    const deep=body&&body.deep===true, chatMode=deep?'deep':'standard', finalModel=deep?SOL_MODEL:LUNA_MODEL;
     const raw=Array.isArray(body&&body.messages)?body.messages.slice(-12):[];
     const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
     if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
@@ -2657,15 +2587,15 @@ async function lunaChatHandler(req, res){
       entityType:rawContext.entityType==='financial_institution'?'financial_institution':'corporate',
       lastBrokerSymbol:/^[A-Z0-9]{1,12}$/.test(String(rawContext.lastBrokerSymbol||''))?String(rawContext.lastBrokerSymbol):null
     };
-    const chatCacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+JSON.stringify(safeContext)+'\n'+JSON.stringify(messages)).digest('hex');
+    const chatCacheKey=crypto.createHash('sha256').update(LUNA_ANALYST_PROMPT_VERSION+'\n'+chatMode+'\n'+finalModel+'\n'+lang+'\n'+JSON.stringify(safeContext)+'\n'+JSON.stringify(messages)).digest('hex');
     const cachedChat=LUNA_CHAT_CACHE.get(chatCacheKey);
     if(cachedChat && Date.now()-cachedChat.at<LUNA_CHAT_CACHE_MS){
       if(wantsStream){
         lunaBeginSse(res);
         lunaSse(res,'delta',{delta:cachedChat.answer});
-        lunaSse(res,'done',{ok:true,cached:true,answer:cachedChat.answer,sources:cachedChat.sources});
+        lunaSse(res,'done',{ok:true,cached:true,mode:chatMode,answer:cachedChat.answer,sources:cachedChat.sources});
         res.end();
-      }else lunaJson(res,200,{ok:true,cached:true,answer:cachedChat.answer,sources:cachedChat.sources});
+      }else lunaJson(res,200,{ok:true,cached:true,mode:chatMode,answer:cachedChat.answer,sources:cachedChat.sources});
       return;
     }
     const appMap=lang==='tr'
@@ -2676,35 +2606,35 @@ async function lunaChatHandler(req, res){
       ? `Doğrulanmış güncel zaman bağlamı: Bugün ${now.weekday}, ${now.localDate}; saat ${now.localTime}; saat dilimi ${now.timezone}. Tarih ve göreli zaman sorularında bu bağlamı ve get_current_datetime aracını esas al.`
       : `Verified current time context: Today is ${now.weekday}, ${now.localDate}; time ${now.localTime}; timezone ${now.timezone}. For date and relative-time questions, use this context and the get_current_datetime tool as authoritative.`;
     const contextText=(lang==='tr'?'Doğrulanmış uygulama bağlamı: ':'Verified app context: ')+JSON.stringify(safeContext)+'.';
-    const contextualMessages=messages.map((m,index)=>index===messages.length-1
-      ? {...m,content:m.content+'\n\n'+timeContext+'\n'+contextText}
-      : m);
+    const deepInstruction=deep?(lang==='tr'
+      ? 'Derin Analiz modu açıktır. Nihai sentezde kaynak çelişkilerini, en güçlü karşı görüşü, koşullu senaryoları ve güven düzeyini özellikle değerlendir; sonuç için yeterli kanıt yoksa bunu açıkça söyle.'
+      : 'Deep Analysis mode is enabled. In the final synthesis, explicitly assess source conflicts, the strongest counter-view, conditional scenarios, and confidence; state clearly when evidence is insufficient.') : '';
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
       ? 'Her kullanıcı mesajında zorunlu web araştırmasından gelen güncel kanıtı değerlendir. Finansal sorularda mümkünse birincil kaynakları öncele: düzenleyici dosyalama, borsa/KAP, şirket yatırımcı ilişkileri, merkez bankası ve resmî istatistik; ardından saygın haber ve veri derleyicileri. Güncel fiyat, teknik analiz veya finansal tablo sorularında uygun yapılandırılmış uygulama aracını da kullan; fiyat ve göstergelerde uygulama verisini esas al, webi bağlam ve çapraz kontrol için kullan. Tam şirket analizinde büyüme ve marjlar, nakit-kâr dönüşümü, likidite ve kaldıraç, değerleme bağlamı, katalizörler, karşı görüş ve risk tetikleyicilerini birlikte ele al. Teknik analizde veri zamanı, trend, momentum, hacim ve hareketli ortalamaları aynı zaman ufkunda değerlendir. Finansal kurumlarda sanayi şirketi oranlarını kullanma. Kullanıcının sembolü söylemediği devam sorularında doğrulanmış aktif hisse bağlamını kullan; bağlam yoksa tahmin yürütmeden sor. Kaynağın yayın tarihi ile olay tarihini ayır, çelişkileri ve veri eksiklerini açıkla. Sonucu önce ver; ardından birkaç kısa düz bölümle kanıt, karşı görüş/risk ve izlenecek koşulları sun. Araç sonuç vermezse bunu belirt.'
-      : 'Evaluate current evidence from the mandatory web research for every user message. For financial questions, prefer primary sources: regulatory filings, exchanges, company investor relations, central banks, and official statistics; then reputable news and data aggregators. For current prices, technical analysis, or financial statements, also use the appropriate structured app tool; treat app prices and indicators as primary, using the web for context and cross-checking. A full company analysis should cover growth and margins, cash conversion, liquidity and leverage, valuation context, catalysts, the strongest counter-view, and risk triggers. For technical analysis, keep timestamp, trend, momentum, volume, and moving averages on a consistent horizon. Do not apply industrial-company ratios to financial institutions. For follow-up questions without a symbol, use the verified active-ticker context; if none exists, ask instead of guessing. Distinguish publication date from event date and disclose conflicts or missing data. Lead with the conclusion, followed by short plain sections for evidence, counter-view/risks, and conditions to monitor. Report unavailable tool data.')+' '+appMap;
+      : 'Evaluate current evidence from the mandatory web research for every user message. For financial questions, prefer primary sources: regulatory filings, exchanges, company investor relations, central banks, and official statistics; then reputable news and data aggregators. For current prices, technical analysis, or financial statements, also use the appropriate structured app tool; treat app prices and indicators as primary, using the web for context and cross-checking. A full company analysis should cover growth and margins, cash conversion, liquidity and leverage, valuation context, catalysts, the strongest counter-view, and risk triggers. For technical analysis, keep timestamp, trend, momentum, volume, and moving averages on a consistent horizon. Do not apply industrial-company ratios to financial institutions. For follow-up questions without a symbol, use the verified active-ticker context; if none exists, ask instead of guessing. Distinguish publication date from event date and disclose conflicts or missing data. Lead with the conclusion, followed by short plain sections for evidence, counter-view/risks, and conditions to monitor. Report unavailable tool data.')+' '+deepInstruction+' '+appMap+' '+timeContext+' '+contextText;
     const researchInstructions=lang==='tr'
       ? 'Kullanıcının son sorusu için doğrudan web araması yap. Önce düzenleyici kurum, borsa/KAP, şirket yatırımcı ilişkileri, merkez bankası ve resmî istatistik gibi birincil kaynakları ara; sonra saygın haber kaynaklarıyla çapraz kontrol et. Önemli iddialarda mümkünse iki bağımsız kaynak kullan. Kaynakların yayın tarihi ile olay tarihini ayır, güncelliği ve çelişkileri belirt. Yalnızca nihai analize yarayacak kısa kanıtı döndür.'
       : 'Run a direct web search for the user’s latest question. Prefer primary sources such as regulators, exchanges, company investor relations, central banks, and official statistics, then cross-check with reputable news. Use two independent sources for material claims when possible. Distinguish publication date from event date and identify freshness or conflicts. Return only concise evidence useful to the final analysis.';
     const plannerInstructions=(lang==='tr'
       ? 'Sen Luna için yalnızca araç seçen planlayıcısın. Güncel fiyat veya teknik analiz için get_market_snapshot; finansal tablolar için get_financial_snapshot; AKD için get_broker_distribution; kesin tarih için get_current_datetime çağır. Kapsamlı şirket analizinde piyasa verisiyle birlikte çeyreklik ve yıllık finansal görünümü çağır. Sembol yazılmamış devam sorusunda doğrulanmış aktif hisseyi kullan; market BIST ise Yahoo uyumlu piyasa ve finans araçlarında sembole .IS ekle. Gerekli bağımsız araçları aynı turda çağır; nihai yanıt veya analiz yazma.'
-      : 'You are Luna’s tool-only planner. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for statements, get_broker_distribution for AKD, and get_current_datetime for exact dates. For a comprehensive company analysis, request market data plus quarterly and annual financial snapshots. Use the verified active ticker for follow-ups without a symbol; when market is BIST, append .IS for Yahoo-compatible market and financial tools. Call independent tools in the same turn and do not write a final answer or analysis.');
+      : 'You are Luna’s tool-only planner. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for statements, get_broker_distribution for AKD, and get_current_datetime for exact dates. For a comprehensive company analysis, request market data plus quarterly and annual financial snapshots. Use the verified active ticker for follow-ups without a symbol; when market is BIST, append .IS for Yahoo-compatible market and financial tools. Call independent tools in the same turn and do not write a final answer or analysis.')+' '+timeContext+' '+contextText;
     if(wantsStream) lunaBeginSse(res);
-    const researchPromise=lunaShared('chat-research:'+chatCacheKey,()=>openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:600,instructions:researchInstructions,input:contextualMessages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],prompt_cache_key:'bilanco-luna-research-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang}));
-    const plannerPromise=lunaShared('chat-planner:'+chatCacheKey,()=>openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:350,instructions:plannerInstructions,input:contextualMessages,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true,prompt_cache_key:'bilanco-luna-planner-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang}));
+    const researchPromise=openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:750,instructions:researchInstructions+' '+timeContext+' '+contextText,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],prompt_cache_key:'bilanco-luna-research-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang});
+    const plannerPromise=openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:450,instructions:plannerInstructions,input:messages,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true,prompt_cache_key:'bilanco-luna-planner-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang});
     const [research,plan]=await Promise.all([researchPromise,plannerPromise]);
-    let finalInput=[...contextualMessages,...(research.output||[])];
+    let finalInput=[...messages,...(research.output||[])];
     const calls=(plan.output||[]).filter(x=>x.type==='function_call').slice(0,4);
     if(calls.length){
       const results=await Promise.all(calls.map(async call=>({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(await lunaRunTool(call))})));
       finalInput=[...finalInput,...(plan.output||[]),...results];
     }
-    const finalBase={model:LUNA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1800,instructions,input:finalInput,prompt_cache_key:'bilanco-luna-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'medium'}};
+    const finalBase={model:finalModel,store:false,reasoning:{effort:deep?'high':'medium'},max_output_tokens:deep?6000:2500,instructions,input:finalInput,prompt_cache_key:'bilanco-'+(deep?'sol-deep':'luna-standard')+'-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'medium'}};
     let answer='', finalResponse={};
     if(wantsStream){
-      const streamed=await openAiResponseStream(finalBase,delta=>lunaSse(res,'delta',{delta}));
+      const streamed=await openAiResponseStream(finalBase,delta=>lunaSse(res,'delta',{delta}),deep?120000:60000);
       answer=lunaProfessionalText(streamed.text); finalResponse=streamed.response||{};
     }else{
-      finalResponse=await lunaShared('chat-final:'+chatCacheKey,()=>openAiResponse(finalBase));
+      finalResponse=await openAiResponse(finalBase);
       answer=lunaProfessionalText(responseOutputText(finalResponse));
     }
     if(!answer) throw new Error('invalid_model_response');
@@ -2713,8 +2643,8 @@ async function lunaChatHandler(req, res){
     LUNA_CHAT_CACHE.set(chatCacheKey,{at:Date.now(),answer,sources:uniqueSources});
     if(LUNA_CHAT_CACHE.size>200) [...LUNA_CHAT_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,50).forEach(([k])=>LUNA_CHAT_CACHE.delete(k));
     if(wantsStream){
-      lunaSse(res,'done',{ok:true,answer,sources:uniqueSources}); res.end();
-    }else lunaJson(res,200,{ok:true,answer,sources:uniqueSources});
+      lunaSse(res,'done',{ok:true,mode:chatMode,answer,sources:uniqueSources}); res.end();
+    }else lunaJson(res,200,{ok:true,mode:chatMode,answer,sources:uniqueSources});
   }catch(e){
     const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
     console.error('[Luna Chat]',e.message||e);
@@ -2727,11 +2657,6 @@ async function lunaChatHandler(req, res){
 
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
-
-  if (urlPath.startsWith('/api/notifications/')) {
-    notificationService.handle(req, res, urlPath);
-    return;
-  }
 
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/broker') { lunaBrokerAnalyzeHandler(req,res); return; }
@@ -2780,15 +2705,17 @@ http.createServer((req, res) => {
   //     m=tr parametresi BIST hisseleri için Türkçe haber pazarını seçer.
   if (urlPath === '/news') {
     const nq = new URLSearchParams(req.url.split('?')[1] || '');
-    const rawQuery = (nq.get('q') || '').trim();
-    const q = encodeURIComponent(rawQuery);
+    const q = encodeURIComponent(nq.get('q') || '');
     const mkt = nq.get('m') === 'tr' ? '&setlang=tr-TR&cc=TR&mkt=tr-TR' : '&setlang=en-US';
     const newsUrl = 'https://www.bing.com/news/search?q=' + q + '&format=rss' + mkt;
-    fastDataLoad('news:' + nq.get('m') + ':' + rawQuery.toLowerCase(), 2 * 60 * 1000,
-      () => httpsGetTextTimeout(newsUrl, { 'User-Agent':BUA, 'Accept':'application/rss+xml,application/xml' }, 8000),
-      15 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/xml; charset=utf-8', 30))
-      .catch(() => { res.writeHead(502); res.end(''); });
+    https.get(newsUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end(''); });
     return;
   }
 
@@ -2844,13 +2771,11 @@ http.createServer((req, res) => {
         'Referer': 'https://stocktwits.com/symbol/' + encodeURIComponent(sym),
         'Origin': 'https://stocktwits.com'
       };
-      const rq=https.get(stUrl, { headers }, pr => {
+      https.get(stUrl, { headers }, pr => {
         let body = '';
         pr.on('data', c => body += c);
         pr.on('end', () => resolve({ code: pr.statusCode, body }));
-      });
-      rq.setTimeout(4500,()=>rq.destroy(new Error('http_timeout')));
-      rq.on('error', () => resolve({ code: 0, body: '' }));
+      }).on('error', () => resolve({ code: 0, body: '' }));
     });
     // Bazı Render IP'leri CF 403 yer → çalışan kardeş köprü (döngü yok: X-ST-Via)
     const pullFallback = () => new Promise((resolve) => {
@@ -2858,7 +2783,7 @@ http.createServer((req, res) => {
       const fb = (process.env.ST_FALLBACK || 'https://bilanco-analiz.onrender.com').replace(/\/$/, '');
       const host = (req.headers.host || '').toLowerCase();
       if (!fb || host && fb.includes(host)) { resolve(null); return; }
-      const rq=https.get(fb + '/stocktwits?s=' + encodeURIComponent(sym), {
+      https.get(fb + '/stocktwits?s=' + encodeURIComponent(sym), {
         headers: { 'User-Agent': BUA, 'Accept': 'application/json', 'X-ST-Via': '1' }
       }, pr => {
         let body = '';
@@ -2867,41 +2792,35 @@ http.createServer((req, res) => {
           if (pr.statusCode !== 200) { resolve(null); return; }
           try { resolve(JSON.parse(body)); } catch (e) { resolve(null); }
         });
-      });
-      rq.setTimeout(5000,()=>rq.destroy(new Error('http_timeout')));
-      rq.on('error', () => resolve(null));
+      }).on('error', () => resolve(null));
     });
-    const parseDirect=(r)=>{
-      if(!r||r.code!==200) return null;
-      try{ return mapMsgs(JSON.parse(r.body)); }catch(_e){ return null; }
-    };
-    fastDataLoad('stocktwits:'+sym, 90*1000, async()=>{
-      const candidates=[
-        pullDirect(0).then(parseDirect),pullDirect(1).then(parseDirect),pullDirect(2).then(parseDirect),pullFallback()
-      ];
-      const found=await new Promise(resolve=>{
-        let pending=candidates.length,settled=false;
-        candidates.forEach(candidate=>candidate.then(value=>{
-          const valid=value&&value.ok&&value.messages&&value.messages.length;
-          if(valid&&!settled){ settled=true; resolve(value); return; }
-          pending--;
-          if(!pending&&!settled){ settled=true; resolve(null); }
-        },()=>{ pending--; if(!pending&&!settled){ settled=true; resolve(null); } }));
-      });
-      if(found) return {status:200,body:JSON.stringify(found)};
-      return {status:502,body:JSON.stringify({ok:false,symbol:sym,messages:[],error:'http_403'})};
-    },10*60*1000).then(result=>{
-      let obj=null; try{ obj=JSON.parse(result.body); }catch(_e){}
-      send(obj||{ok:false,symbol:sym,messages:[],error:'invalid_response'});
-    }).catch(()=>send({ok:false,symbol:sym,messages:[],error:'unavailable'}));
+    (async () => {
+      for (let i = 0; i < uaList.length; i++) {
+        const r = await pullDirect(i);
+        if (r.code === 200) {
+          try { send(mapMsgs(JSON.parse(r.body))); return; }
+          catch (e) { /* dene sonraki */ }
+        }
+        if (r.code === 503 || r.code === 429) {
+          await new Promise(res => setTimeout(res, 500));
+          const r2 = await pullDirect(i);
+          if (r2.code === 200) {
+            try { send(mapMsgs(JSON.parse(r2.body))); return; }
+            catch (e) { /* */ }
+          }
+        }
+      }
+      const fb = await pullFallback();
+      if (fb && fb.ok && fb.messages && fb.messages.length) { send(fb); return; }
+      send({ ok: false, symbol: sym, messages: [], error: 'http_403' });
+    })();
     return;
   }
 
   // --- Fiyat köprüsü (Yahoo Finance, anahtarsız) ---
   if (urlPath === '/price') {
     const qs  = new URLSearchParams(req.url.split('?')[1] || '');
-    const rawSym = (qs.get('s') || '').trim().toUpperCase();
-    const sym = encodeURIComponent(rawSym);
+    const sym = encodeURIComponent(qs.get('s') || '');
     // range verilirse onu kullan (canlı/günlük), yoksa period1/period2 (geçmiş)
     let range = '';
     if (qs.get('range')) {
@@ -2912,14 +2831,14 @@ http.createServer((req, res) => {
       range = 'period1=' + p1 + '&period2=' + p2;
     }
     const yurl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + sym + '?' + range + '&interval=1d';
-    const rangeKey = qs.get('range') || ('p1=' + (qs.get('p1') || '0') + '&p2=' + (qs.get('p2') || 'latest'));
-    const liveRequest = !!qs.get('range') || !qs.get('p2');
-    const ttl = liveRequest ? 20 * 1000 : 5 * 60 * 1000;
-    fastDataLoad('price:' + rawSym + ':' + rangeKey, ttl,
-      () => httpsGetTextTimeout(yurl, { 'User-Agent': BUA, 'Accept': 'application/json' }, 8000),
-      liveRequest ? 2 * 60 * 1000 : 30 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', liveRequest ? 10 : 60))
-      .catch(e => { res.writeHead(502, { 'Content-Type':'application/json; charset=utf-8' }); res.end(JSON.stringify({ error:e.message })); });
+    https.get(yurl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end(JSON.stringify({ error: e.message })); });
     return;
   }
 
@@ -2958,13 +2877,11 @@ http.createServer((req, res) => {
         });
       }).on('error', () => resolve([]));
     });
-    const quoteKey = raw.map(x => x.toUpperCase()).sort().join(',');
-    fastDataLoad('quotes:' + quoteKey, 20 * 1000, async () => {
-      const parts = await Promise.all(chunks.map(fetchChunk));
-      return { status:200, body:JSON.stringify({ quotes:[].concat(...parts) }) };
-    }, 2 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', 10))
-      .catch(() => sendCachedProxy(res, {status:200, body:'{"quotes":[]}'}, 'application/json; charset=utf-8', 0));
+    Promise.all(chunks.map(fetchChunk)).then(parts => {
+      const quotes = [].concat(...parts);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ quotes }));
+    });
     return;
   }
 
@@ -2973,8 +2890,7 @@ http.createServer((req, res) => {
   //     bilanço/gelir/nakit-akış yedeği. Yahoo CORS göndermez → proxy şart (aynı /price gibi).
   if (urlPath === '/yfin') {
     const yq = new URLSearchParams(req.url.split('?')[1] || '');
-    const rawSym = (yq.get('s') || '').trim().toUpperCase();
-    const sym = encodeURIComponent(rawSym);
+    const sym = encodeURIComponent(yq.get('s') || '');
     // p=q → çeyreklik seri (quarterly*); varsayılan yıllık (annual*). Not: yarıyıllık raporlayan
     // Avrupa şirketlerinde (Nestle, LVMH…) "quarterly" 6 aylık dönemler döndürür — Yahoo şirketin
     // gerçekte yayınladığı en sık dönemi verir.
@@ -2991,11 +2907,14 @@ http.createServer((req, res) => {
     const p2 = Math.floor(Date.now() / 1000) + 86400;
     const yUrl = 'https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/' + sym +
       '?symbol=' + sym + '&type=' + types + '&period1=' + p1 + '&period2=' + p2;
-    fastDataLoad('yfin:' + rawSym + ':' + pfx, 30 * 60 * 1000,
-      () => httpsGetTextTimeout(yUrl, { 'User-Agent':BUA, 'Accept':'application/json' }, 10000),
-      6 * 60 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', 300))
-      .catch(() => sendCachedProxy(res, {status:502,body:'{"timeseries":{"result":[]}}'}, 'application/json; charset=utf-8', 0));
+    https.get(yUrl, { headers: { 'User-Agent': BUA } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"timeseries":{"result":[]}}'); });
     return;
   }
 
@@ -3005,14 +2924,16 @@ http.createServer((req, res) => {
   //     ayırt etmez. Yahoo'nun kendi arama uç noktası doğru eki (symbol alanında) doğrudan
   //     verir — CORS göndermediği için anahtarsız proxy şart (aynı /price gibi).
   if (urlPath === '/yfsearch') {
-    const rawQuery = (new URLSearchParams(req.url.split('?')[1] || '').get('q') || '').trim();
-    const q = encodeURIComponent(rawQuery);
+    const q = encodeURIComponent(new URLSearchParams(req.url.split('?')[1] || '').get('q') || '');
     const yUrl = 'https://query1.finance.yahoo.com/v1/finance/search?q=' + q;
-    fastDataLoad('yfsearch:' + rawQuery.toLowerCase(), 10 * 60 * 1000,
-      () => httpsGetTextTimeout(yUrl, { 'User-Agent':BUA, 'Accept':'application/json' }, 8000),
-      60 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', 120))
-      .catch(() => sendCachedProxy(res, {status:502,body:'{"quotes":[]}'}, 'application/json; charset=utf-8', 0));
+    https.get(yUrl, { headers: { 'User-Agent': BUA } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"quotes":[]}'); });
     return;
   }
 
@@ -3022,11 +2943,14 @@ http.createServer((req, res) => {
   if (urlPath === '/bist') {
     const qs = req.url.split('?')[1] || '';
     const bUrl = 'https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/MaliTablo?exchange=TRY&' + qs;
-    fastDataLoad('bist:' + qs, 15 * 60 * 1000,
-      () => httpsGetTextTimeout(bUrl, { 'User-Agent':BUA, 'Accept':'application/json' }, 10000),
-      6 * 60 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', 120))
-      .catch(() => sendCachedProxy(res, {status:502,body:'{"value":[]}'}, 'application/json; charset=utf-8', 0));
+    https.get(bUrl, { headers: { 'User-Agent': BUA, 'Accept': 'application/json' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"value":[]}'); });
     return;
   }
 
@@ -3062,11 +2986,14 @@ http.createServer((req, res) => {
     const OKC = ['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP','CN','HK','TW','CA','AU','SG'];
     const country = OKC.includes(q.get('countries')) ? q.get('countries') : 'TR';
     const eUrl = 'https://economic-calendar.tradingview.com/events?from=' + from + '&to=' + to + '&countries=' + country;
-    fastDataLoad('econ:' + country + ':' + from + ':' + to, 2 * 60 * 1000,
-      () => httpsGetTextTimeout(eUrl, { 'User-Agent':BUA, 'Origin':'https://tr.tradingview.com', 'Accept':'application/json' }, 8000),
-      20 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', 30))
-      .catch(() => sendCachedProxy(res, {status:502,body:'{"result":[]}'}, 'application/json; charset=utf-8', 0));
+    https.get(eUrl, { headers: { 'User-Agent': BUA, 'Origin': 'https://tr.tradingview.com', 'Accept': 'application/json' } }, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
+        res.end(body);
+      });
+    }).on('error', e => { res.writeHead(502); res.end('{"result":[]}'); });
     return;
   }
 
@@ -3089,19 +3016,16 @@ http.createServer((req, res) => {
       'User-Agent': BUA, 'X-Requested-With':'XMLHttpRequest',
       'Referer':'https://tr.investing.com/economic-calendar/',
       'Content-Type':'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(post), 'Accept':'*/*' } };
-    const loadCalendar = () => new Promise((resolve, reject) => {
-      const preq = https.request('https://tr.investing.com/economic-calendar/Service/getCalendarFilteredData', options, pr => {
-        let body = '';
-        pr.on('data', c => body += c);
-        pr.on('end', () => resolve({status:pr.statusCode,body}));
+    const preq = https.request('https://tr.investing.com/economic-calendar/Service/getCalendarFilteredData', options, pr => {
+      let body = '';
+      pr.on('data', c => body += c);
+      pr.on('end', () => {
+        res.writeHead(pr.statusCode, { 'Content-Type':'application/json; charset=utf-8', 'Access-Control-Allow-Origin':'*', 'Cache-Control':'no-store' });
+        res.end(body);
       });
-      preq.setTimeout(8000, () => preq.destroy(new Error('http_timeout')));
-      preq.on('error', reject);
-      preq.write(post); preq.end();
     });
-    fastDataLoad('investcal:' + country + ':' + tab, 2 * 60 * 1000, loadCalendar, 20 * 60 * 1000)
-      .then(result => sendCachedProxy(res, result, 'application/json; charset=utf-8', 30))
-      .catch(() => sendCachedProxy(res, {status:502,body:'{"data":""}'}, 'application/json; charset=utf-8', 0));
+    preq.on('error', e => { res.writeHead(502); res.end('{"data":""}'); });
+    preq.write(post); preq.end();
     return;
   }
 
@@ -3955,35 +3879,13 @@ http.createServer((req, res) => {
     res.end('Bulunamadi: ' + file);
     return;
   }
-  fs.stat(fp, (statError, stat) => {
-    if (statError || !stat.isFile()) { res.writeHead(404); res.end('Bulunamadi: ' + file); return; }
-    const etag='W/"'+stat.size.toString(16)+'-'+Math.floor(stat.mtimeMs).toString(16)+'"';
-    const cacheControl=relPosix==='sw.js'||relPosix==='bilanco-analiz.html'
-      ? 'no-cache, must-revalidate'
-      : (relPosix.startsWith('icons/')?'public, max-age=86400, stale-while-revalidate=604800':'public, max-age=0, must-revalidate');
-    if(String(req.headers['if-none-match']||'')===etag){
-      res.writeHead(304,{'ETag':etag,'Cache-Control':cacheControl,'Vary':'Accept-Encoding'}); res.end(); return;
-    }
-    const cached=STATIC_ASSET_CACHE.get(fp);
-    const serve=(asset)=>{
-      const acceptsGzip=/\bgzip\b/i.test(String(req.headers['accept-encoding']||''));
-      const useGzip=acceptsGzip&&asset.gzip&&asset.raw.length>1024;
-      const payload=useGzip?asset.gzip:asset.raw;
-      const headers={
-        'Content-Type':MIME[path.extname(fp)]||'application/octet-stream',
-        'Cache-Control':cacheControl,'ETag':etag,'Vary':'Accept-Encoding','Content-Length':payload.length
-      };
-      if(useGzip) headers['Content-Encoding']='gzip';
-      res.writeHead(200,headers); res.end(payload);
-    };
-    if(cached&&cached.etag===etag){ serve(cached); return; }
-    fs.readFile(fp,(readError,data)=>{
-      if(readError){ res.writeHead(404); res.end('Bulunamadi: '+file); return; }
-      if(data.length<=1024){ const asset={etag,raw:data,gzip:null}; STATIC_ASSET_CACHE.set(fp,asset); serve(asset); return; }
-      zlib.gzip(data,{level:6},(_gzipError,gzip)=>{
-        const asset={etag,raw:data,gzip:gzip||null}; STATIC_ASSET_CACHE.set(fp,asset); serve(asset);
-      });
+  fs.readFile(fp, (e, data) => {
+    if (e) { res.writeHead(404); res.end('Bulunamadi: ' + file); return; }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream',
+      'Cache-Control': 'no-store, no-cache, must-revalidate'
     });
+    res.end(data);
   });
 }).listen(PORT, '0.0.0.0', () => {
   console.log('===========================================');

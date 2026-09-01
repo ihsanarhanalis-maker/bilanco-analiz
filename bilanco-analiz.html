@@ -621,7 +621,7 @@
     a{color:#1763b8 !important;text-decoration:none}
   }
 </style>
-<link rel="stylesheet" href="/apple-design.css?v=196">
+<link rel="stylesheet" href="/apple-design.css?v=197">
 </head>
 <body>
 <a class="skip-link" href="#mainContent" data-i18n="skip_main">Ana içeriğe geç</a>
@@ -700,17 +700,6 @@
   <div class="card no-print hidden" id="watchCard">
     <h2 data-i18n="watch_h2">İzleme Listem</h2>
     <div class="sub" data-i18n-html="watch_sub">Takip ettiğin hisseler — canlı fiyat, günlük değişim ve F/K. Satıra tıklayınca analiz açılır; hisse aradıktan sonra <b>☆ Listeme Ekle</b> ile eklersin.</div>
-    <div class="watch-notification-panel" id="watchNotificationPanel">
-      <div class="watch-notification-copy">
-        <strong data-i18n="notify_title">Bilanço ve bildirim alarmı</strong>
-        <span id="notificationStatus" data-i18n="notify_off">Bu cihazda bildirimler kapalı.</span>
-        <small data-i18n="notify_scope">Yeni bilanço, KAP/SEC bildirimi ve analist hedef fiyatı değişiklikleri izlenir.</small>
-      </div>
-      <div class="watch-notification-actions">
-        <button type="button" class="primary" id="notificationEnableBtn" onclick="enableWatchNotifications()" data-i18n="notify_enable">Bildirimleri Aç</button>
-        <button type="button" class="hidden" id="notificationPairBtn" onclick="shareNotificationProfile()" data-i18n="notify_pair">Diğer Cihazı Bağla</button>
-      </div>
-    </div>
     <div id="watchBody"><div class="hint">—</div></div>
   </div>
 
@@ -1014,7 +1003,12 @@
         <h2 id="aiChatTitle" data-i18n="ai_h2">Luna AI'a Sor</h2>
         <p data-i18n="ai_sub">Finans, şirketler, ekonomi veya merak ettiğin herhangi bir konuda Luna ile konuş.</p>
       </div>
-      <button type="button" class="ai-clear" onclick="clearLunaChat()" data-i18n="ai_clear">Yeni sohbet</button>
+      <div class="ai-head-actions">
+        <button type="button" id="aiDeepMode" class="ai-deep-toggle" aria-pressed="false" onclick="toggleLunaDeepMode()" data-i18n-title="ai_deep_title" title="Sol High ile daha kapsamlı analiz">
+          <span aria-hidden="true">✦</span><span data-i18n="ai_deep">Derin Analiz</span>
+        </button>
+        <button type="button" class="ai-clear" onclick="clearLunaChat()" data-i18n="ai_clear">Yeni sohbet</button>
+      </div>
     </header>
     <div id="aiChatMessages" class="ai-chat-messages" aria-live="polite">
       <div id="aiChatEmpty" class="ai-empty">
@@ -1310,8 +1304,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=196"></script>
-<script src="app.js?v=196"></script>
+<script src="i18n.js?v=197"></script>
+<script src="app.js?v=197"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">
