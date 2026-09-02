@@ -3652,7 +3652,7 @@ async function analyzeEconWithLuna(cc){
     }
     status.textContent='';
   }catch(e){
-    status.textContent=e.message==='not_configured'?t('luna_not_configured'):(e.message==='rate_limit'?t('luna_rate'):t('econ_luna_error'));
+    status.textContent=e.message==='not_configured'?t('sol_not_configured'):(e.message==='rate_limit'?t('sol_rate'):t('econ_luna_error'));
     status.className='hint down';
   }finally{ btn.disabled=false; }
 }
@@ -5965,7 +5965,7 @@ async function analyzeWithLuna(){
     renderLunaAnalysis(j.analysis||{});
     status.textContent='';
   }catch(e){
-    status.textContent=e.message==='not_configured'?t('luna_not_configured'):(e.message==='rate_limit'?t('luna_rate'):t('luna_error'));
+    status.textContent=e.message==='not_configured'?t('sol_not_configured'):(e.message==='rate_limit'?t('sol_rate'):t('sol_error'));
     status.className='hint luna-status down';
   }finally{ btn.disabled=false; }
 }
