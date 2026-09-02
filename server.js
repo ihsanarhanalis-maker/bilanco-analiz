@@ -2522,11 +2522,13 @@ async function lunaChartAnalyzeHandler(req,res){
   if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
   try{
     const body=await readJsonBody(req,16*1024), lang=body&&body.lang==='en'?'en':'tr';
+    const analysisMode=body&&body.model==='sol'?'sol':'luna';
+    const analysisModel=analysisMode==='sol'?SOL_MODEL:LUNA_MODEL;
     const symbol=String(body&&body.symbol||'').trim().toUpperCase();
     if(!/^[A-Z0-9.^=\-]{1,24}$/.test(symbol)){ lunaJson(res,400,{ok:false,error:'invalid_symbol'}); return; }
-    const cacheKey=LUNA_ANALYST_PROMPT_VERSION+'\n'+lang+'\n'+symbol;
+    const cacheKey=LUNA_ANALYST_PROMPT_VERSION+'\n'+analysisModel+'\n'+lang+'\n'+symbol;
     const cached=LUNA_CHART_CACHE.get(cacheKey);
-    if(cached&&Date.now()-cached.at<5*60*1000){ lunaJson(res,200,{ok:true,cached:true,analysis:cached.analysis,market:cached.market}); return; }
+    if(cached&&Date.now()-cached.at<5*60*1000){ lunaJson(res,200,{ok:true,cached:true,model:analysisMode,analysis:cached.analysis,market:cached.market}); return; }
     const market=await lunaMarketSnapshot(symbol);
     if(!market||!market.ok){ lunaJson(res,404,{ok:false,error:(market&&market.error)||'market_data_unavailable'}); return; }
     const instructions=lunaAnalystStandards(lang)+' '+(lang==='tr'
@@ -2537,18 +2539,18 @@ async function lunaChartAnalyzeHandler(req,res){
       levels:{type:'array',items:{type:'string'},maxItems:4},scenarios:{type:'array',items:{type:'string'},maxItems:3},
       risks:{type:'array',items:{type:'string'},maxItems:4},disclaimer:{type:'string'}
     },required:['summary','trend','momentum','levels','scenarios','risks','disclaimer']};
-    const out=await openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:5000,
+    const out=await openAiResponse({model:analysisModel,store:false,reasoning:{effort:analysisMode==='sol'?'high':'medium'},max_output_tokens:5000,
       instructions,input:'Güncel teknik veri paketi / Current technical data package:\n'+JSON.stringify(market),
-      prompt_cache_key:'bilanco-luna-chart-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
-      text:{verbosity:'low',format:{type:'json_schema',name:'technical_chart_analysis',strict:true,schema}}},90000);
+      prompt_cache_key:'bilanco-'+analysisMode+'-chart-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,
+      text:{verbosity:'low',format:{type:'json_schema',name:'technical_chart_analysis',strict:true,schema}}},analysisMode==='sol'?120000:90000);
     let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
     if(!analysis){ lunaJson(res,502,{ok:false,error:'invalid_model_response'}); return; }
-    LUNA_CHART_CACHE.set(cacheKey,{at:Date.now(),analysis,market});
+    LUNA_CHART_CACHE.set(cacheKey,{at:Date.now(),model:analysisMode,analysis,market});
     if(LUNA_CHART_CACHE.size>150) [...LUNA_CHART_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>LUNA_CHART_CACHE.delete(k));
-    lunaJson(res,200,{ok:true,analysis,market});
+    lunaJson(res,200,{ok:true,model:analysisMode,analysis,market});
   }catch(e){
     const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
-    console.error('[Luna Chart]',e.message||e);
+    console.error('[AI Chart]',e.message||e);
     lunaJson(res,status,{ok:false,error:status===502?'luna_unavailable':e.message});
   }
 }

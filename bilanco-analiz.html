@@ -621,7 +621,7 @@
     a{color:#1763b8 !important;text-decoration:none}
   }
 </style>
-<link rel="stylesheet" href="/apple-design.css?v=198">
+<link rel="stylesheet" href="/apple-design.css?v=199">
 </head>
 <body>
 <a class="skip-link" href="#mainContent" data-i18n="skip_main">Ana içeriğe geç</a>
@@ -1030,9 +1030,9 @@
   <section class="graph-ai-shell no-print" aria-labelledby="graphAiTitle">
     <header class="graph-ai-head">
       <div>
-        <div class="ai-kicker" data-i18n="graph_ai_kicker">TradingView + Luna teknik analiz</div>
+        <div class="ai-kicker" data-i18n="graph_ai_kicker">TradingView + Luna/Sol teknik analiz</div>
         <h2 id="graphAiTitle" data-i18n="graph_ai_h2">Grafik AI</h2>
-        <p data-i18n="graph_ai_sub">Hisse kodunu doğrudan TradingView grafiğinin sembol aramasından seç; Luna seçili grafiği High düzeyinde yorumlasın.</p>
+        <p data-i18n="graph_ai_sub">Hisse kodunu TradingView grafiğinden seç; hızlı yorum için Luna'yı, daha derin analiz için Sol High'ı kullan.</p>
       </div>
     </header>
     <div class="graph-ai-chart-card">
@@ -1041,16 +1041,17 @@
     <div class="graph-ai-actions">
       <div>
         <strong id="graphAiSymbolLabel">NASDAQ:NVDA</strong>
-        <span class="hint" data-i18n="graph_ai_hint">TradingView’in üst araç çubuğundaki sembole tıkla; kodu yazıp sonucu seçtiğinde grafik ve Luna sembolü birlikte güncellenir.</span>
+        <span class="hint" data-i18n="graph_ai_hint">TradingView’in üst araç çubuğundaki sembole tıkla; kodu yazıp sonucu seçtiğinde grafik ve AI sembolü birlikte güncellenir.</span>
       </div>
       <div class="graph-ai-action-buttons">
         <button type="button" class="scan-chip" onclick="toggleGraphAiFullscreen()" data-i18n="graph_ai_fullscreen">Tam ekran</button>
-        <button type="button" id="graphAiLunaBtn" class="primary luna-button" onclick="analyzeGraphAi()" data-i18n="graph_ai_luna">✦ Luna ile Yorumla</button>
+        <button type="button" id="graphAiLunaBtn" class="primary luna-button" onclick="analyzeGraphAi('luna')" data-i18n="graph_ai_luna">✦ Luna ile Yorumla</button>
+        <button type="button" id="graphAiSolBtn" class="primary sol-button" onclick="analyzeGraphAi('sol')" data-i18n="graph_ai_sol" data-i18n-title="graph_ai_sol_hint" title="Sol High ile daha derin teknik analiz">✦ Sol ile Yorumla</button>
       </div>
     </div>
     <div id="graphAiStatus" class="hint" aria-live="polite"></div>
     <div id="graphAiLunaCard" class="econ-luna-card hidden">
-      <h3 data-i18n="graph_ai_luna_title">Luna Teknik Grafik Yorumu</h3>
+      <h3 id="graphAiAnalysisTitle" data-i18n="graph_ai_luna_title">Luna Teknik Grafik Yorumu</h3>
       <div id="graphAiLunaBody"></div>
     </div>
   </section>
@@ -1304,8 +1305,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=198"></script>
-<script src="app.js?v=198"></script>
+<script src="i18n.js?v=199"></script>
+<script src="app.js?v=199"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

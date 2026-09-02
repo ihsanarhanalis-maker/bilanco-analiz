@@ -38,6 +38,8 @@
 .luna-head h2::before{content:"✦";color:#78a9ff;text-shadow:0 0 18px rgba(82,145,255,.75)}
 .luna-button{flex:0 0 auto;min-width:180px;background:linear-gradient(135deg,#2f80ed,#5b8cff)!important;box-shadow:0 8px 24px rgba(47,128,237,.25)}
 .luna-button:disabled{opacity:.62;cursor:wait;transform:none!important}
+.sol-button{flex:0 0 auto;min-width:180px;color:#fff!important;background:linear-gradient(135deg,#8067f5,#b45ee4)!important;box-shadow:0 8px 24px rgba(142,92,224,.25)}
+.sol-button:disabled{opacity:.62;cursor:wait;transform:none!important}
 .luna-status{position:relative;margin-top:14px}
 .luna-result{position:relative;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}
 .luna-section{padding:15px 16px;border:1px solid rgba(121,157,219,.2);border-radius:13px;background:rgba(7,14,30,.48)}
@@ -470,4 +472,4 @@ a { color: var(--accent-2); text-underline-offset: 3px; }
 .graph-ai-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:15px 17px;border:1px solid var(--line);border-radius:16px;background:var(--surface)}.graph-ai-actions>div{display:flex;flex-direction:column;gap:3px}.graph-ai-actions strong{font-size:15px;color:var(--accent-2)}.graph-ai-action-buttons{display:flex!important;flex-direction:row!important;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}
 #graphAiStatus{margin:9px 3px 0}.graph-ai-shell .econ-luna-card{margin-bottom:22px}
 .graph-ai-market-line{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 2px}.graph-ai-market-line>*{padding:6px 9px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:12px}.graph-ai-market-line b{color:var(--accent-2)}
-@media(max-width:760px){.graph-ai-head{align-items:stretch;flex-direction:column;padding:17px}.graph-ai-chart-card{height:560px;border-radius:17px}.graph-ai-actions{align-items:stretch;flex-direction:column}.graph-ai-action-buttons{justify-content:stretch}.graph-ai-action-buttons>*{flex:1}.graph-ai-actions .luna-button{width:100%}}
+@media(max-width:760px){.graph-ai-head{align-items:stretch;flex-direction:column;padding:17px}.graph-ai-chart-card{height:560px;border-radius:17px}.graph-ai-actions{align-items:stretch;flex-direction:column}.graph-ai-action-buttons{justify-content:stretch}.graph-ai-action-buttons>*{flex:1}.graph-ai-actions .luna-button,.graph-ai-actions .sol-button{width:100%}}

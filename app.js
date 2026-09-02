@@ -3437,6 +3437,7 @@ function econTimeLabel(time){
 let GRAPH_AI_INIT=false;
 let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA',originalName:'',synced:false,blockedOriginal:''};
 let GRAPH_AI_PENDING_ANALYSIS=false;
+let GRAPH_AI_PENDING_MODEL='luna';
 const GRAPH_AI_TV_SUFFIX={L:'LSE',DE:'XETR',PA:'EURONEXT',AS:'EURONEXT',BR:'EURONEXT',LS:'EURONEXT',MI:'MIL',MC:'BME',SW:'SIX',ST:'OMXSTO',CO:'OMXCOP',OL:'OSL',HE:'OMXHEX',VI:'VIE',WA:'GPW',T:'TSE',HK:'HKEX',TW:'TWSE',TWO:'TPEX',TO:'TSX',V:'TSXV',AX:'ASX',SI:'SGX'};
 function graphAiYahooSymbol(tvSymbol){
   const raw=String(tvSymbol||'').trim().toUpperCase();
@@ -3465,7 +3466,7 @@ function syncGraphAiSymbolFromWidget(event){
     GRAPH_AI_STATE.synced=false;
     GRAPH_AI_STATE.blockedOriginal=GRAPH_AI_STATE.originalName;
     GRAPH_AI_PENDING_ANALYSIS=false;
-    const btn=document.getElementById('graphAiLunaBtn'); if(btn) btn.disabled=false;
+    setGraphAiButtonsDisabled(false);
     const status=document.getElementById('graphAiStatus');
     if(status){ status.textContent=t('graph_ai_symbol_unavailable'); status.className='hint down'; }
     return;
@@ -3476,7 +3477,7 @@ function syncGraphAiSymbolFromWidget(event){
   /* TradingView aynı hisseyi BATS_DLY:NVDA ve NASDAQ:NVDA gibi farklı
      sağlayıcı adlarıyla sırayla gönderebilir; gerçek kod değişmedikçe sonucu silme. */
   const changed=next.yahooSymbol!==GRAPH_AI_STATE.yahooSymbol;
-  const runPending=GRAPH_AI_PENDING_ANALYSIS;
+  const runPending=GRAPH_AI_PENDING_ANALYSIS, pendingModel=GRAPH_AI_PENDING_MODEL;
   GRAPH_AI_STATE={...GRAPH_AI_STATE,...next,synced:true,blockedOriginal:''};
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=next.tvSymbol;
   const status=document.getElementById('graphAiStatus');
@@ -3485,7 +3486,7 @@ function syncGraphAiSymbolFromWidget(event){
     const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
     if(card) card.classList.add('hidden'); if(body) body.innerHTML='';
   }
-  if(runPending){ GRAPH_AI_PENDING_ANALYSIS=false; setTimeout(analyzeGraphAi,0); }
+  if(runPending){ GRAPH_AI_PENDING_ANALYSIS=false; setTimeout(()=>analyzeGraphAi(pendingModel),0); }
 }
 window.addEventListener('message',syncGraphAiSymbolFromWidget);
 async function toggleGraphAiFullscreen(){
@@ -3508,23 +3509,29 @@ function renderGraphAiWidget(){
 function initGraphAiPage(){
   if(!GRAPH_AI_INIT){ GRAPH_AI_INIT=true; renderGraphAiWidget(); }
 }
-async function analyzeGraphAi(){
-  const btn=document.getElementById('graphAiLunaBtn'), status=document.getElementById('graphAiStatus');
+function setGraphAiButtonsDisabled(disabled){
+  ['graphAiLunaBtn','graphAiSolBtn'].forEach(id=>{ const button=document.getElementById(id); if(button) button.disabled=disabled; });
+}
+async function analyzeGraphAi(requestedModel='luna'){
+  const model=requestedModel==='sol'?'sol':'luna', status=document.getElementById('graphAiStatus');
   const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
-  if(!btn||!status||!card||!body) return;
+  const title=document.getElementById('graphAiAnalysisTitle');
+  if(!status||!card||!body) return;
   if(!GRAPH_AI_STATE.synced){
-    GRAPH_AI_PENDING_ANALYSIS=true; btn.disabled=true;
+    GRAPH_AI_PENDING_ANALYSIS=true; GRAPH_AI_PENDING_MODEL=model; setGraphAiButtonsDisabled(true);
     status.textContent=t('graph_ai_wait_symbol'); status.className='hint graph-ai-busy';
     setTimeout(()=>{
       if(!GRAPH_AI_PENDING_ANALYSIS) return;
-      GRAPH_AI_PENDING_ANALYSIS=false; btn.disabled=false;
+      GRAPH_AI_PENDING_ANALYSIS=false; setGraphAiButtonsDisabled(false);
       status.textContent=t('graph_ai_wait_symbol'); status.className='hint down';
     },12000);
     return;
   }
-  btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.className='hint graph-ai-busy'; status.textContent=t('graph_ai_loading');
+  setGraphAiButtonsDisabled(true); card.classList.remove('hidden'); body.innerHTML='';
+  if(title){ const key=model==='sol'?'graph_ai_sol_title':'graph_ai_luna_title'; title.dataset.i18n=key; title.textContent=t(key); }
+  status.className='hint graph-ai-busy'; status.textContent=t(model==='sol'?'graph_ai_loading_sol':'graph_ai_loading');
   try{
-    const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol})});
+    const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol,model})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok){ if(j.error==='rate_limit') throw new Error('rate_limit'); throw new Error('unavailable'); }
     const a=j.analysis||{}, m=j.market||{};
@@ -3539,7 +3546,7 @@ async function analyzeGraphAi(){
     </div><div class="luna-note">${safeHTML(a.disclaimer||t('luna_note'))}</div>`;
     status.textContent=''; status.className='hint';
   }catch(e){ status.textContent=e.message==='rate_limit'?t('luna_rate'):t('graph_ai_error'); status.className='hint down'; }
-  finally{ btn.disabled=false; }
+  finally{ setGraphAiButtonsDisabled(false); }
 }
 function econImportanceLabel(importance){
   return {'-1':t('econ_imp_lo'),'0':t('econ_imp_mid'),'1':t('econ_imp_hi')}[String(importance)]||'';
@@ -5797,6 +5804,8 @@ function toggleLunaDeepMode(){
   LUNA_CHAT_DEEP=!LUNA_CHAT_DEEP;
   const btn=document.getElementById('aiDeepMode');
   if(btn){ btn.classList.toggle('active',LUNA_CHAT_DEEP); btn.setAttribute('aria-pressed',LUNA_CHAT_DEEP?'true':'false'); }
+  const title=document.getElementById('aiChatTitle');
+  if(title){ const key=LUNA_CHAT_DEEP?'ai_h2_deep':'ai_h2'; title.dataset.i18n=key; title.textContent=t(key); }
   const input=document.getElementById('aiChatInput'); if(input) input.focus();
 }
 function lunaChatKeydown(e){
