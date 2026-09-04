@@ -11,6 +11,7 @@ const crypto = require('crypto');
 
 const PORT = process.env.PORT || 8723;  // internette sunucu portu atar; yerelde 8723
 const ROOT = __dirname;
+const AI_API_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.AI_API_ENABLED || ''));
 // SEC, kendini tanıtan bir User-Agent ister:
 const UA = 'Bilanco Analiz Araci (kisisel kullanim; contact@example.com)';
 const BUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
@@ -2803,6 +2804,13 @@ async function lunaChatHandler(req, res){
 
 http.createServer((req, res) => {
   const urlPath = req.url.split('?')[0];
+
+  if (urlPath === '/api/app-config') {
+    lunaJson(res,200,{ok:true,aiApiEnabled:AI_API_ENABLED}); return;
+  }
+  if (urlPath.startsWith('/ai/') && !AI_API_ENABLED) {
+    lunaJson(res,503,{ok:false,error:'ai_disabled'}); return;
+  }
 
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/astra-analyze') { astraFinanceAnalyzeHandler(req,res); return; }

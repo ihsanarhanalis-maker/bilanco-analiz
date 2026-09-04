@@ -3510,7 +3510,7 @@ function initGraphAiPage(){
   if(!GRAPH_AI_INIT){ GRAPH_AI_INIT=true; renderGraphAiWidget(); }
 }
 function setGraphAiButtonsDisabled(disabled){
-  ['graphAiLunaBtn','graphAiSolBtn'].forEach(id=>{ const button=document.getElementById(id); if(button) button.disabled=disabled; });
+  ['graphAiLunaBtn','graphAiSolBtn'].forEach(id=>{ const button=document.getElementById(id); if(button) button.disabled=disabled || !AI_API_ENABLED; });
 }
 async function analyzeGraphAi(requestedModel='luna'){
   const model=requestedModel==='sol'?'sol':'luna', status=document.getElementById('graphAiStatus');
@@ -3618,6 +3618,7 @@ function renderEconPanel(cc){
       <h3>${safeHTML(t('econ_luna_title'))}</h3>
       <div id="econLunaBody-${cc}"></div>
     </div>`;
+  syncAiApiControls();
 }
 async function analyzeEconWithLuna(cc){
   const st=ECON_PANELS[cc], c=st&&ECON_CACHE[cc+':'+(ECON_TAB[st.time]||'thisWeek')];
@@ -6051,6 +6052,7 @@ function prepareLunaCard(){
     if(body){ body.classList.add('hidden'); body.innerHTML=''; }
     if(status){ status.textContent=t('luna_ready'); status.className='hint luna-status'; }
   }
+  if(!AI_API_ENABLED && status){ status.textContent=t('ai_api_disabled'); status.className='hint luna-status'; }
 }
 window.addEventListener('bilanco-lang', prepareLunaCard);
 function prepareAstraCard(){
@@ -6064,6 +6066,7 @@ function prepareAstraCard(){
     if(body){ body.classList.add('hidden'); body.innerHTML=''; }
     if(status){ status.textContent=t('astra_finance_ready'); status.className='hint luna-status'; }
   }
+  if(!AI_API_ENABLED && status){ status.textContent=t('ai_api_disabled'); status.className='hint luna-status'; }
 }
 window.addEventListener('bilanco-lang', prepareAstraCard);
 function analyze(myGen){
@@ -8167,7 +8170,7 @@ async function loadTakasAkd(){
     TAKAS_ACTIVE_SLUG=(latest.gun_sonu_akd && latest.gun_sonu_akd.slug) || null;
     renderTakasView();
     prefetchTakasLuna(sym);
-    if(lunaBtn) lunaBtn.disabled=false;
+    if(lunaBtn) lunaBtn.disabled=!AI_API_ENABLED;
     if(st) st.textContent='Güncel';
   }catch(e){
     box.innerHTML='<div class="hint">Alınamadı: '+safeHTML(e.message)+'</div>';
@@ -8240,11 +8243,43 @@ async function loadTakasAkdItem(slug){
 window.loadTakasAkd=loadTakasAkd;
 window.loadTakasAkdItem=loadTakasAkdItem;
 
+let AI_API_ENABLED=false;
+function syncAiApiControls(){
+  const controls=document.querySelectorAll('.luna-button,.sol-button,#aiChatSend,#aiChatInput,#aiDeepMode');
+  controls.forEach(el=>{
+    if(!AI_API_ENABLED){
+      if(!el.disabled) el.dataset.aiForcedDisabled='1';
+      el.disabled=true;
+      el.setAttribute('aria-disabled','true');
+    }else if(el.dataset.aiForcedDisabled==='1'){
+      el.disabled=false;
+      delete el.dataset.aiForcedDisabled;
+      el.removeAttribute('aria-disabled');
+    }
+  });
+  if(!AI_API_ENABLED){
+    ['lunaStatus','astraStatus','graphAiStatus'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.textContent=t('ai_api_disabled');
+    });
+    document.querySelectorAll('[id^="econLunaStatus-"]').forEach(el=>{ el.textContent=t('ai_api_disabled'); });
+  }
+}
+async function initAiApiAvailability(){
+  AI_API_ENABLED=false;
+  syncAiApiControls();
+  try{
+    const r=await fetch('/api/app-config',{cache:'no-store'}), j=await r.json();
+    AI_API_ENABLED=Boolean(r.ok&&j&&j.aiApiEnabled);
+  }catch(_e){ AI_API_ENABLED=false; }
+  syncAiApiControls();
+}
+
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
   /* Dil dinleyicisi initLang'den ÖNCE — yoksa ilk bilanco-lang kaçırılır */
   window.addEventListener('bilanco-lang',()=>{ refreshI18nPanels(); });
   if(typeof initLang==='function') initLang();
+  initAiApiAvailability();
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
   // Bilanço Verisi'nde değer/kategori değişince cari hücreleri anında yeniden renklendir
