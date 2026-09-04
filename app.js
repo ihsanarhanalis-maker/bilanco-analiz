@@ -6012,14 +6012,17 @@ async function analyzeWithAstra(){
     const r=await fetch('/ai/astra-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),snapshot})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok || !j.ok){
-      if(j.error==='astra_not_configured') throw new Error('not_configured');
-      if(j.error==='rate_limit') throw new Error('rate_limit');
-      throw new Error('unavailable');
+      throw new Error(String(j.error||'astra_unavailable'));
     }
     renderAstraAnalysis(j.analysis||{},j.sources||[]);
     status.textContent='';
   }catch(e){
-    status.textContent=e.message==='not_configured'?t('astra_not_configured'):(e.message==='rate_limit'?t('astra_rate'):t('astra_error'));
+    const messages={
+      astra_not_configured:'astra_not_configured',rate_limit:'astra_rate',astra_api_key_invalid:'astra_api_key_invalid',
+      astra_access_denied:'astra_access_denied',astra_model_unavailable:'astra_model_unavailable',astra_quota:'astra_quota',
+      astra_openai_rate:'astra_openai_rate',astra_timeout:'astra_timeout',astra_invalid_response:'astra_invalid_response'
+    };
+    status.textContent=t(messages[e.message]||'astra_error');
     status.className='hint luna-status down';
   }finally{ btn.disabled=false; }
 }
