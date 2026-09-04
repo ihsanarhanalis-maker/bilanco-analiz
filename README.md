@@ -14,7 +14,8 @@ ABD (SEC EDGAR) ve Borsa İstanbul (KAP / İş Yatırım) hisseleri için **anah
 - **BIST'e özel:** KAP bildirimleri + ekonomik takvim
 - **Dışa aktarma:** PDF / Excel (CSV) · koyu tema · mobil uyumlu
 - **PWA:** Ana ekrana / masaüstüne yüklenebilir uygulama (ikonla açılır)
-- **Luna AI · Astra High:** GPT‑6 Astra ile sürekli `high` akıl yürütme; güncel web araştırması, uygulamanın piyasa/finansal veri araçları, paralel araç çağrıları, Code Interpreter hesaplamaları ve akışlı yanıtlar
+- **Astra AI · High:** GPT‑6 Astra ile sürekli `high` akıl yürütme; güncel web araştırması, uygulamanın piyasa/finansal veri araçları, paralel araç çağrıları, Code Interpreter hesaplamaları ve akışlı yanıtlar
+- **Astra Finansal Yorum:** Sol kartının altında çalışan ayrı derin analiz; web araştırması ve Code Interpreter denetimini zorunlu çalıştırıp sonuçları kaynaklarıyla sunar
 
 ## Kurulum & Çalıştırma
 
@@ -57,8 +58,8 @@ Uygulama Android, iOS 16.4+ ve masaüstünde Web Push kullanır. İzleme listesi
 
 Üretim ortamında şu değişkenler gereklidir:
 
-- `OPENAI_API_KEY`: Luna AI sunucu çağrıları için OpenAI API anahtarı. Anahtar yalnızca Render ortam değişkeninde tutulur ve tarayıcıya gönderilmez.
-- `OPENAI_ASTRA_MODEL`: Luna AI sekmesinin modeli; varsayılan `gpt-6-astra`.
+- `OPENAI_API_KEY`: Astra AI ve diğer yapay zekâ sunucu çağrıları için OpenAI API anahtarı. Anahtar yalnızca Render ortam değişkeninde tutulur ve tarayıcıya gönderilmez.
+- `OPENAI_ASTRA_MODEL`: Astra AI sekmesinin ve Astra Finansal Yorum kartının modeli; varsayılan `gpt-6-astra`.
 - `DATABASE_URL`: Kalıcı PostgreSQL bağlantısı. Render'ın geçici dosya sistemi bildirim abonelikleri için kullanılmamalıdır.
 - `VAPID_PUBLIC_KEY` ve `VAPID_PRIVATE_KEY`: `npm run generate:vapid` çıktısındaki Web Push anahtarları.
 - `VAPID_SUBJECT`: Geçerli bir `mailto:` veya HTTPS iletişim adresi.

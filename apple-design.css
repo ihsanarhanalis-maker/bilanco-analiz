@@ -51,6 +51,16 @@
 .luna-note{position:relative;margin-top:13px;padding-top:11px;border-top:1px solid rgba(121,157,219,.17);font-size:11px;line-height:1.5;color:var(--muted)}
 @media(max-width:680px){.luna-head{flex-direction:column}.luna-button{width:100%}.luna-result{grid-template-columns:1fr}.luna-section.wide{grid-column:auto}}
 
+/* GPT-6 Astra High finansal yorum kartı */
+.astra-finance-card{border-color:rgba(170,103,255,.52)!important;background:linear-gradient(145deg,rgba(31,20,67,.97),rgba(10,15,35,.98))!important}
+.astra-finance-card::before{background:rgba(159,81,255,.18)}
+.astra-finance-card .luna-head h2::before{color:#c18cff;text-shadow:0 0 20px rgba(174,102,255,.82)}
+.astra-feature-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:-4px;margin-bottom:14px}
+.astra-feature-row span{padding:5px 9px;border:1px solid rgba(193,140,255,.28);border-radius:999px;background:rgba(145,82,235,.10);color:#cbb8ef;font-size:10.5px;font-weight:700;letter-spacing:.01em}
+.astra-button{background:linear-gradient(135deg,#7c4dff,#b15cff)!important;box-shadow:0 9px 28px rgba(139,77,255,.30)!important}
+.astra-finance-card .luna-section{border-color:rgba(193,140,255,.20);background:rgba(17,10,38,.46)}
+.astra-finance-card .ai-sources{grid-column:1/-1}
+
 /* Ekonomik takvim ülke panelindeki bağlamsal Luna yorumu */
 .econ-luna-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px}
 .econ-luna-card{position:relative;overflow:hidden;margin-top:14px;padding:17px;border:1px solid rgba(83,146,255,.34);border-radius:15px;background:linear-gradient(145deg,rgba(16,28,58,.78),rgba(9,16,34,.88))}

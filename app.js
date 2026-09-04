@@ -5954,6 +5954,35 @@ function renderLunaAnalysis(a){
     <section class="luna-section wide"><h3>${safeHTML(t('luna_data_quality'))}</h3><p>${safeHTML(a.dataQuality||'—')}</p></section>
   </div>`;
 }
+function renderAstraAnalysis(a,sources){
+  const body=document.getElementById('astraBody'); if(!body) return;
+  body.classList.remove('hidden');
+  body.innerHTML=`<div class="luna-result">
+    <section class="luna-section wide"><h3>${safeHTML(t('luna_summary'))}</h3><p>${safeHTML(a.summary||'—')}</p></section>
+    ${lunaList(t('luna_strengths'),a.strengths)}${lunaList(t('luna_risks'),a.risks)}
+    <section class="luna-section"><h3>${safeHTML(t('luna_profit'))}</h3><p>${safeHTML(a.profitability||'—')}</p></section>
+    <section class="luna-section"><h3>${safeHTML(t('luna_position'))}</h3><p>${safeHTML(a.financialPosition||'—')}</p></section>
+    <section class="luna-section"><h3>${safeHTML(t('luna_cash'))}</h3><p>${safeHTML(a.cashFlow||'—')}</p></section>
+    <section class="luna-section"><h3>${safeHTML(t('luna_earnings_quality'))}</h3><p>${safeHTML(a.earningsQuality||'—')}</p></section>
+    <section class="luna-section wide"><h3>${safeHTML(t('astra_market_context'))}</h3><p>${safeHTML(a.marketContext||'—')}</p></section>
+    <section class="luna-section wide"><h3>${safeHTML(t('astra_valuation'))}</h3><p>${safeHTML(a.valuationContext||'—')}</p></section>
+    ${lunaList(t('astra_catalysts'),a.catalysts)}
+    <section class="luna-section"><h3>${safeHTML(t('astra_counter_view'))}</h3><p>${safeHTML(a.counterView||'—')}</p></section>
+    ${lunaList(t('astra_risk_triggers'),a.riskTriggers)}${lunaList(t('luna_watch'),a.watchNext)}
+    <section class="luna-section"><h3>${safeHTML(t('astra_confidence'))}</h3><p>${safeHTML(a.confidence||'—')}</p></section>
+    <section class="luna-section"><h3>${safeHTML(t('luna_data_quality'))}</h3><p>${safeHTML(a.dataQuality||'—')}</p></section>
+  </div>`;
+  if(Array.isArray(sources)&&sources.length){
+    const sourceBox=document.createElement('div'); sourceBox.className='ai-sources econ-luna-sources';
+    const label=document.createElement('strong'); label.textContent=t('ai_sources'); sourceBox.appendChild(label);
+    sources.forEach(s=>{
+      if(!s||!/^https:\/\//i.test(String(s.url||''))) return;
+      const link=document.createElement('a'); link.href=s.url; link.target='_blank'; link.rel='noopener noreferrer';
+      link.textContent=s.title||s.url; sourceBox.appendChild(link);
+    });
+    body.appendChild(sourceBox);
+  }
+}
 async function analyzeWithLuna(){
   const btn=document.getElementById('lunaAnalyzeBtn'), status=document.getElementById('lunaStatus');
   const snapshot=buildLunaSnapshot();
@@ -5974,6 +6003,26 @@ async function analyzeWithLuna(){
     status.className='hint luna-status down';
   }finally{ btn.disabled=false; }
 }
+async function analyzeWithAstra(){
+  const btn=document.getElementById('astraAnalyzeBtn'), status=document.getElementById('astraStatus');
+  const snapshot=buildLunaSnapshot();
+  if(!snapshot || !btn || !status) return;
+  btn.disabled=true; status.textContent=t('astra_finance_loading'); status.className='hint luna-status';
+  try{
+    const r=await fetch('/ai/astra-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),snapshot})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok || !j.ok){
+      if(j.error==='astra_not_configured') throw new Error('not_configured');
+      if(j.error==='rate_limit') throw new Error('rate_limit');
+      throw new Error('unavailable');
+    }
+    renderAstraAnalysis(j.analysis||{},j.sources||[]);
+    status.textContent='';
+  }catch(e){
+    status.textContent=e.message==='not_configured'?t('astra_not_configured'):(e.message==='rate_limit'?t('astra_rate'):t('astra_error'));
+    status.className='hint luna-status down';
+  }finally{ btn.disabled=false; }
+}
 function prepareLunaCard(){
   const card=document.getElementById('lunaCard'), body=document.getElementById('lunaBody'), status=document.getElementById('lunaStatus');
   if(!card) return;
@@ -5987,6 +6036,19 @@ function prepareLunaCard(){
   }
 }
 window.addEventListener('bilanco-lang', prepareLunaCard);
+function prepareAstraCard(){
+  const card=document.getElementById('astraCard'), body=document.getElementById('astraBody'), status=document.getElementById('astraStatus');
+  if(!card) return;
+  if(!FIN){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const key=[FIN.ticker,FIN.mode,FIN.D0,FIN.D1,FIN.filedD0,FIN.filedD1,getLang()].join('|');
+  if(card.dataset.snapshotKey!==key){
+    card.dataset.snapshotKey=key;
+    if(body){ body.classList.add('hidden'); body.innerHTML=''; }
+    if(status){ status.textContent=t('astra_finance_ready'); status.className='hint luna-status'; }
+  }
+}
+window.addEventListener('bilanco-lang', prepareAstraCard);
 function analyze(myGen){
   if(myGen!=null && myGen!==REQ_GEN) return;
   const d=readData();
@@ -6032,6 +6094,7 @@ function analyze(myGen){
     ['cashCard','healthCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }
   prepareLunaCard();
+  prepareAstraCard();
 
   // Rapor başlığı (dışa aktarmada da kullanılır)
   const rt=document.getElementById('reportTitle');
