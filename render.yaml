@@ -16,5 +16,7 @@ services:
         value: "gpt-5.6-luna"
       - key: OPENAI_SOL_MODEL
         value: "gpt-5.6-sol"
+      - key: OPENAI_ASTRA_MODEL
+        value: "gpt-6-astra"
       - key: OPENAI_API_KEY
         sync: false

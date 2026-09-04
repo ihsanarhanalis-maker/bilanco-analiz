@@ -5769,7 +5769,7 @@ function updateMarketSpecificLabels(){
 const LUNA_CHAT_MESSAGES=[];
 let LUNA_CHAT_BUSY=false;
 let LUNA_CHAT_STREAMING=false;
-let LUNA_CHAT_DEEP=false;
+let LUNA_CHAT_DEEP=true;
 function renderLunaChat(){
   const box=document.getElementById('aiChatMessages'); if(!box) return;
   const empty=document.getElementById('aiChatEmpty');
@@ -5800,12 +5800,8 @@ function clearLunaChat(){
   const input=document.getElementById('aiChatInput'); if(input){ input.value=''; input.focus(); }
 }
 function toggleLunaDeepMode(){
-  if(LUNA_CHAT_BUSY) return;
-  LUNA_CHAT_DEEP=!LUNA_CHAT_DEEP;
   const btn=document.getElementById('aiDeepMode');
-  if(btn){ btn.classList.toggle('active',LUNA_CHAT_DEEP); btn.setAttribute('aria-pressed',LUNA_CHAT_DEEP?'true':'false'); }
-  const title=document.getElementById('aiChatTitle');
-  if(title){ const key=LUNA_CHAT_DEEP?'ai_h2_deep':'ai_h2'; title.dataset.i18n=key; title.textContent=t(key); }
+  if(btn){ btn.classList.add('active'); btn.setAttribute('aria-pressed','true'); }
   const input=document.getElementById('aiChatInput'); if(input) input.focus();
 }
 function lunaChatKeydown(e){
@@ -5817,7 +5813,7 @@ async function sendLunaChat(e){
   const question=String(input&&input.value||'').trim();
   if(!question || LUNA_CHAT_BUSY) return;
   LUNA_CHAT_MESSAGES.push({role:'user',content:question});
-  const deepMode=LUNA_CHAT_DEEP;
+  const deepMode=true;
   if(input) input.value=''; LUNA_CHAT_BUSY=true; if(btn) btn.disabled=true; if(modeBtn) modeBtn.disabled=true; renderLunaChat();
   try{
     const history=LUNA_CHAT_MESSAGES.slice(-12);

@@ -2091,7 +2091,8 @@ function openTvQuoteSocket(tvSymbol, onQuote, onStatus) {
    ortam değişkeninden okunur; tarayıcıya hiçbir zaman gönderilmez. */
 const LUNA_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
 const SOL_MODEL = process.env.OPENAI_SOL_MODEL || 'gpt-5.6-sol';
-const LUNA_ANALYST_PROMPT_VERSION = 'senior-finance-v1';
+const ASTRA_MODEL = process.env.OPENAI_ASTRA_MODEL || 'gpt-6-astra';
+const LUNA_ANALYST_PROMPT_VERSION = 'senior-finance-astra-v2';
 const LUNA_CACHE = new Map();
 const LUNA_CHAT_CACHE = new Map();
 const LUNA_BROKER_CACHE = new Map();
@@ -2575,7 +2576,7 @@ async function lunaChatHandler(req, res){
   if(!lunaRateAllowed(req)){ lunaJson(res,429,{ok:false,error:'rate_limit'}); return; }
   try{
     const body=await readJsonBody(req,64*1024), lang=body&&body.lang==='en'?'en':'tr', wantsStream=body&&body.stream===true;
-    const deep=body&&body.deep===true, chatMode=deep?'deep':'standard', finalModel=deep?SOL_MODEL:LUNA_MODEL;
+    const deep=true, chatMode='astra-high', finalModel=ASTRA_MODEL;
     const raw=Array.isArray(body&&body.messages)?body.messages.slice(-12):[];
     const messages=raw.map(m=>({role:m&&m.role==='assistant'?'assistant':'user',content:String(m&&m.content||'').trim().slice(0,4000)})).filter(m=>m.content);
     if(!messages.length || messages[messages.length-1].role!=='user'){ lunaJson(res,400,{ok:false,error:'bad_messages'}); return; }
@@ -2621,8 +2622,8 @@ async function lunaChatHandler(req, res){
       ? 'Sen Luna için yalnızca araç seçen planlayıcısın. Güncel fiyat veya teknik analiz için get_market_snapshot; finansal tablolar için get_financial_snapshot; AKD için get_broker_distribution; kesin tarih için get_current_datetime çağır. Kapsamlı şirket analizinde piyasa verisiyle birlikte çeyreklik ve yıllık finansal görünümü çağır. Sembol yazılmamış devam sorusunda doğrulanmış aktif hisseyi kullan; market BIST ise Yahoo uyumlu piyasa ve finans araçlarında sembole .IS ekle. Gerekli bağımsız araçları aynı turda çağır; nihai yanıt veya analiz yazma.'
       : 'You are Luna’s tool-only planner. Call get_market_snapshot for current prices or technical analysis, get_financial_snapshot for statements, get_broker_distribution for AKD, and get_current_datetime for exact dates. For a comprehensive company analysis, request market data plus quarterly and annual financial snapshots. Use the verified active ticker for follow-ups without a symbol; when market is BIST, append .IS for Yahoo-compatible market and financial tools. Call independent tools in the same turn and do not write a final answer or analysis.')+' '+timeContext+' '+contextText;
     if(wantsStream) lunaBeginSse(res);
-    const researchPromise=openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:750,instructions:researchInstructions+' '+timeContext+' '+contextText,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],prompt_cache_key:'bilanco-luna-research-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang});
-    const plannerPromise=openAiResponse({model:LUNA_MODEL,store:false,reasoning:{effort:'medium'},max_output_tokens:450,instructions:plannerInstructions,input:messages,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true,prompt_cache_key:'bilanco-luna-planner-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang});
+    const researchPromise=openAiResponse({model:ASTRA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:1200,instructions:researchInstructions+' '+timeContext+' '+contextText,input:messages,tools:[{type:'web_search'}],tool_choice:'required',include:['web_search_call.action.sources'],prompt_cache_key:'bilanco-astra-research-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang});
+    const plannerPromise=openAiResponse({model:ASTRA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:900,instructions:plannerInstructions,input:messages,tools:LUNA_APP_TOOLS.filter(x=>x.type==='function'),tool_choice:'auto',parallel_tool_calls:true,prompt_cache_key:'bilanco-astra-planner-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang});
     const [research,plan]=await Promise.all([researchPromise,plannerPromise]);
     let finalInput=[...messages,...(research.output||[])];
     const calls=(plan.output||[]).filter(x=>x.type==='function_call').slice(0,4);
@@ -2630,10 +2631,13 @@ async function lunaChatHandler(req, res){
       const results=await Promise.all(calls.map(async call=>({type:'function_call_output',call_id:call.call_id,output:JSON.stringify(await lunaRunTool(call))})));
       finalInput=[...finalInput,...(plan.output||[]),...results];
     }
-    const finalBase={model:finalModel,store:false,reasoning:{effort:deep?'high':'medium'},max_output_tokens:deep?6000:2500,instructions,input:finalInput,prompt_cache_key:'bilanco-'+(deep?'sol-deep':'luna-standard')+'-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'medium'}};
+    const finalBase={model:finalModel,store:false,reasoning:{effort:'high'},max_output_tokens:8000,instructions,input:finalInput,
+      tools:[{type:'web_search'},{type:'code_interpreter',container:{type:'auto'}}],tool_choice:'auto',parallel_tool_calls:true,
+      include:['web_search_call.action.sources','code_interpreter_call.outputs'],
+      prompt_cache_key:'bilanco-astra-high-final-'+LUNA_ANALYST_PROMPT_VERSION+'-'+lang,text:{verbosity:'high'}};
     let answer='', finalResponse={};
     if(wantsStream){
-      const streamed=await openAiResponseStream(finalBase,delta=>lunaSse(res,'delta',{delta}),deep?120000:60000);
+      const streamed=await openAiResponseStream(finalBase,delta=>lunaSse(res,'delta',{delta}),180000);
       answer=lunaProfessionalText(streamed.text); finalResponse=streamed.response||{};
     }else{
       finalResponse=await openAiResponse(finalBase);
