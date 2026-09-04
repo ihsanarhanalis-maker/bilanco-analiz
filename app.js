@@ -6003,6 +6003,18 @@ async function analyzeWithLuna(){
     status.className='hint luna-status down';
   }finally{ btn.disabled=false; }
 }
+async function waitForAstraResult(jobId){
+  const deadline=Date.now()+10*60*1000;
+  while(Date.now()<deadline){
+    await new Promise(resolve=>setTimeout(resolve,4000));
+    const r=await fetch('/ai/astra-status?job='+encodeURIComponent(jobId),{cache:'no-store'});
+    const j=await r.json().catch(()=>({}));
+    if(r.status===202 && j.ok && j.pending) continue;
+    if(!r.ok || !j.ok) throw new Error(String(j.error||'astra_unavailable'));
+    return j;
+  }
+  throw new Error('astra_timeout');
+}
 async function analyzeWithAstra(){
   const btn=document.getElementById('astraAnalyzeBtn'), status=document.getElementById('astraStatus');
   const snapshot=buildLunaSnapshot();
@@ -6010,17 +6022,19 @@ async function analyzeWithAstra(){
   btn.disabled=true; status.textContent=t('astra_finance_loading'); status.className='hint luna-status';
   try{
     const r=await fetch('/ai/astra-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),snapshot})});
-    const j=await r.json().catch(()=>({}));
+    let j=await r.json().catch(()=>({}));
     if(!r.ok || !j.ok){
       throw new Error(String(j.error||'astra_unavailable'));
     }
+    if(j.pending && j.jobId) j=await waitForAstraResult(j.jobId);
     renderAstraAnalysis(j.analysis||{},j.sources||[]);
     status.textContent='';
   }catch(e){
     const messages={
       astra_not_configured:'astra_not_configured',rate_limit:'astra_rate',astra_api_key_invalid:'astra_api_key_invalid',
       astra_access_denied:'astra_access_denied',astra_model_unavailable:'astra_model_unavailable',astra_quota:'astra_quota',
-      astra_openai_rate:'astra_openai_rate',astra_timeout:'astra_timeout',astra_invalid_response:'astra_invalid_response'
+      astra_openai_rate:'astra_openai_rate',astra_timeout:'astra_timeout',astra_invalid_response:'astra_invalid_response',
+      astra_job_expired:'astra_job_expired'
     };
     status.textContent=t(messages[e.message]||'astra_error');
     status.className='hint luna-status down';

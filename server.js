@@ -2096,6 +2096,7 @@ const LUNA_ANALYST_PROMPT_VERSION = 'senior-finance-astra-v2';
 const ASTRA_FINANCE_PROMPT_VERSION = 'astra-finance-high-v1';
 const LUNA_CACHE = new Map();
 const ASTRA_FINANCE_CACHE = new Map();
+const ASTRA_FINANCE_JOBS = new Map();
 const LUNA_CHAT_CACHE = new Map();
 const LUNA_BROKER_CACHE = new Map();
 const LUNA_ECON_CACHE = new Map();
@@ -2151,6 +2152,23 @@ function openAiResponse(payload, timeoutMs){
     });
     rq.on('timeout', () => rq.destroy(new Error('openai_timeout')));
     rq.on('error', reject); rq.end(raw);
+  });
+}
+function openAiRetrieveResponse(responseId, timeoutMs){
+  return new Promise((resolve, reject) => {
+    const rq=https.request({hostname:'api.openai.com',path:'/v1/responses/'+encodeURIComponent(responseId),method:'GET',headers:{
+      'Authorization':'Bearer '+process.env.OPENAI_API_KEY,'Content-Type':'application/json'
+    },timeout:timeoutMs||30000}, pr => {
+      let body='';
+      pr.on('data', c => { if(body.length < 2000000) body += c; });
+      pr.on('end', () => {
+        let parsed=null; try{ parsed=JSON.parse(body); }catch(_e){}
+        if(pr.statusCode<200 || pr.statusCode>=300){ const e=new Error((parsed&&parsed.error&&parsed.error.message)||('openai_'+pr.statusCode)); e.status=pr.statusCode; reject(e); return; }
+        resolve(parsed||{});
+      });
+    });
+    rq.on('timeout', () => rq.destroy(new Error('openai_timeout')));
+    rq.on('error', reject); rq.end();
   });
 }
 function openAiResponseStream(payload, onDelta, timeoutMs){
@@ -2324,6 +2342,19 @@ function astraPublicError(error){
   if(message.includes('invalid_model_response')) return 'astra_invalid_response';
   return 'astra_unavailable';
 }
+function astraCompletedResult(out){
+  let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
+  if(!analysis) throw new Error('invalid_model_response');
+  const outputItems=Array.isArray(out.output)?out.output:[];
+  return {
+    analysis,
+    sources:responseWebSources(out),
+    tools:{
+      webSearch:outputItems.some(item=>item&&item.type==='web_search_call'),
+      codeInterpreter:outputItems.some(item=>item&&item.type==='code_interpreter_call')
+    }
+  };
+}
 async function astraFinanceAnalyzeHandler(req,res){
   if(req.method!=='POST'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
   if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'astra_not_configured'}); return; }
@@ -2357,27 +2388,51 @@ async function astraFinanceAnalyzeHandler(req,res){
       ? 'Yanıt vermeden önce sunulan iki aracı da kullan: (1) web aramasıyla şirketin en güncel düzenleyici açıklamalarını, yatırımcı ilişkileri duyurularını ve önemli haberlerini araştır; birincil kaynaklara öncelik ver, (2) kod yorumlayıcıyla yapılandırılmış finansal veride büyüme, marj, likidite, kaldıraç, işletme sermayesi, nakit dönüşümü ve kâr kalitesi hesaplarını yeniden doğrula. Ekrandaki finansal tablo paketini temel veri olarak kullan; web araştırmasını güncel bağlam, doğrulama ve dönem sonrası gelişmeler için ekle. filedDates[0] açıklanma tarihi, balanceDates[0] dönem sonudur; ikisini karıştırma. Uyumsuz dönemleri oranlama; finansal kurumlara sanayi şirketi eşikleri uygulama. Değerleme verisi eksikse kesin ucuz/pahalı yargısı verme. Her ana bölümde en az bir rakam, tarih veya açık veri eksikliği göster. Katalizörleri ve risk tetikleyicilerini ölçülebilir koşullar halinde yaz. Güven düzeyini yüksek/orta/düşük olarak belirt ve gerekçelendir. Ayrıntılı ama tekrarsız yaz.'
       : 'Before answering, use both provided tools: (1) research the company’s latest regulatory filings, investor-relations releases, and material news with web search, preferring primary sources, and (2) use code interpreter to recalculate growth, margins, liquidity, leverage, working capital, cash conversion, and earnings-quality checks from the structured financial data. Use the on-screen financial package as the base dataset; add web research for current context, verification, and post-period developments. filedDates[0] is the publication date and balanceDates[0] is the period end; do not confuse them. Do not ratio mismatched periods or apply industrial-company thresholds to financial institutions. If valuation inputs are missing, do not make a definitive cheap/expensive claim. Include at least one figure, date, or explicit data gap in every major section. Express catalysts and risk triggers as measurable conditions. State high/medium/low confidence with reasons. Be detailed without repetition.');
     const out=await openAiResponse({
-      model:ASTRA_MODEL,store:false,reasoning:{effort:'high'},max_output_tokens:9000,
+      model:ASTRA_MODEL,store:true,background:true,reasoning:{effort:'high'},max_output_tokens:9000,
       instructions:instructions+' Current server time: '+new Date().toISOString(),
       input:'STRUCTURED FINANCIAL SNAPSHOT:\n'+input,
       tools:[{type:'web_search'},{type:'code_interpreter',container:{type:'auto'}}],
       tool_choice:'required',parallel_tool_calls:true,
       include:['web_search_call.action.sources','code_interpreter_call.outputs'],
       text:{verbosity:'high',format:{type:'json_schema',name:'astra_financial_analysis',strict:true,schema}}
-    },180000);
-    let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
-    if(!analysis) throw new Error('invalid_model_response');
-    const outputItems=Array.isArray(out.output)?out.output:[];
-    const usedWeb=outputItems.some(item=>item&&item.type==='web_search_call');
-    const usedCode=outputItems.some(item=>item&&item.type==='code_interpreter_call');
-    const sources=responseWebSources(out);
-    ASTRA_FINANCE_CACHE.set(cacheKey,{at:Date.now(),analysis,sources});
-    if(ASTRA_FINANCE_CACHE.size>150) [...ASTRA_FINANCE_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>ASTRA_FINANCE_CACHE.delete(k));
-    lunaJson(res,200,{ok:true,model:ASTRA_MODEL,mode:'high',tools:{webSearch:usedWeb,codeInterpreter:usedCode},analysis,sources});
+    },30000);
+    if(out.status==='completed'){
+      const result=astraCompletedResult(out);
+      ASTRA_FINANCE_CACHE.set(cacheKey,{at:Date.now(),analysis:result.analysis,sources:result.sources});
+      lunaJson(res,200,{ok:true,model:ASTRA_MODEL,mode:'high',...result});
+      return;
+    }
+    if(!out.id || !['queued','in_progress'].includes(out.status)) throw new Error((out.error&&out.error.message)||('astra_'+String(out.status||'unknown')));
+    const jobId=crypto.randomBytes(18).toString('hex');
+    ASTRA_FINANCE_JOBS.set(jobId,{responseId:out.id,cacheKey,createdAt:Date.now()});
+    for(const [id,job] of ASTRA_FINANCE_JOBS) if(Date.now()-job.createdAt>15*60*1000) ASTRA_FINANCE_JOBS.delete(id);
+    lunaJson(res,202,{ok:true,pending:true,jobId,model:ASTRA_MODEL,mode:'high'});
   }catch(e){
     const status=e.message==='payload_too_large'?413:(e.message==='bad_json'?400:502);
     console.error('[Astra Finance]',e.message||e);
     lunaJson(res,status,{ok:false,error:status===502?astraPublicError(e):e.message});
+  }
+}
+async function astraFinanceStatusHandler(req,res){
+  if(req.method!=='GET'){ lunaJson(res,405,{ok:false,error:'method_not_allowed'}); return; }
+  if(!process.env.OPENAI_API_KEY){ lunaJson(res,503,{ok:false,error:'astra_not_configured'}); return; }
+  const requestUrl=new URL(req.url,'http://localhost');
+  const jobId=String(requestUrl.searchParams.get('job')||'');
+  const job=/^[a-f0-9]{36}$/.test(jobId)?ASTRA_FINANCE_JOBS.get(jobId):null;
+  if(!job){ lunaJson(res,404,{ok:false,error:'astra_job_expired'}); return; }
+  if(Date.now()-job.createdAt>15*60*1000){ ASTRA_FINANCE_JOBS.delete(jobId); lunaJson(res,410,{ok:false,error:'astra_job_expired'}); return; }
+  try{
+    const out=await openAiRetrieveResponse(job.responseId,30000);
+    if(['queued','in_progress'].includes(out.status)){ lunaJson(res,202,{ok:true,pending:true,status:out.status}); return; }
+    if(out.status!=='completed') throw new Error((out.error&&out.error.message)||('astra_'+String(out.status||'unknown')));
+    const result=astraCompletedResult(out);
+    ASTRA_FINANCE_CACHE.set(job.cacheKey,{at:Date.now(),analysis:result.analysis,sources:result.sources});
+    if(ASTRA_FINANCE_CACHE.size>150) [...ASTRA_FINANCE_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>ASTRA_FINANCE_CACHE.delete(k));
+    ASTRA_FINANCE_JOBS.delete(jobId);
+    lunaJson(res,200,{ok:true,model:ASTRA_MODEL,mode:'high',...result});
+  }catch(e){
+    console.error('[Astra Finance Status]',e.message||e);
+    lunaJson(res,502,{ok:false,error:astraPublicError(e)});
   }
 }
 function lunaFinite(v){
@@ -2741,6 +2796,7 @@ http.createServer((req, res) => {
 
   if (urlPath === '/ai/analyze') { lunaAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/astra-analyze') { astraFinanceAnalyzeHandler(req,res); return; }
+  if (urlPath === '/ai/astra-status') { astraFinanceStatusHandler(req,res); return; }
   if (urlPath === '/ai/broker') { lunaBrokerAnalyzeHandler(req,res); return; }
   if (urlPath === '/ai/economic-calendar') { lunaEconomicCalendarHandler(req,res); return; }
   if (urlPath === '/ai/chart') { lunaChartAnalyzeHandler(req,res); return; }
