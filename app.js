@@ -6034,7 +6034,7 @@ async function analyzeWithAstra(){
       astra_not_configured:'astra_not_configured',rate_limit:'astra_rate',astra_api_key_invalid:'astra_api_key_invalid',
       astra_access_denied:'astra_access_denied',astra_model_unavailable:'astra_model_unavailable',astra_quota:'astra_quota',
       astra_openai_rate:'astra_openai_rate',astra_timeout:'astra_timeout',astra_invalid_response:'astra_invalid_response',
-      astra_job_expired:'astra_job_expired'
+      astra_output_limit:'astra_output_limit',astra_server_error:'astra_server_error',astra_job_expired:'astra_job_expired'
     };
     status.textContent=t(messages[e.message]||'astra_error');
     status.className='hint luna-status down';

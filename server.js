@@ -2339,8 +2339,18 @@ function astraPublicError(error){
   if(status===429 && /(quota|billing|credit|insufficient)/.test(message)) return 'astra_quota';
   if(status===429) return 'astra_openai_rate';
   if(message.includes('openai_timeout')) return 'astra_timeout';
+  if(message.includes('astra_output_limit') || message.includes('max_output_tokens')) return 'astra_output_limit';
+  if(message.includes('server_error')) return 'astra_server_error';
   if(message.includes('invalid_model_response')) return 'astra_invalid_response';
   return 'astra_unavailable';
+}
+function astraResponseFailure(out){
+  const status=String(out&&out.status||'unknown');
+  const reason=String(out&&out.incomplete_details&&out.incomplete_details.reason||'');
+  const code=String(out&&out.error&&out.error.code||'');
+  const message=String(out&&out.error&&out.error.message||'');
+  if(status==='incomplete' && reason==='max_output_tokens') return new Error('astra_output_limit');
+  return new Error([status,code,message,reason].filter(Boolean).join(': '));
 }
 function astraCompletedResult(out){
   let analysis=null; try{ analysis=JSON.parse(responseOutputText(out)); }catch(_e){}
@@ -2388,7 +2398,7 @@ async function astraFinanceAnalyzeHandler(req,res){
       ? 'Yanıt vermeden önce sunulan iki aracı da kullan: (1) web aramasıyla şirketin en güncel düzenleyici açıklamalarını, yatırımcı ilişkileri duyurularını ve önemli haberlerini araştır; birincil kaynaklara öncelik ver, (2) kod yorumlayıcıyla yapılandırılmış finansal veride büyüme, marj, likidite, kaldıraç, işletme sermayesi, nakit dönüşümü ve kâr kalitesi hesaplarını yeniden doğrula. Ekrandaki finansal tablo paketini temel veri olarak kullan; web araştırmasını güncel bağlam, doğrulama ve dönem sonrası gelişmeler için ekle. filedDates[0] açıklanma tarihi, balanceDates[0] dönem sonudur; ikisini karıştırma. Uyumsuz dönemleri oranlama; finansal kurumlara sanayi şirketi eşikleri uygulama. Değerleme verisi eksikse kesin ucuz/pahalı yargısı verme. Her ana bölümde en az bir rakam, tarih veya açık veri eksikliği göster. Katalizörleri ve risk tetikleyicilerini ölçülebilir koşullar halinde yaz. Güven düzeyini yüksek/orta/düşük olarak belirt ve gerekçelendir. Ayrıntılı ama tekrarsız yaz.'
       : 'Before answering, use both provided tools: (1) research the company’s latest regulatory filings, investor-relations releases, and material news with web search, preferring primary sources, and (2) use code interpreter to recalculate growth, margins, liquidity, leverage, working capital, cash conversion, and earnings-quality checks from the structured financial data. Use the on-screen financial package as the base dataset; add web research for current context, verification, and post-period developments. filedDates[0] is the publication date and balanceDates[0] is the period end; do not confuse them. Do not ratio mismatched periods or apply industrial-company thresholds to financial institutions. If valuation inputs are missing, do not make a definitive cheap/expensive claim. Include at least one figure, date, or explicit data gap in every major section. Express catalysts and risk triggers as measurable conditions. State high/medium/low confidence with reasons. Be detailed without repetition.');
     const out=await openAiResponse({
-      model:ASTRA_MODEL,store:true,background:true,reasoning:{effort:'high'},max_output_tokens:9000,
+      model:ASTRA_MODEL,store:true,background:true,reasoning:{effort:'high'},max_output_tokens:32000,max_tool_calls:8,
       instructions:instructions+' Current server time: '+new Date().toISOString(),
       input:'STRUCTURED FINANCIAL SNAPSHOT:\n'+input,
       tools:[{type:'web_search'},{type:'code_interpreter',container:{type:'auto'}}],
@@ -2402,7 +2412,7 @@ async function astraFinanceAnalyzeHandler(req,res){
       lunaJson(res,200,{ok:true,model:ASTRA_MODEL,mode:'high',...result});
       return;
     }
-    if(!out.id || !['queued','in_progress'].includes(out.status)) throw new Error((out.error&&out.error.message)||('astra_'+String(out.status||'unknown')));
+    if(!out.id || !['queued','in_progress'].includes(out.status)) throw astraResponseFailure(out);
     const jobId=crypto.randomBytes(18).toString('hex');
     ASTRA_FINANCE_JOBS.set(jobId,{responseId:out.id,cacheKey,createdAt:Date.now()});
     for(const [id,job] of ASTRA_FINANCE_JOBS) if(Date.now()-job.createdAt>15*60*1000) ASTRA_FINANCE_JOBS.delete(id);
@@ -2424,7 +2434,7 @@ async function astraFinanceStatusHandler(req,res){
   try{
     const out=await openAiRetrieveResponse(job.responseId,30000);
     if(['queued','in_progress'].includes(out.status)){ lunaJson(res,202,{ok:true,pending:true,status:out.status}); return; }
-    if(out.status!=='completed') throw new Error((out.error&&out.error.message)||('astra_'+String(out.status||'unknown')));
+    if(out.status!=='completed') throw astraResponseFailure(out);
     const result=astraCompletedResult(out);
     ASTRA_FINANCE_CACHE.set(job.cacheKey,{at:Date.now(),analysis:result.analysis,sources:result.sources});
     if(ASTRA_FINANCE_CACHE.size>150) [...ASTRA_FINANCE_CACHE.entries()].sort((a,b)=>a[1].at-b[1].at).slice(0,40).forEach(([k])=>ASTRA_FINANCE_CACHE.delete(k));
