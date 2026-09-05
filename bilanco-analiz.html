@@ -621,7 +621,7 @@
     a{color:#1763b8 !important;text-decoration:none}
   }
 </style>
-<link rel="stylesheet" href="/apple-design.css?v=200">
+<link rel="stylesheet" href="/apple-design.css?v=199">
 </head>
 <body>
 <a class="skip-link" href="#mainContent" data-i18n="skip_main">Ana içeriğe geç</a>
@@ -660,7 +660,7 @@
     <button class="tab-btn" id="tabbtn-wnews" onclick="switchPage('wnews')" data-i18n="tab_wnews">🌎 Dünya Haberleri</button>
     <button class="tab-btn" id="tabbtn-st" onclick="switchPage('st')" data-i18n="tab_st">💬 hisseX</button>
     <button class="tab-btn" id="tabbtn-graphai" onclick="switchPage('graphai')" data-i18n="tab_graphai">📈 Grafik AI</button>
-    <button class="tab-btn" id="tabbtn-ai" onclick="switchPage('ai')" data-i18n="tab_ai">✦ Astra AI</button>
+    <button class="tab-btn" id="tabbtn-ai" onclick="switchPage('ai')" data-i18n="tab_ai">✦ Luna AI</button>
   </div>
 </nav>
 
@@ -841,24 +841,6 @@
       <div class="luna-note" data-i18n="luna_note">Eğitim amaçlıdır; yatırım tavsiyesi değildir. Yorum, ekranda görünen finansal dönemlere dayanır.</div>
     </div>
 
-    <div class="card hidden luna-card astra-finance-card" id="astraCard">
-      <div class="luna-head">
-        <div>
-          <h2 data-i18n="astra_finance_h2">Astra Finansal Yorum · High</h2>
-          <div class="sub" data-i18n="astra_finance_sub">Finansal tabloları güncel web araştırması ve gelişmiş hesaplamalarla üst düzey derinlikte değerlendir.</div>
-          <div class="astra-feature-row" aria-label="Astra High capabilities">
-            <span data-i18n="astra_feature_reasoning">High düşünme</span>
-            <span data-i18n="astra_feature_web">Güncel web araştırması</span>
-            <span data-i18n="astra_feature_code">Gelişmiş hesaplama</span>
-          </div>
-        </div>
-        <button type="button" class="primary luna-button astra-button no-print" id="astraAnalyzeBtn" onclick="analyzeWithAstra()" data-i18n="astra_finance_btn">✦ Astra ile Yorumla</button>
-      </div>
-      <div id="astraStatus" class="hint luna-status" data-i18n="astra_finance_ready">Astra High analizi hazır olduğunda burada görünecek.</div>
-      <div id="astraBody" class="hidden"></div>
-      <div class="luna-note" data-i18n="astra_finance_note">Eğitim amaçlıdır; yatırım tavsiyesi değildir. Güncel kaynaklar ile ekrandaki finansal dönemler birlikte değerlendirilir.</div>
-    </div>
-
     <div class="card hidden" id="valCard">
       <h2 data-i18n="card_val">Değerleme Oranları (Canlı)</h2>
       <div class="sub" data-i18n="card_val_sub">Anlık piyasa fiyatına göre hesaplanır. F/K = Piyasa Değeri / Net Kâr, PD/DD = Piyasa Değeri / Özkaynak (Defter Değeri). Sektöre göre yorumlanmalıdır.</div>
@@ -1017,13 +999,13 @@
     <header class="ai-chat-head">
       <div class="ai-orb" aria-hidden="true">✦</div>
       <div>
-        <div class="ai-kicker" data-i18n="ai_kicker">GPT‑6 Astra destekli finansal yapay zekâ</div>
-        <h2 id="aiChatTitle" data-i18n="ai_h2">Astra AI · High</h2>
-        <p data-i18n="ai_sub">Güncel web araştırması, finansal veriler ve gelişmiş hesaplamalarla üst düzey derin analiz.</p>
+        <div class="ai-kicker" data-i18n="ai_kicker">Bilanço Analiz yapay zekâsı</div>
+        <h2 id="aiChatTitle" data-i18n="ai_h2">Luna AI'a Sor</h2>
+        <p data-i18n="ai_sub">Finans, şirketler, ekonomi veya merak ettiğin herhangi bir konuda Luna ile konuş.</p>
       </div>
       <div class="ai-head-actions">
-        <button type="button" id="aiDeepMode" class="ai-deep-toggle active" aria-pressed="true" onclick="toggleLunaDeepMode()" data-i18n-title="ai_deep_title" title="GPT‑6 Astra High sürekli açık">
-          <span aria-hidden="true">✦</span><span data-i18n="ai_deep">Astra High · Derin Analiz</span>
+        <button type="button" id="aiDeepMode" class="ai-deep-toggle" aria-pressed="false" onclick="toggleLunaDeepMode()" data-i18n-title="ai_deep_title" title="Sol High ile daha kapsamlı analiz">
+          <span aria-hidden="true">✦</span><span data-i18n="ai_deep">Derin Analiz</span>
         </button>
         <button type="button" class="ai-clear" onclick="clearLunaChat()" data-i18n="ai_clear">Yeni sohbet</button>
       </div>
@@ -1032,14 +1014,14 @@
       <div id="aiChatEmpty" class="ai-empty">
         <div class="ai-empty-mark" aria-hidden="true">✦</div>
         <h3 data-i18n="ai_empty_h">Bugün neyi merak ediyorsun?</h3>
-        <p data-i18n="ai_empty_p">Sorunu yaz ve Astra AI ile konuşmaya başla.</p>
+        <p data-i18n="ai_empty_p">Sorunu yaz ve Luna ile konuşmaya başla.</p>
       </div>
     </div>
     <form class="ai-composer" onsubmit="sendLunaChat(event)">
-      <textarea id="aiChatInput" rows="1" maxlength="4000" data-i18n-placeholder="ai_ph" placeholder="Astra AI'a bir şey sor…" onkeydown="lunaChatKeydown(event)"></textarea>
+      <textarea id="aiChatInput" rows="1" maxlength="4000" data-i18n-placeholder="ai_ph" placeholder="Luna'ya bir şey sor…" onkeydown="lunaChatKeydown(event)"></textarea>
       <button type="submit" id="aiChatSend" class="primary" data-i18n="ai_send">Gönder ↑</button>
     </form>
-    <div class="ai-chat-note" data-i18n="ai_note">Astra AI hata yapabilir. Finansal kararlar vermeden önce bilgileri doğrula.</div>
+    <div class="ai-chat-note" data-i18n="ai_note">Luna hata yapabilir. Finansal kararlar vermeden önce bilgileri doğrula.</div>
   </section>
 </div>
 
@@ -1048,9 +1030,9 @@
   <section class="graph-ai-shell no-print" aria-labelledby="graphAiTitle">
     <header class="graph-ai-head">
       <div>
-        <div class="ai-kicker" data-i18n="graph_ai_kicker">TradingView + Luna/Sol teknik analiz</div>
+        <div class="ai-kicker" data-i18n="graph_ai_kicker">TradingView + Luna teknik analiz</div>
         <h2 id="graphAiTitle" data-i18n="graph_ai_h2">Grafik AI</h2>
-        <p data-i18n="graph_ai_sub">Hisse kodunu TradingView grafiğinden seç; hızlı yorum için Luna'yı, daha derin analiz için Sol High'ı kullan.</p>
+        <p data-i18n="graph_ai_sub">Hisse kodunu doğrudan TradingView grafiğinin sembol aramasından seç; Luna seçili grafiği High düzeyinde yorumlasın.</p>
       </div>
     </header>
     <div class="graph-ai-chart-card">
@@ -1059,17 +1041,16 @@
     <div class="graph-ai-actions">
       <div>
         <strong id="graphAiSymbolLabel">NASDAQ:NVDA</strong>
-        <span class="hint" data-i18n="graph_ai_hint">TradingView’in üst araç çubuğundaki sembole tıkla; kodu yazıp sonucu seçtiğinde grafik ve AI sembolü birlikte güncellenir.</span>
+        <span class="hint" data-i18n="graph_ai_hint">TradingView’in üst araç çubuğundaki sembole tıkla; kodu yazıp sonucu seçtiğinde grafik ve Luna sembolü birlikte güncellenir.</span>
       </div>
       <div class="graph-ai-action-buttons">
         <button type="button" class="scan-chip" onclick="toggleGraphAiFullscreen()" data-i18n="graph_ai_fullscreen">Tam ekran</button>
-        <button type="button" id="graphAiLunaBtn" class="primary luna-button" onclick="analyzeGraphAi('luna')" data-i18n="graph_ai_luna">✦ Luna ile Yorumla</button>
-        <button type="button" id="graphAiSolBtn" class="primary sol-button" onclick="analyzeGraphAi('sol')" data-i18n="graph_ai_sol" data-i18n-title="graph_ai_sol_hint" title="Sol High ile daha derin teknik analiz">✦ Sol ile Yorumla</button>
+        <button type="button" id="graphAiLunaBtn" class="primary luna-button" onclick="analyzeGraphAi()" data-i18n="graph_ai_luna">✦ Luna ile Yorumla</button>
       </div>
     </div>
     <div id="graphAiStatus" class="hint" aria-live="polite"></div>
     <div id="graphAiLunaCard" class="econ-luna-card hidden">
-      <h3 id="graphAiAnalysisTitle" data-i18n="graph_ai_luna_title">Luna Teknik Grafik Yorumu</h3>
+      <h3 data-i18n="graph_ai_luna_title">Luna Teknik Grafik Yorumu</h3>
       <div id="graphAiLunaBody"></div>
     </div>
   </section>
@@ -1323,8 +1304,8 @@
 </main>
 
 <script src="cik-map.js?v=140"></script>
-<script src="i18n.js?v=204"></script>
-<script src="app.js?v=204"></script>
+<script src="i18n.js?v=199"></script>
+<script src="app.js?v=199"></script>
 
 <div id="pwaSheet" class="pwa-sheet no-print" onclick="if(event.target===this)closePwaSheet()">
   <div class="pwa-sheet-card" role="dialog" aria-modal="true" aria-labelledby="pwaSheetTitle">

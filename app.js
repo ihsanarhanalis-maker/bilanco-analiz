@@ -478,7 +478,7 @@ const VOICE_CC_EXTRA={
   isvec:'SE', isveç:'SE', danimarka:'DK', norvec:'NO', norveç:'NO', finlandiya:'FI',
   avusturya:'AT', polonya:'PL', 'guney kore':'KR', 'güney kore':'KR', kore:'KR',
   japonya:'JP', japan:'JP', cin:'CN', çin:'CN', 'hong kong':'HK', tayvan:'TW',
-  kanada:'CA', canada:'CA', avustralya:'AU', singapur:'SG',
+  kanada:'CA', canada:'CA', avustralya:'AU', 'yeni zelanda':'NZ', 'new zealand':'NZ', singapur:'SG',
   'butun dunya':'GLOBAL', 'bütün dünya':'GLOBAL', dunya:'GLOBAL', dünya:'GLOBAL', global:'GLOBAL'
 };
 const VOICE_SECTOR_EXTRA={
@@ -586,7 +586,8 @@ function voiceCcMap(){
   if(_voiceCcMap) return _voiceCcMap;
   const m=Object.assign({}, VOICE_CC_EXTRA);
   if(typeof ECON_COUNTRIES!=='undefined'){
-    ECON_COUNTRIES.forEach(([cc,name])=>{ m[normalizeVoiceText(name)]=cc; });
+    const countries=typeof ECON_CALENDAR_COUNTRIES!=='undefined'?ECON_CALENDAR_COUNTRIES:ECON_COUNTRIES;
+    countries.forEach(([cc,name])=>{ m[normalizeVoiceText(name)]=cc; });
   }
   _voiceCcMap=m;
   return m;
@@ -880,7 +881,7 @@ function runVoiceIntent(intent){
       switchPage('econ');
       if(intent.cc){
         if(!ECON_PANELS[intent.cc]) toggleEconCountry(intent.cc);
-        const nm=(ECON_COUNTRIES.find(x=>x[0]===intent.cc)||[])[1]||intent.cc;
+        const nm=(ECON_CALENDAR_COUNTRIES.find(x=>x[0]===intent.cc)||[])[1]||intent.cc;
         bits.unshift(nm);
       }
       break;
@@ -3167,6 +3168,7 @@ const FLAG_SVG={
   TW:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#FE0000"/><rect width="15" height="10" fill="#000095"/><circle cx="7.5" cy="5" r="2.8" fill="#fff"/><circle cx="7.5" cy="5" r="1.7" fill="#000095"/><g fill="#fff" transform="translate(7.5,5)">${[0,30,60,90,120,150,180,210,240,270,300,330].map(a=>`<path d="M0,-3.6 L0.45,-1.8 -0.45,-1.8Z" transform="rotate(${a})"/>`).join('')}</g>`,
   CA:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect width="7" height="20" fill="#FF0000"/><rect x="23" width="7" height="20" fill="#FF0000"/><path fill="#FF0000" d="M15 3.5l1.1 3.2 3.4-.2-2.6 2.2 1 3.2L15 10.2l-2.9 1.7 1-3.2-2.6-2.2 3.4.2z"/>`,
   AU:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#00008B"/><path d="M0 0L12 8M12 0L0 8" stroke="#fff" stroke-width="1.6"/><path d="M0 0L12 8M12 0L0 8" stroke="#FF0000" stroke-width=".7"/><path d="M6 0V8M0 4H12" stroke="#fff" stroke-width="2.4"/><path d="M6 0V8M0 4H12" stroke="#FF0000" stroke-width="1.2"/><g fill="#fff"><path d="M22 4.5l.5 1.4 1.5.1-1.1.9.4 1.4-1.3-.8-1.3.8.4-1.4-1.1-.9 1.5-.1z"/><path d="M25 9l.35 1 1 .05-.75.65.25 1-.9-.55-.9.55.25-1-.75-.65 1-.05z"/><path d="M20 11l.35 1 1 .05-.75.65.25 1-.9-.55-.9.55.25-1-.75-.65 1-.05z"/><path d="M23.5 14l.4 1.15 1.2.05-.9.75.3 1.15-1-.65-1 .65.3-1.15-.9-.75 1.2-.05z"/><path d="M18 7.5l.25.7.7.05-.55.45.2.7-.6-.4-.6.4.2-.7-.55-.45.7-.05z"/></g>`,
+  NZ:`<svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#00247D"/><path d="M0 0L12 8M12 0L0 8" stroke="#fff" stroke-width="1.6"/><path d="M0 0L12 8M12 0L0 8" stroke="#CF142B" stroke-width=".7"/><path d="M6 0V8M0 4H12" stroke="#fff" stroke-width="2.4"/><path d="M6 0V8M0 4H12" stroke="#CF142B" stroke-width="1.2"/><g fill="#CC142B" stroke="#fff" stroke-width=".35"><path d="M22 4l.5 1.35 1.45.05-1.15.9.4 1.4-1.2-.8-1.2.8.4-1.4-1.15-.9 1.45-.05z"/><path d="M25 9l.45 1.2 1.3.05-1 .8.35 1.2-1.1-.7-1.1.7.35-1.2-1-.8 1.3-.05z"/><path d="M19.5 10.5l.45 1.2 1.3.05-1 .8.35 1.2-1.1-.7-1.1.7.35-1.2-1-.8 1.3-.05z"/><path d="M22.5 14l.45 1.2 1.3.05-1 .8.35 1.2-1.1-.7-1.1.7.35-1.2-1-.8 1.3-.05z"/></g>`,
   SG:`<svg viewBox="0 0 30 20"><rect width="30" height="10" fill="#ED2939"/><rect y="10" width="30" height="10" fill="#fff"/><circle cx="7" cy="5" r="3.2" fill="#fff"/><circle cx="8.2" cy="5" r="2.6" fill="#ED2939"/><g fill="#fff"><circle cx="12.2" cy="3.2" r=".55"/><circle cx="13.5" cy="4.5" r=".55"/><circle cx="13.5" cy="6.2" r=".55"/><circle cx="12.2" cy="7.5" r=".55"/><circle cx="10.9" cy="5.35" r=".55"/></g>`,
 };
 function flagSpan(cc){ return `<span class="cfl" aria-hidden="true">${(FLAG_SVG[cc]||'')+'</svg>'}</span>`; }
@@ -3181,11 +3183,12 @@ const ECON_COUNTRIES=[
   ['TW','Tayvan'],    ['CA','Kanada'],    ['AU','Avustralya'],
   ['SG','Singapur'],
 ];
+const ECON_CALENDAR_COUNTRIES=[...ECON_COUNTRIES,['NZ','Yeni Zelanda']];
 const ECON_PANELS={};
 let ECON_PAGE_INIT=false;
 /* Investing.com'dan takvimi çekilebilen pazarlar —
    ISO→Investing ülke ID eşlemesi server.js /investcal rotasında */
-const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP','CN','HK','TW','CA','AU','SG'];
+const INVESTING_MARKETS=['US','TR','GB','DE','FR','NL','BE','PT','IT','ES','CH','SE','DK','NO','FI','AT','PL','KR','JP','CN','HK','TW','CA','AU','NZ','SG'];
 const ECON_CACHE={};   // "US:thisWeek" → { rows, src, ts }
 const ECON_TAB={ dun:'yesterday', bugun:'today', yarin:'tomorrow', buhafta:'thisWeek', gelecekhafta:'nextWeek' };
 const TR_AY=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
@@ -3393,7 +3396,7 @@ async function tvRowsForTab(cc, time){
 function initEconPage(){
   if(ECON_PAGE_INIT) return;
   ECON_PAGE_INIT=true;
-  document.getElementById('econCountries').innerHTML=ECON_COUNTRIES.map(([cc])=>
+  document.getElementById('econCountries').innerHTML=ECON_CALENDAR_COUNTRIES.map(([cc])=>
     `<button class="cbox" id="cbox-${cc}" onclick="toggleEconCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
   toggleEconCountry('TR');
 }
@@ -3437,7 +3440,6 @@ function econTimeLabel(time){
 let GRAPH_AI_INIT=false;
 let GRAPH_AI_STATE={tvSymbol:'NASDAQ:NVDA',yahooSymbol:'NVDA',originalName:'',synced:false,blockedOriginal:''};
 let GRAPH_AI_PENDING_ANALYSIS=false;
-let GRAPH_AI_PENDING_MODEL='luna';
 const GRAPH_AI_TV_SUFFIX={L:'LSE',DE:'XETR',PA:'EURONEXT',AS:'EURONEXT',BR:'EURONEXT',LS:'EURONEXT',MI:'MIL',MC:'BME',SW:'SIX',ST:'OMXSTO',CO:'OMXCOP',OL:'OSL',HE:'OMXHEX',VI:'VIE',WA:'GPW',T:'TSE',HK:'HKEX',TW:'TWSE',TWO:'TPEX',TO:'TSX',V:'TSXV',AX:'ASX',SI:'SGX'};
 function graphAiYahooSymbol(tvSymbol){
   const raw=String(tvSymbol||'').trim().toUpperCase();
@@ -3466,7 +3468,7 @@ function syncGraphAiSymbolFromWidget(event){
     GRAPH_AI_STATE.synced=false;
     GRAPH_AI_STATE.blockedOriginal=GRAPH_AI_STATE.originalName;
     GRAPH_AI_PENDING_ANALYSIS=false;
-    setGraphAiButtonsDisabled(false);
+    const btn=document.getElementById('graphAiLunaBtn'); if(btn) btn.disabled=false;
     const status=document.getElementById('graphAiStatus');
     if(status){ status.textContent=t('graph_ai_symbol_unavailable'); status.className='hint down'; }
     return;
@@ -3477,7 +3479,7 @@ function syncGraphAiSymbolFromWidget(event){
   /* TradingView aynı hisseyi BATS_DLY:NVDA ve NASDAQ:NVDA gibi farklı
      sağlayıcı adlarıyla sırayla gönderebilir; gerçek kod değişmedikçe sonucu silme. */
   const changed=next.yahooSymbol!==GRAPH_AI_STATE.yahooSymbol;
-  const runPending=GRAPH_AI_PENDING_ANALYSIS, pendingModel=GRAPH_AI_PENDING_MODEL;
+  const runPending=GRAPH_AI_PENDING_ANALYSIS;
   GRAPH_AI_STATE={...GRAPH_AI_STATE,...next,synced:true,blockedOriginal:''};
   const label=document.getElementById('graphAiSymbolLabel'); if(label) label.textContent=next.tvSymbol;
   const status=document.getElementById('graphAiStatus');
@@ -3486,7 +3488,7 @@ function syncGraphAiSymbolFromWidget(event){
     const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
     if(card) card.classList.add('hidden'); if(body) body.innerHTML='';
   }
-  if(runPending){ GRAPH_AI_PENDING_ANALYSIS=false; setTimeout(()=>analyzeGraphAi(pendingModel),0); }
+  if(runPending){ GRAPH_AI_PENDING_ANALYSIS=false; setTimeout(analyzeGraphAi,0); }
 }
 window.addEventListener('message',syncGraphAiSymbolFromWidget);
 async function toggleGraphAiFullscreen(){
@@ -3509,29 +3511,23 @@ function renderGraphAiWidget(){
 function initGraphAiPage(){
   if(!GRAPH_AI_INIT){ GRAPH_AI_INIT=true; renderGraphAiWidget(); }
 }
-function setGraphAiButtonsDisabled(disabled){
-  ['graphAiLunaBtn','graphAiSolBtn'].forEach(id=>{ const button=document.getElementById(id); if(button) button.disabled=disabled || !AI_API_ENABLED; });
-}
-async function analyzeGraphAi(requestedModel='luna'){
-  const model=requestedModel==='sol'?'sol':'luna', status=document.getElementById('graphAiStatus');
+async function analyzeGraphAi(){
+  const btn=document.getElementById('graphAiLunaBtn'), status=document.getElementById('graphAiStatus');
   const card=document.getElementById('graphAiLunaCard'), body=document.getElementById('graphAiLunaBody');
-  const title=document.getElementById('graphAiAnalysisTitle');
-  if(!status||!card||!body) return;
+  if(!btn||!status||!card||!body) return;
   if(!GRAPH_AI_STATE.synced){
-    GRAPH_AI_PENDING_ANALYSIS=true; GRAPH_AI_PENDING_MODEL=model; setGraphAiButtonsDisabled(true);
+    GRAPH_AI_PENDING_ANALYSIS=true; btn.disabled=true;
     status.textContent=t('graph_ai_wait_symbol'); status.className='hint graph-ai-busy';
     setTimeout(()=>{
       if(!GRAPH_AI_PENDING_ANALYSIS) return;
-      GRAPH_AI_PENDING_ANALYSIS=false; setGraphAiButtonsDisabled(false);
+      GRAPH_AI_PENDING_ANALYSIS=false; btn.disabled=false;
       status.textContent=t('graph_ai_wait_symbol'); status.className='hint down';
     },12000);
     return;
   }
-  setGraphAiButtonsDisabled(true); card.classList.remove('hidden'); body.innerHTML='';
-  if(title){ const key=model==='sol'?'graph_ai_sol_title':'graph_ai_luna_title'; title.dataset.i18n=key; title.textContent=t(key); }
-  status.className='hint graph-ai-busy'; status.textContent=t(model==='sol'?'graph_ai_loading_sol':'graph_ai_loading');
+  btn.disabled=true; card.classList.remove('hidden'); body.innerHTML=''; status.className='hint graph-ai-busy'; status.textContent=t('graph_ai_loading');
   try{
-    const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol,model})});
+    const r=await fetch('/ai/chart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),symbol:GRAPH_AI_STATE.yahooSymbol,tvSymbol:GRAPH_AI_STATE.tvSymbol})});
     const j=await r.json().catch(()=>({}));
     if(!r.ok||!j.ok){ if(j.error==='rate_limit') throw new Error('rate_limit'); throw new Error('unavailable'); }
     const a=j.analysis||{}, m=j.market||{};
@@ -3546,7 +3542,7 @@ async function analyzeGraphAi(requestedModel='luna'){
     </div><div class="luna-note">${safeHTML(a.disclaimer||t('luna_note'))}</div>`;
     status.textContent=''; status.className='hint';
   }catch(e){ status.textContent=e.message==='rate_limit'?t('luna_rate'):t('graph_ai_error'); status.className='hint down'; }
-  finally{ setGraphAiButtonsDisabled(false); }
+  finally{ btn.disabled=false; }
 }
 function econImportanceLabel(importance){
   return {'-1':t('econ_imp_lo'),'0':t('econ_imp_mid'),'1':t('econ_imp_hi')}[String(importance)]||'';
@@ -3618,7 +3614,6 @@ function renderEconPanel(cc){
       <h3>${safeHTML(t('econ_luna_title'))}</h3>
       <div id="econLunaBody-${cc}"></div>
     </div>`;
-  syncAiApiControls();
 }
 async function analyzeEconWithLuna(cc){
   const st=ECON_PANELS[cc], c=st&&ECON_CACHE[cc+':'+(ECON_TAB[st.time]||'thisWeek')];
@@ -5770,7 +5765,7 @@ function updateMarketSpecificLabels(){
 const LUNA_CHAT_MESSAGES=[];
 let LUNA_CHAT_BUSY=false;
 let LUNA_CHAT_STREAMING=false;
-let LUNA_CHAT_DEEP=true;
+let LUNA_CHAT_DEEP=false;
 function renderLunaChat(){
   const box=document.getElementById('aiChatMessages'); if(!box) return;
   const empty=document.getElementById('aiChatEmpty');
@@ -5801,8 +5796,10 @@ function clearLunaChat(){
   const input=document.getElementById('aiChatInput'); if(input){ input.value=''; input.focus(); }
 }
 function toggleLunaDeepMode(){
+  if(LUNA_CHAT_BUSY) return;
+  LUNA_CHAT_DEEP=!LUNA_CHAT_DEEP;
   const btn=document.getElementById('aiDeepMode');
-  if(btn){ btn.classList.add('active'); btn.setAttribute('aria-pressed','true'); }
+  if(btn){ btn.classList.toggle('active',LUNA_CHAT_DEEP); btn.setAttribute('aria-pressed',LUNA_CHAT_DEEP?'true':'false'); }
   const input=document.getElementById('aiChatInput'); if(input) input.focus();
 }
 function lunaChatKeydown(e){
@@ -5814,7 +5811,7 @@ async function sendLunaChat(e){
   const question=String(input&&input.value||'').trim();
   if(!question || LUNA_CHAT_BUSY) return;
   LUNA_CHAT_MESSAGES.push({role:'user',content:question});
-  const deepMode=true;
+  const deepMode=LUNA_CHAT_DEEP;
   if(input) input.value=''; LUNA_CHAT_BUSY=true; if(btn) btn.disabled=true; if(modeBtn) modeBtn.disabled=true; renderLunaChat();
   try{
     const history=LUNA_CHAT_MESSAGES.slice(-12);
@@ -5955,35 +5952,6 @@ function renderLunaAnalysis(a){
     <section class="luna-section wide"><h3>${safeHTML(t('luna_data_quality'))}</h3><p>${safeHTML(a.dataQuality||'—')}</p></section>
   </div>`;
 }
-function renderAstraAnalysis(a,sources){
-  const body=document.getElementById('astraBody'); if(!body) return;
-  body.classList.remove('hidden');
-  body.innerHTML=`<div class="luna-result">
-    <section class="luna-section wide"><h3>${safeHTML(t('luna_summary'))}</h3><p>${safeHTML(a.summary||'—')}</p></section>
-    ${lunaList(t('luna_strengths'),a.strengths)}${lunaList(t('luna_risks'),a.risks)}
-    <section class="luna-section"><h3>${safeHTML(t('luna_profit'))}</h3><p>${safeHTML(a.profitability||'—')}</p></section>
-    <section class="luna-section"><h3>${safeHTML(t('luna_position'))}</h3><p>${safeHTML(a.financialPosition||'—')}</p></section>
-    <section class="luna-section"><h3>${safeHTML(t('luna_cash'))}</h3><p>${safeHTML(a.cashFlow||'—')}</p></section>
-    <section class="luna-section"><h3>${safeHTML(t('luna_earnings_quality'))}</h3><p>${safeHTML(a.earningsQuality||'—')}</p></section>
-    <section class="luna-section wide"><h3>${safeHTML(t('astra_market_context'))}</h3><p>${safeHTML(a.marketContext||'—')}</p></section>
-    <section class="luna-section wide"><h3>${safeHTML(t('astra_valuation'))}</h3><p>${safeHTML(a.valuationContext||'—')}</p></section>
-    ${lunaList(t('astra_catalysts'),a.catalysts)}
-    <section class="luna-section"><h3>${safeHTML(t('astra_counter_view'))}</h3><p>${safeHTML(a.counterView||'—')}</p></section>
-    ${lunaList(t('astra_risk_triggers'),a.riskTriggers)}${lunaList(t('luna_watch'),a.watchNext)}
-    <section class="luna-section"><h3>${safeHTML(t('astra_confidence'))}</h3><p>${safeHTML(a.confidence||'—')}</p></section>
-    <section class="luna-section"><h3>${safeHTML(t('luna_data_quality'))}</h3><p>${safeHTML(a.dataQuality||'—')}</p></section>
-  </div>`;
-  if(Array.isArray(sources)&&sources.length){
-    const sourceBox=document.createElement('div'); sourceBox.className='ai-sources econ-luna-sources';
-    const label=document.createElement('strong'); label.textContent=t('ai_sources'); sourceBox.appendChild(label);
-    sources.forEach(s=>{
-      if(!s||!/^https:\/\//i.test(String(s.url||''))) return;
-      const link=document.createElement('a'); link.href=s.url; link.target='_blank'; link.rel='noopener noreferrer';
-      link.textContent=s.title||s.url; sourceBox.appendChild(link);
-    });
-    body.appendChild(sourceBox);
-  }
-}
 async function analyzeWithLuna(){
   const btn=document.getElementById('lunaAnalyzeBtn'), status=document.getElementById('lunaStatus');
   const snapshot=buildLunaSnapshot();
@@ -6004,43 +5972,6 @@ async function analyzeWithLuna(){
     status.className='hint luna-status down';
   }finally{ btn.disabled=false; }
 }
-async function waitForAstraResult(jobId){
-  const deadline=Date.now()+10*60*1000;
-  while(Date.now()<deadline){
-    await new Promise(resolve=>setTimeout(resolve,4000));
-    const r=await fetch('/ai/astra-status?job='+encodeURIComponent(jobId),{cache:'no-store'});
-    const j=await r.json().catch(()=>({}));
-    if(r.status===202 && j.ok && j.pending) continue;
-    if(!r.ok || !j.ok) throw new Error(String(j.error||'astra_unavailable'));
-    return j;
-  }
-  throw new Error('astra_timeout');
-}
-async function analyzeWithAstra(){
-  const btn=document.getElementById('astraAnalyzeBtn'), status=document.getElementById('astraStatus');
-  const snapshot=buildLunaSnapshot();
-  if(!snapshot || !btn || !status) return;
-  btn.disabled=true; status.textContent=t('astra_finance_loading'); status.className='hint luna-status';
-  try{
-    const r=await fetch('/ai/astra-analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:getLang(),snapshot})});
-    let j=await r.json().catch(()=>({}));
-    if(!r.ok || !j.ok){
-      throw new Error(String(j.error||'astra_unavailable'));
-    }
-    if(j.pending && j.jobId) j=await waitForAstraResult(j.jobId);
-    renderAstraAnalysis(j.analysis||{},j.sources||[]);
-    status.textContent='';
-  }catch(e){
-    const messages={
-      astra_not_configured:'astra_not_configured',rate_limit:'astra_rate',astra_api_key_invalid:'astra_api_key_invalid',
-      astra_access_denied:'astra_access_denied',astra_model_unavailable:'astra_model_unavailable',astra_quota:'astra_quota',
-      astra_openai_rate:'astra_openai_rate',astra_timeout:'astra_timeout',astra_invalid_response:'astra_invalid_response',
-      astra_output_limit:'astra_output_limit',astra_server_error:'astra_server_error',astra_job_expired:'astra_job_expired'
-    };
-    status.textContent=t(messages[e.message]||'astra_error');
-    status.className='hint luna-status down';
-  }finally{ btn.disabled=false; }
-}
 function prepareLunaCard(){
   const card=document.getElementById('lunaCard'), body=document.getElementById('lunaBody'), status=document.getElementById('lunaStatus');
   if(!card) return;
@@ -6052,23 +5983,8 @@ function prepareLunaCard(){
     if(body){ body.classList.add('hidden'); body.innerHTML=''; }
     if(status){ status.textContent=t('luna_ready'); status.className='hint luna-status'; }
   }
-  if(!AI_API_ENABLED && status){ status.textContent=t('ai_api_disabled'); status.className='hint luna-status'; }
 }
 window.addEventListener('bilanco-lang', prepareLunaCard);
-function prepareAstraCard(){
-  const card=document.getElementById('astraCard'), body=document.getElementById('astraBody'), status=document.getElementById('astraStatus');
-  if(!card) return;
-  if(!FIN){ card.classList.add('hidden'); return; }
-  card.classList.remove('hidden');
-  const key=[FIN.ticker,FIN.mode,FIN.D0,FIN.D1,FIN.filedD0,FIN.filedD1,getLang()].join('|');
-  if(card.dataset.snapshotKey!==key){
-    card.dataset.snapshotKey=key;
-    if(body){ body.classList.add('hidden'); body.innerHTML=''; }
-    if(status){ status.textContent=t('astra_finance_ready'); status.className='hint luna-status'; }
-  }
-  if(!AI_API_ENABLED && status){ status.textContent=t('ai_api_disabled'); status.className='hint luna-status'; }
-}
-window.addEventListener('bilanco-lang', prepareAstraCard);
 function analyze(myGen){
   if(myGen!=null && myGen!==REQ_GEN) return;
   const d=readData();
@@ -6114,7 +6030,6 @@ function analyze(myGen){
     ['cashCard','healthCard'].forEach(id=>{ const c=document.getElementById(id); if(c) c.classList.add('hidden'); });
   }
   prepareLunaCard();
-  prepareAstraCard();
 
   // Rapor başlığı (dışa aktarmada da kullanılır)
   const rt=document.getElementById('reportTitle');
@@ -8170,7 +8085,7 @@ async function loadTakasAkd(){
     TAKAS_ACTIVE_SLUG=(latest.gun_sonu_akd && latest.gun_sonu_akd.slug) || null;
     renderTakasView();
     prefetchTakasLuna(sym);
-    if(lunaBtn) lunaBtn.disabled=!AI_API_ENABLED;
+    if(lunaBtn) lunaBtn.disabled=false;
     if(st) st.textContent='Güncel';
   }catch(e){
     box.innerHTML='<div class="hint">Alınamadı: '+safeHTML(e.message)+'</div>';
@@ -8243,43 +8158,11 @@ async function loadTakasAkdItem(slug){
 window.loadTakasAkd=loadTakasAkd;
 window.loadTakasAkdItem=loadTakasAkdItem;
 
-let AI_API_ENABLED=false;
-function syncAiApiControls(){
-  const controls=document.querySelectorAll('.luna-button,.sol-button,#aiChatSend,#aiChatInput,#aiDeepMode');
-  controls.forEach(el=>{
-    if(!AI_API_ENABLED){
-      if(!el.disabled) el.dataset.aiForcedDisabled='1';
-      el.disabled=true;
-      el.setAttribute('aria-disabled','true');
-    }else if(el.dataset.aiForcedDisabled==='1'){
-      el.disabled=false;
-      delete el.dataset.aiForcedDisabled;
-      el.removeAttribute('aria-disabled');
-    }
-  });
-  if(!AI_API_ENABLED){
-    ['lunaStatus','astraStatus','graphAiStatus'].forEach(id=>{
-      const el=document.getElementById(id); if(el) el.textContent=t('ai_api_disabled');
-    });
-    document.querySelectorAll('[id^="econLunaStatus-"]').forEach(el=>{ el.textContent=t('ai_api_disabled'); });
-  }
-}
-async function initAiApiAvailability(){
-  AI_API_ENABLED=false;
-  syncAiApiControls();
-  try{
-    const r=await fetch('/api/app-config',{cache:'no-store'}), j=await r.json();
-    AI_API_ENABLED=Boolean(r.ok&&j&&j.aiApiEnabled);
-  }catch(_e){ AI_API_ENABLED=false; }
-  syncAiApiControls();
-}
-
 /* başlangıç */
 window.addEventListener('DOMContentLoaded',()=>{
   /* Dil dinleyicisi initLang'den ÖNCE — yoksa ilk bilanco-lang kaçırılır */
   window.addEventListener('bilanco-lang',()=>{ refreshI18nPanels(); });
   if(typeof initLang==='function') initLang();
-  initAiApiAvailability();
   loadSample();
   renderWatchlist();   // önceki oturumdan kalan izleme listesi (localStorage)
   // Bilanço Verisi'nde değer/kategori değişince cari hücreleri anında yeniden renklendir
@@ -8383,7 +8266,7 @@ function refreshI18nPanels(){
     if(typeof ECON_PAGE_INIT!=='undefined' && ECON_PAGE_INIT){
       const ec=document.getElementById('econCountries');
       if(ec){
-        ec.innerHTML=ECON_COUNTRIES.map(([cc])=>
+        ec.innerHTML=ECON_CALENDAR_COUNTRIES.map(([cc])=>
           `<button class="cbox" id="cbox-${cc}" onclick="toggleEconCountry('${cc}')">${flagSpan(cc)}<span>${ccName(cc)}</span></button>`).join('');
         Object.keys(ECON_PANELS||{}).forEach(cc=>{
           document.getElementById('cbox-'+cc)?.classList.add('active');
